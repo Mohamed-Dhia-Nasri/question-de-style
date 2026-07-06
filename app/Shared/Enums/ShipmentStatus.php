@@ -1,0 +1,18 @@
+<?php
+
+namespace App\Shared\Enums;
+
+/**
+ * ENUM-ShipmentStatus — canonical values:
+ * docs/00-meta/03-glossary.md#enum-shipmentstatus.
+ */
+enum ShipmentStatus: string
+{
+    case Pending = 'PENDING';
+    case Preparing = 'PREPARING';
+    case Shipped = 'SHIPPED';
+    case InTransit = 'IN_TRANSIT';
+    case Delivered = 'DELIVERED';
+    case Returned = 'RETURNED';
+    case Failed = 'FAILED';
+}

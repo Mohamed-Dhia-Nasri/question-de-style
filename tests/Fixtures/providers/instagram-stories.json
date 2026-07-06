@@ -1,0 +1,15 @@
+[
+  {
+    "id": "story-77001",
+    "videoUrl": "https://cdn.example/story1.mp4",
+    "expiresAt": "2026-07-05T10:00:00.000Z",
+    "viewCount": 4100
+  },
+  {
+    "id": "story-77002",
+    "imageUrl": "https://cdn.example/story2.jpg"
+  },
+  {
+    "note": "kein Identifier — muss in Quarantäne"
+  }
+]

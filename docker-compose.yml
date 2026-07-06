@@ -1,0 +1,40 @@
+# Local development services for QDS.
+#
+# Per ADR-0013 the production database is Neon (serverless Postgres, EU) and is
+# NOT containerized; this compose file provides a plain PostgreSQL 17 that is
+# feature-compatible with Neon (no TimescaleDB, no pg_cron — rollups are
+# refreshed by the Laravel scheduler, see ADR-0010/ADR-0013).
+#
+# Redis is optional locally (queue/cache default to the database driver) but is
+# included for parity with the production topology (Redis + Horizon worker).
+#
+# Full app-tier containerization (PHP-FPM, nginx, worker, scheduler) is the
+# remaining P0 infrastructure work — see README.md#deployment.
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: qds-postgres
+    environment:
+      POSTGRES_DB: qds
+      POSTGRES_USER: qds
+      POSTGRES_PASSWORD: qds
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - qds-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qds"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: qds-redis
+    ports:
+      - "127.0.0.1:6380:6379"
+    profiles: ["redis"]
+
+volumes:
+  qds-pgdata:

@@ -1,0 +1,240 @@
+<?php
+
+namespace Tests\Feature\Analytics;
+
+use App\Modules\CRM\Models\Brand;
+use App\Modules\CRM\Models\Campaign;
+use App\Modules\CRM\Models\Client;
+use App\Modules\CRM\Models\Creator;
+use App\Modules\CRM\Models\PlatformAccount;
+use App\Modules\Monitoring\Models\ContentItem;
+use App\Modules\Monitoring\Models\Mention;
+use App\Modules\Monitoring\Models\MetricSnapshot;
+use App\Modules\Monitoring\Models\MonitoredSubject;
+use App\Platform\Analytics\Contracts\AnalyticsService;
+use App\Platform\Analytics\NeonAnalyticsService;
+use App\Shared\Enums\MetricTier;
+use App\Shared\Enums\Platform;
+use App\Shared\ValueObjects\MetricValue;
+use App\Shared\ValueObjects\Provenance;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Tests\TestCase;
+
+/**
+ * SVC-Analytics (ADR-0010/ADR-0013): append-only fact loading from
+ * own-DB snapshots, tier preservation (DP-001), DERIVED recomputation at
+ * the rollup grain (never summed), incremental idempotent refresh, and
+ * the personal-data exclusion rule for the star schema.
+ */
+class AnalyticsRollupTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private function provenance(): Provenance
+    {
+        return new Provenance('SRC-apify-instagram-profile-scraper', now()->toImmutable(), 'v1');
+    }
+
+    /** @param list<MetricValue> $metrics */
+    private function accountSnapshot(PlatformAccount $account, array $metrics, string $capturedAt): MetricSnapshot
+    {
+        return MetricSnapshot::create([
+            'platform_account_id' => $account->id,
+            'captured_at' => $capturedAt,
+            'metrics' => $metrics,
+            'provenance' => $this->provenance(),
+        ]);
+    }
+
+    /** @param list<MetricValue> $metrics */
+    private function contentSnapshot(ContentItem $content, array $metrics, string $capturedAt): MetricSnapshot
+    {
+        return MetricSnapshot::create([
+            'content_item_id' => $content->id,
+            'captured_at' => $capturedAt,
+            'metrics' => $metrics,
+            'provenance' => $this->provenance(),
+        ]);
+    }
+
+    public function test_fact_loading_is_incremental_idempotent_and_derived_rates_are_recomputed(): void
+    {
+        $creator = Creator::factory()->create();
+        $account = PlatformAccount::factory()->create([
+            'creator_id' => $creator->id,
+            'platform' => Platform::Instagram,
+        ]);
+        $content = ContentItem::factory()->create([
+            'platform_account_id' => $account->id,
+            'platform' => Platform::Instagram,
+            'published_at' => '2026-07-02 10:00:00',
+        ]);
+
+        $this->accountSnapshot($account, [new MetricValue(1000, MetricTier::Public, 'followers')], '2026-07-01 08:00:00');
+        $this->accountSnapshot($account, [new MetricValue(1100, MetricTier::Public, 'followers')], '2026-07-03 08:00:00');
+        $this->contentSnapshot($content, [
+            new MetricValue(500, MetricTier::Public, 'views'),
+            new MetricValue(40, MetricTier::Public, 'likes'),
+            new MetricValue(10, MetricTier::Public, 'comments'),
+        ], '2026-07-03 09:00:00');
+
+        $service = app(AnalyticsService::class);
+        $this->assertInstanceOf(NeonAnalyticsService::class, $service);
+
+        $this->assertSame(count(NeonAnalyticsService::ROLLUPS), $service->refreshRollups());
+
+        $this->assertSame(2, DB::table('fact_creator_account')->count());
+        $this->assertSame(1, DB::table('fact_content_metric')->count());
+
+        // Second refresh loads nothing new (idempotent watermarks).
+        $service->refreshRollups();
+        $this->assertSame(2, DB::table('fact_creator_account')->count());
+        $this->assertSame(1, DB::table('fact_content_metric')->count());
+
+        $bucket = DB::table('rollup_creator_by_period')
+            ->where('grain', 'month')
+            ->where('creator_id', $creator->id)
+            ->first();
+
+        // Followers = LAST snapshot in bucket; growth = last − first
+        // (recomputed at the grain, ADR-0003 own-DB history).
+        $this->assertSame(1100.0, (float) $bucket->followers);
+        $this->assertSame(100.0, (float) $bucket->follower_growth);
+
+        // DERIVED engagement rate is recomputed from summed PUBLIC
+        // components at the grain — never summed (analytics-model rule 6).
+        $this->assertEqualsWithDelta(50 / 1100, (float) $bucket->engagement_rate, 0.00001);
+        $this->assertSame(500.0, (float) $bucket->avg_views);
+
+        // No canonical posting-frequency formula → NULL, never zero.
+        $this->assertNull($bucket->posting_frequency);
+    }
+
+    public function test_only_public_tier_metrics_enter_public_fact_measures(): void
+    {
+        $account = PlatformAccount::factory()->create(['creator_id' => Creator::factory()->create()->id]);
+        $content = ContentItem::factory()->create(['platform_account_id' => $account->id]);
+
+        // An ESTIMATED value labelled "views" must never land in the
+        // PUBLIC views measure (DP-001 tier preservation).
+        $this->contentSnapshot($content, [
+            new MetricValue(999999, MetricTier::Estimated, 'views'),
+            new MetricValue(100, MetricTier::Public, 'likes'),
+        ], '2026-07-03 09:00:00');
+
+        app(AnalyticsService::class)->refreshRollups();
+
+        $fact = DB::table('fact_content_metric')->first();
+        $this->assertNull($fact->views);
+        $this->assertSame(100.0, (float) $fact->likes);
+    }
+
+    public function test_facts_are_append_only_at_the_database_level(): void
+    {
+        $account = PlatformAccount::factory()->create(['creator_id' => Creator::factory()->create()->id]);
+        $this->accountSnapshot($account, [new MetricValue(10, MetricTier::Public, 'followers')], '2026-07-01 08:00:00');
+
+        app(AnalyticsService::class)->refreshRollups();
+
+        $this->expectExceptionMessage('append-only');
+        DB::table('fact_creator_account')->update(['followers' => 0]);
+    }
+
+    public function test_mention_rollup_computes_share_of_voice_and_labels_estimates(): void
+    {
+        $client = Client::factory()->create();
+        $brandA = Brand::factory()->create(['client_id' => $client->id]);
+        $brandB = Brand::factory()->create(['client_id' => $client->id]);
+        $campaignA = Campaign::factory()->create(['brand_id' => $brandA->id]);
+        $campaignB = Campaign::factory()->create(['brand_id' => $brandB->id]);
+
+        $creator = Creator::factory()->create();
+        $account = PlatformAccount::factory()->create(['creator_id' => $creator->id]);
+        $subject = MonitoredSubject::factory()->create(['creator_id' => $creator->id]);
+
+        $makeMention = function (Campaign $campaign) use ($account, $subject): void {
+            $content = ContentItem::factory()->create(['platform_account_id' => $account->id]);
+            Mention::factory()->create([
+                'monitored_subject_id' => $subject->id,
+                'content_item_id' => $content->id,
+                'story_id' => null,
+                'campaign_id' => $campaign->id,
+            ]);
+        };
+
+        $makeMention($campaignA);
+        $makeMention($campaignA);
+        $makeMention($campaignA);
+        $makeMention($campaignB);
+
+        app(AnalyticsService::class)->refreshRollups();
+
+        $rows = DB::table('rollup_mention_by_brand')
+            ->where('grain', 'month')
+            ->orderBy('brand_id')
+            ->get()
+            ->keyBy('brand_id');
+
+        $this->assertSame(3, (int) $rows[$brandA->id]->mention_count);
+        $this->assertEqualsWithDelta(0.75, (float) $rows[$brandA->id]->share_of_voice, 0.00001);
+        $this->assertEqualsWithDelta(0.25, (float) $rows[$brandB->id]->share_of_voice, 0.00001);
+
+        // ESTIMATED aggregates stay NULL (unavailable) with their tier
+        // label — never a fabricated zero (DP-001, DEF-003).
+        $this->assertNull($rows[$brandA->id]->total_estimated_reach);
+        $this->assertSame('ESTIMATED', $rows[$brandA->id]->total_estimated_reach_tier);
+        $this->assertNull($rows[$brandA->id]->total_emv);
+        $this->assertSame('ESTIMATED', $rows[$brandA->id]->total_emv_tier);
+    }
+
+    public function test_analytics_schema_contains_no_personal_data_columns(): void
+    {
+        $tables = DB::table('information_schema.columns')
+            ->where('table_schema', 'public')
+            ->where(fn ($q) => $q
+                ->where('table_name', 'like', 'fact\_%')
+                ->orWhere('table_name', 'like', 'dim\_%'))
+            ->pluck('column_name', 'table_name');
+
+        $forbidden = ['email', 'phone', 'postal_address', 'address', 'notes', 'handle', 'bio'];
+
+        $columns = DB::table('information_schema.columns')
+            ->where('table_schema', 'public')
+            ->where(fn ($q) => $q
+                ->where('table_name', 'like', 'fact\_%')
+                ->orWhere('table_name', 'like', 'dim\_%'))
+            ->pluck('column_name')
+            ->unique();
+
+        foreach ($forbidden as $column) {
+            $this->assertFalse(
+                $columns->contains($column),
+                "Analytics schema must not carry personal-data column [{$column}].",
+            );
+        }
+
+        $this->assertNotEmpty($tables);
+    }
+
+    public function test_seeding_structures_exist_and_stay_empty_until_p3(): void
+    {
+        // The P0 analytics foundation ships every canonical FACT-/ROLLUP-
+        // structure; the seeding loaders activate in P3 (ENT-Shipment).
+        foreach (['fact_shipment', 'fact_seeding_content'] as $table) {
+            $this->assertSame(0, DB::table($table)->count());
+        }
+
+        app(AnalyticsService::class)->refreshRollups();
+
+        foreach ([
+            'rollup_seeding_by_shipment',
+            'rollup_seeding_by_creator_campaign',
+            'rollup_seeding_by_product',
+            'rollup_seeding_by_brand',
+            'rollup_metric_by_geo',
+        ] as $rollup) {
+            $this->assertSame(0, DB::table($rollup)->count(), "{$rollup} must exist and be empty in P1.");
+        }
+    }
+}

@@ -1,0 +1,11 @@
+{
+  "kind": "youtube#channelListResponse",
+  "items": [
+    {
+      "id": "UCabcdefghijklmnopqrstuv",
+      "snippet": {"title": "StyleIcon", "description": "Fashion Kanal", "customUrl": "@styleicon"},
+      "statistics": {"subscriberCount": "310000", "hiddenSubscriberCount": false},
+      "contentDetails": {"relatedPlaylists": {"uploads": "UUabcdefghijklmnopqrstuv"}}
+    }
+  ]
+}

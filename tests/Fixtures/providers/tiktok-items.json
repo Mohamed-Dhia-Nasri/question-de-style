@@ -1,0 +1,31 @@
+[
+  {
+    "id": "7301234567890123456",
+    "text": "Outfit check #fyp",
+    "webVideoUrl": "https://www.tiktok.com/@styleicon/video/7301234567890123456",
+    "createTimeISO": "2026-07-02T12:00:00.000Z",
+    "playCount": 250000,
+    "diggCount": 21000,
+    "commentCount": 480,
+    "shareCount": 900,
+    "collectCount": 1500,
+    "videoMeta": {"duration": 34},
+    "authorMeta": {"name": "styleicon", "signature": "Mode & Lifestyle", "fans": 480000, "bioLink": "https://styleicon.example"}
+  },
+  {
+    "id": "7301234567890123457",
+    "text": "Langes Tutorial",
+    "webVideoUrl": "https://www.tiktok.com/@styleicon/video/7301234567890123457",
+    "createTime": 1751500000,
+    "playCount": 90000,
+    "diggCount": 4000,
+    "commentCount": 120,
+    "shareCount": 60,
+    "videoMeta": {"duration": 184},
+    "authorMeta": {"name": "styleicon", "signature": "Mode & Lifestyle", "fans": 480000}
+  },
+  {
+    "text": "kaputtes Item ohne id",
+    "authorMeta": {"name": "styleicon", "fans": 480000}
+  }
+]

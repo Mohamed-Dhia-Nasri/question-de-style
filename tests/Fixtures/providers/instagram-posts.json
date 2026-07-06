@@ -1,0 +1,39 @@
+[
+  {
+    "id": "3412345678901234567",
+    "shortCode": "CxIMGpost01",
+    "type": "Image",
+    "caption": "Herbstlook 🍂",
+    "displayUrl": "https://cdn.example/img1.jpg",
+    "timestamp": "2026-07-01T10:00:00.000Z",
+    "likesCount": 5400,
+    "commentsCount": 120
+  },
+  {
+    "id": "3412345678901234568",
+    "shortCode": "CxIMGpost02",
+    "type": "Sidecar",
+    "caption": "Unboxing Teil 2",
+    "displayUrl": "https://cdn.example/img2.jpg",
+    "images": ["https://cdn.example/img2a.jpg", "https://cdn.example/img2b.jpg"],
+    "timestamp": "2026-07-02T09:30:00.000Z",
+    "likesCount": 3100,
+    "commentsCount": 85
+  },
+  {
+    "type": "Image",
+    "caption": "kaputt — kein Identifier"
+  },
+  {
+    "id": "3412345678901234570",
+    "shortCode": "CxIMGpost04",
+    "type": "Hologram",
+    "caption": "unbekannter Typ"
+  },
+  {
+    "id": "3412345678901234571",
+    "shortCode": "CxIMGpost05",
+    "type": "Image",
+    "likesCount": "not-a-number"
+  }
+]

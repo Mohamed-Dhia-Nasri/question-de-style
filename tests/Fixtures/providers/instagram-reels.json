@@ -1,0 +1,20 @@
+[
+  {
+    "id": "3512345678901234567",
+    "shortCode": "CxREEL001",
+    "caption": "Get ready with me ✨",
+    "videoUrl": "https://cdn.example/reel1.mp4",
+    "displayUrl": "https://cdn.example/reel1.jpg",
+    "timestamp": "2026-07-03T18:00:00.000Z",
+    "videoPlayCount": 98000,
+    "videoViewCount": 87000,
+    "likesCount": 8400,
+    "commentsCount": 310,
+    "sharesCount": 95
+  },
+  {
+    "id": "3512345678901234568",
+    "shortCode": "CxREEL002",
+    "caption": "Ohne Zahlen — optionale Felder fehlen"
+  }
+]

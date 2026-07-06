@@ -1,0 +1,7 @@
+{
+  "kind": "youtube#playlistItemListResponse",
+  "items": [
+    {"contentDetails": {"videoId": "vid00000001"}},
+    {"contentDetails": {"videoId": "vid00000002"}}
+  ]
+}

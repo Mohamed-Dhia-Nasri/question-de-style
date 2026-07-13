@@ -23,10 +23,6 @@ Route::middleware(['web', 'auth', 'can:'.PermissionsCatalog::MONITORING_VIEW, 's
         // monitoring.manage inside ReviewService).
         Route::view('/review', 'monitoring.review')->name('review');
 
-        // EMV configurations (REQ-M1-011; mutations re-authorize on
-        // emv.manage inside EmvConfigurationService).
-        Route::view('/emv', 'monitoring.emv')->name('emv');
-
         // Configured hashtag lists — matching evidence registry (mutations
         // re-authorize on monitoring.manage via HashtagListPolicy).
         Route::view('/hashtags', 'monitoring.hashtags')->name('hashtags.index');

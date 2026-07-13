@@ -308,7 +308,6 @@ class DashboardScreensTest extends TestCase
             "/monitoring/creators/{$creator->id}",
             "/monitoring/content/{$content->id}",
             '/monitoring/review',
-            '/monitoring/emv',
             '/monitoring/exports',
             '/monitoring/operations',
             '/dashboard',

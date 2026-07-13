@@ -24,5 +24,13 @@ Route::middleware(['auth', 'can:'.PermissionsCatalog::REPORTS_VIEW_APPROVED, 'su
     Route::view('/reports', 'reports.index')->name('reports.index');
 });
 
+// Settings — staff-managed configuration surfaces (EMV, reach formula).
+// Product surface → subscription-gated like every module area (ADR-0021).
+Route::middleware(['auth', 'can:'.PermissionsCatalog::SETTINGS_VIEW, 'subscribed'])
+    ->prefix('settings')->as('settings.')->group(function () {
+        Route::view('/emv', 'settings.emv')->name('emv');
+        Route::view('/reach', 'settings.reach')->name('reach');
+    });
+
 // Module areas (monitoring, discovery, crm, admin/users) are registered by
 // their module service providers — see app/Modules/*/routes.php.

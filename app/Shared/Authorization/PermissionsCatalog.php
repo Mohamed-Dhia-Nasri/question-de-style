@@ -73,6 +73,16 @@ final class PermissionsCatalog
     public const EMV_MANAGE = 'emv.manage';
 
     /**
+     * Staff-visible Settings area (EMV + Reach formula pages).
+     */
+    public const SETTINGS_VIEW = 'settings.view';
+
+    /**
+     * Create/edit/activate reach configurations. ADMIN only.
+     */
+    public const REACH_MANAGE = 'reach.manage';
+
+    /**
      * Request/download rollup-backed report exports (REQ-M1-012). Staff
      * only — CLIENT_VIEWER never exports internal reports; its surface is
      * the approved-reports area (REQ-M3-012, P3).
@@ -102,6 +112,8 @@ final class PermissionsCatalog
             self::ROLES_MANAGE,
             self::AUDIT_VIEW,
             self::EMV_MANAGE,
+            self::SETTINGS_VIEW,
+            self::REACH_MANAGE,
             self::EXPORTS_CREATE,
             self::OPERATIONS_VIEW,
         ];
@@ -122,6 +134,7 @@ final class PermissionsCatalog
             self::CRM_VIEW,
             self::CRM_MANAGE,
             self::REPORTS_VIEW_APPROVED,
+            self::SETTINGS_VIEW,
             self::EXPORTS_CREATE,
             self::OPERATIONS_VIEW,
         ];

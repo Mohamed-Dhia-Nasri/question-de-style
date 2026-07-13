@@ -58,6 +58,23 @@
         ],
     ];
 
+    $settingsItems = [
+        [
+            'name' => 'EMV',
+            'route' => 'settings.emv',
+            'active' => request()->routeIs('settings.emv'),
+            'can' => 'settings.view',
+            'icon' => '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 6H3.75M10.5 6a1.5 1.5 0 1 0 3 0m-3 0a1.5 1.5 0 1 1 3 0M13.5 6h6.75m-6.75 6H3.75m9.75 0a1.5 1.5 0 1 0 3 0m-3 0a1.5 1.5 0 1 1 3 0m3 0h.75m-9 6H3.75m9.75 0a1.5 1.5 0 1 0 3 0m-3 0a1.5 1.5 0 1 1 3 0m3 0h.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+        ],
+        [
+            'name' => 'Reach',
+            'route' => 'settings.reach',
+            'active' => request()->routeIs('settings.reach'),
+            'can' => 'settings.view',
+            'icon' => '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 6H3.75M10.5 6a1.5 1.5 0 1 0 3 0m-3 0a1.5 1.5 0 1 1 3 0M13.5 6h6.75m-6.75 6H3.75m9.75 0a1.5 1.5 0 1 0 3 0m-3 0a1.5 1.5 0 1 1 3 0m3 0h.75m-9 6H3.75m9.75 0a1.5 1.5 0 1 0 3 0m-3 0a1.5 1.5 0 1 1 3 0m3 0h.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+        ],
+    ];
+
     $adminItems = [
         [
             'name' => 'Users & Team',
@@ -155,6 +172,45 @@
 
                         <ul class="flex flex-col gap-1">
                             @foreach ($accountItems as $item)
+                                @can($item['can'])
+                                    <li>
+                                        <a href="{{ route($item['route']) }}"
+                                            class="menu-item group {{ $item['active'] ? 'menu-item-active' : 'menu-item-inactive' }}"
+                                            :class="(!$store.sidebar.isExpanded && !$store.sidebar.isHovered && !$store.sidebar.isMobileOpen) ?
+                                                'xl:justify-center' :
+                                                'justify-start'">
+                                            <span class="{{ $item['active'] ? 'menu-item-icon-active' : 'menu-item-icon-inactive' }}">
+                                                {!! $item['icon'] !!}
+                                            </span>
+                                            <span x-show="$store.sidebar.isExpanded || $store.sidebar.isHovered || $store.sidebar.isMobileOpen"
+                                                class="menu-item-text whitespace-nowrap">
+                                                {{ $item['name'] }}
+                                            </span>
+                                        </a>
+                                    </li>
+                                @endcan
+                            @endforeach
+                        </ul>
+                    </div>
+                @endcan
+
+                @can('settings.view')
+                    <div>
+                        <h2 class="mb-4 flex text-xs leading-[20px] uppercase text-gray-400"
+                            :class="(!$store.sidebar.isExpanded && !$store.sidebar.isHovered && !$store.sidebar.isMobileOpen) ?
+                                'xl:justify-center' : 'justify-start'">
+                            <template x-if="$store.sidebar.isExpanded || $store.sidebar.isHovered || $store.sidebar.isMobileOpen">
+                                <span>Settings</span>
+                            </template>
+                            <template x-if="!$store.sidebar.isExpanded && !$store.sidebar.isHovered && !$store.sidebar.isMobileOpen">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path fill-rule="evenodd" clip-rule="evenodd" d="M5.99915 10.2451C6.96564 10.2451 7.74915 11.0286 7.74915 11.9951V12.0051C7.74915 12.9716 6.96564 13.7551 5.99915 13.7551C5.03265 13.7551 4.24915 12.9716 4.24915 12.0051V11.9951C4.24915 11.0286 5.03265 10.2451 5.99915 10.2451ZM17.9991 10.2451C18.9656 10.2451 19.7491 11.0286 19.7491 11.9951V12.0051C19.7491 12.9716 18.9656 13.7551 17.9991 13.7551C17.0326 13.7551 16.2491 12.9716 16.2491 12.0051V11.9951C16.2491 11.0286 17.0326 10.2451 17.9991 10.2451ZM13.7491 11.9951C13.7491 11.0286 12.9656 10.2451 11.9991 10.2451C11.0326 10.2451 10.2491 11.0286 10.2491 11.9951V12.0051C10.2491 12.9716 11.0326 13.7551 11.9991 13.7551C12.9656 13.7551 13.7491 12.9716 13.7491 12.0051V11.9951Z" fill="currentColor"/>
+                                </svg>
+                            </template>
+                        </h2>
+
+                        <ul class="flex flex-col gap-1">
+                            @foreach ($settingsItems as $item)
                                 @can($item['can'])
                                     <li>
                                         <a href="{{ route($item['route']) }}"

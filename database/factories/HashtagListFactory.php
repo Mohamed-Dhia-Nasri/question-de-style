@@ -7,6 +7,7 @@ use App\Modules\CRM\Models\Campaign;
 use App\Modules\Monitoring\Models\HashtagList;
 use App\Platform\Enrichment\Hashtags\HashtagNormalizer;
 use App\Platform\Enrichment\Support\HashtagScope;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -16,6 +17,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class HashtagListFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = HashtagList::class;
 
     /**
@@ -26,6 +29,7 @@ class HashtagListFactory extends Factory
         $hashtag = '#'.fake()->unique()->lexify('brandtag????');
 
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'scope' => HashtagScope::Brand,
             'campaign_id' => null,
             'brand_id' => Brand::factory(),

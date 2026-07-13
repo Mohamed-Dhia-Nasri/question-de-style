@@ -226,6 +226,10 @@ return new class extends Migration
         DB::statement('CREATE UNIQUE INDEX rollup_seeding_by_shipment_key ON rollup_seeding_by_shipment (shipment_id)');
 
         // ROLLUP-SeedingByCreatorCampaign — creator × seeding campaign.
+        // Deep-review fixes: distinct_content dedupes a content item linked
+        // to several shipments of the same run so it counts once (M2); the
+        // engagement sum is NULL — never a fabricated zero — when no
+        // component was observed (H1, DP-001; matches ROLLUP-MentionByCampaign).
         DB::statement(<<<'SQL'
             CREATE MATERIALIZED VIEW rollup_seeding_by_creator_campaign AS
             WITH latest_content AS (
@@ -236,17 +240,30 @@ return new class extends Migration
                        ) AS rn
                 FROM fact_seeding_content f
             ),
+            distinct_content AS (
+                SELECT c.*,
+                       row_number() OVER (
+                           PARTITION BY c.creator_id, c.seeding_campaign_id, c.content_item_id
+                           ORDER BY c.metric_snapshot_id DESC, c.id DESC
+                       ) AS crn
+                FROM latest_content c
+                WHERE c.rn = 1
+            ),
             content_rollup AS (
                 SELECT creator_id, seeding_campaign_id,
                        min(date_key) AS first_posted_at,
                        count(*) AS content_count,
                        sum(views) AS views,
-                       sum(coalesce(likes, 0) + coalesce(comments, 0)
-                           + coalesce(shares, 0) + coalesce(saves, 0)) AS engagement,
+                       sum(CASE WHEN likes IS NULL AND comments IS NULL
+                                 AND shares IS NULL AND saves IS NULL
+                                THEN NULL
+                                ELSE coalesce(likes, 0) + coalesce(comments, 0)
+                                     + coalesce(shares, 0) + coalesce(saves, 0)
+                           END) AS engagement,
                        sum(estimated_reach) AS estimated_reach,
                        sum(emv) AS emv
-                FROM latest_content
-                WHERE rn = 1
+                FROM distinct_content
+                WHERE crn = 1
                 GROUP BY creator_id, seeding_campaign_id
             ),
             shipment_rollup AS (
@@ -300,19 +317,42 @@ return new class extends Migration
                 FROM fact_seeding_content f
             ),
             content_rollup AS (
-                SELECT g.grain,
-                       date_trunc(g.grain, c.date_key)::date AS bucket_start,
-                       c.product_id,
+                -- Deep-review fixes: the inner dedupe keeps ONE row per
+                -- content item per product bucket, so content linked to two
+                -- shipments of the same product is not double-counted (M2);
+                -- the engagement sum is NULL when no component was observed
+                -- (H1, DP-001; matches ROLLUP-MentionByCampaign).
+                SELECT d.grain,
+                       d.bucket_start,
+                       d.product_id,
                        count(*) AS content_count,
-                       sum(c.views) AS total_views,
-                       sum(coalesce(c.likes, 0) + coalesce(c.comments, 0)
-                           + coalesce(c.shares, 0) + coalesce(c.saves, 0)) AS total_engagement,
-                       sum(c.estimated_reach) AS total_estimated_reach,
-                       sum(c.emv) AS total_emv
-                FROM latest_content c
-                CROSS JOIN grains g
-                WHERE c.rn = 1
-                GROUP BY g.grain, date_trunc(g.grain, c.date_key), c.product_id
+                       sum(d.views) AS total_views,
+                       sum(CASE WHEN d.likes IS NULL AND d.comments IS NULL
+                                 AND d.shares IS NULL AND d.saves IS NULL
+                                THEN NULL
+                                ELSE coalesce(d.likes, 0) + coalesce(d.comments, 0)
+                                     + coalesce(d.shares, 0) + coalesce(d.saves, 0)
+                           END) AS total_engagement,
+                       sum(d.estimated_reach) AS total_estimated_reach,
+                       sum(d.emv) AS total_emv
+                FROM (
+                    SELECT g.grain,
+                           date_trunc(g.grain, c.date_key)::date AS bucket_start,
+                           c.product_id,
+                           c.content_item_id,
+                           c.views, c.likes, c.comments, c.shares, c.saves,
+                           c.estimated_reach, c.emv,
+                           row_number() OVER (
+                               PARTITION BY g.grain, date_trunc(g.grain, c.date_key),
+                                            c.product_id, c.content_item_id
+                               ORDER BY c.metric_snapshot_id DESC, c.id DESC
+                           ) AS crn
+                    FROM latest_content c
+                    CROSS JOIN grains g
+                    WHERE c.rn = 1
+                ) d
+                WHERE d.crn = 1
+                GROUP BY d.grain, d.bucket_start, d.product_id
             )
             SELECT grain,
                    bucket_start,
@@ -360,17 +400,33 @@ return new class extends Migration
                 FROM fact_seeding_content f
             ),
             content_rollup AS (
-                SELECT g.grain,
-                       date_trunc(g.grain, c.date_key)::date AS bucket_start,
-                       c.brand_id,
+                -- Same M2-class dedupe as ROLLUP-SeedingByProduct: one row
+                -- per content item per brand bucket, so multi-shipment links
+                -- do not double-count views/EMV.
+                SELECT d.grain,
+                       d.bucket_start,
+                       d.brand_id,
                        count(*) AS content_count,
-                       sum(c.views) AS total_views,
-                       sum(c.estimated_reach) AS total_estimated_reach,
-                       sum(c.emv) AS total_emv
-                FROM latest_content c
-                CROSS JOIN grains g
-                WHERE c.rn = 1 AND c.brand_id IS NOT NULL
-                GROUP BY g.grain, date_trunc(g.grain, c.date_key), c.brand_id
+                       sum(d.views) AS total_views,
+                       sum(d.estimated_reach) AS total_estimated_reach,
+                       sum(d.emv) AS total_emv
+                FROM (
+                    SELECT g.grain,
+                           date_trunc(g.grain, c.date_key)::date AS bucket_start,
+                           c.brand_id,
+                           c.content_item_id,
+                           c.views, c.estimated_reach, c.emv,
+                           row_number() OVER (
+                               PARTITION BY g.grain, date_trunc(g.grain, c.date_key),
+                                            c.brand_id, c.content_item_id
+                               ORDER BY c.metric_snapshot_id DESC, c.id DESC
+                           ) AS crn
+                    FROM latest_content c
+                    CROSS JOIN grains g
+                    WHERE c.rn = 1 AND c.brand_id IS NOT NULL
+                ) d
+                WHERE d.crn = 1
+                GROUP BY d.grain, d.bucket_start, d.brand_id
             )
             SELECT grain,
                    bucket_start,

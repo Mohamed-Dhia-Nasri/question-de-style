@@ -2,6 +2,8 @@
 
 namespace App\Modules\Discovery;
 
+use App\Modules\Discovery\Contracts\CreatorGeography;
+use App\Modules\Discovery\Services\CreatorGeographyWriter;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -16,6 +18,17 @@ use Illuminate\Support\ServiceProvider;
  */
 class DiscoveryServiceProvider extends ServiceProvider
 {
+    public function register(): void
+    {
+        // ADR-0018 — operator-assigned creator geography: ENT-GeoAttribution
+        // is M2-owned, so the CRM writes it only through this owner-side
+        // seam (the XMC-001/XMC-003 contract pattern).
+        $this->app->bind(
+            CreatorGeography::class,
+            CreatorGeographyWriter::class,
+        );
+    }
+
     public function boot(): void
     {
         $this->loadRoutesFrom(__DIR__.'/routes.php');

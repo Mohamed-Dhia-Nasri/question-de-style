@@ -5,6 +5,7 @@ namespace App\Modules\Monitoring\Models;
 use App\Modules\CRM\Models\PlatformAccount;
 use App\Shared\Casts\AsValueObject;
 use App\Shared\Casts\AsValueObjectCollection;
+use App\Shared\Tenancy\BelongsToTenant;
 use App\Shared\ValueObjects\MetricValue;
 use App\Shared\ValueObjects\Provenance;
 use Carbon\CarbonImmutable;
@@ -28,7 +29,10 @@ use LogicException;
  * APPEND-ONLY: snapshots are immutable history — updates and deletes throw
  * here and are also rejected by a database trigger.
  *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property int|null $platform_account_id
  * @property int|null $content_item_id
  * @property CarbonImmutable $captured_at
@@ -37,6 +41,8 @@ use LogicException;
  */
 class MetricSnapshot extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<MetricSnapshotFactory> */
     use HasFactory;
 

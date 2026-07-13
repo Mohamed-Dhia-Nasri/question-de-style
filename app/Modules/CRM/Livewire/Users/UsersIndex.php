@@ -3,6 +3,8 @@
 namespace App\Modules\CRM\Livewire\Users;
 
 use App\Models\User;
+use App\Modules\Billing\Exceptions\SeatLimitExceeded;
+use App\Modules\Billing\Services\SeatLimiter;
 use App\Shared\Audit\AuditLogger;
 use App\Shared\Enums\RoleName;
 use App\Shared\Livewire\Concerns\WithDataTable;
@@ -137,7 +139,7 @@ class UsersIndex extends Component
         $this->showForm = true;
     }
 
-    public function save(AuditLogger $audit): void
+    public function save(AuditLogger $audit, SeatLimiter $seats): void
     {
         $editing = $this->editingUserId !== null;
         $user = $editing ? User::findOrFail($this->editingUserId) : null;
@@ -166,6 +168,31 @@ class UsersIndex extends Component
             }
         }
 
+        // Seat model (ADR-0021): creating an active user or reactivating an
+        // inactive one consumes a seat — those paths run under the tenant
+        // seat lock so a concurrent change cannot overshoot the limit.
+        $consumesSeat = $editing
+            ? ((bool) $validated['active'] && ! $user->active)
+            : (bool) $validated['active'];
+
+        try {
+            $user = $consumesSeat
+                ? $seats->reserve((int) auth()->user()->tenant_id, fn (): User => $this->persistUser($editing, $user, $validated))
+                : $this->persistUser($editing, $user, $validated);
+        } catch (SeatLimitExceeded $e) {
+            throw ValidationException::withMessages(['seats' => $e->getMessage()]);
+        }
+
+        $audit->record($editing ? 'user.updated' : 'user.created', $user, ['role' => $validated['role'], 'active' => $user->active]);
+
+        $this->showForm = false;
+        $this->resetForm();
+        $this->dispatch('notify', type: 'success', message: $editing ? 'User updated.' : 'User created.');
+    }
+
+    /** @param  array<string, mixed>  $validated */
+    protected function persistUser(bool $editing, ?User $user, array $validated): User
+    {
         if ($editing) {
             $user->fill([
                 'display_name' => $validated['display_name'],
@@ -178,7 +205,6 @@ class UsersIndex extends Component
             }
 
             $user->save();
-            $action = 'user.updated';
         } else {
             $user = User::create([
                 'display_name' => $validated['display_name'],
@@ -186,17 +212,12 @@ class UsersIndex extends Component
                 'active' => $validated['active'],
                 'password' => $validated['password'],
             ]);
-            $action = 'user.created';
         }
 
         // Exactly one role per user (ENT-User): syncRoles, never assignRole.
         $user->syncRoles([$validated['role']]);
 
-        $audit->record($action, $user, ['role' => $validated['role'], 'active' => $user->active]);
-
-        $this->showForm = false;
-        $this->resetForm();
-        $this->dispatch('notify', type: 'success', message: $editing ? 'User updated.' : 'User created.');
+        return $user;
     }
 
     public function cancelForm(): void
@@ -241,27 +262,43 @@ class UsersIndex extends Component
 
     // --- bulk actions --------------------------------------------------------
 
-    public function bulkSetActive(bool $active, AuditLogger $audit): void
+    public function bulkSetActive(bool $active, AuditLogger $audit, SeatLimiter $seats): void
     {
         $this->authorize('viewAny', User::class);
 
-        $users = User::query()->whereIn('id', $this->selected)->get();
+        $apply = function () use ($active, $audit): int {
+            $users = User::query()->whereIn('id', $this->selected)->get();
 
-        $count = 0;
+            $count = 0;
 
-        foreach ($users as $user) {
-            // Skip self-deactivation and re-check per record.
-            if (! $active && $user->is(auth()->user())) {
-                continue;
+            foreach ($users as $user) {
+                // Skip self-deactivation and re-check per record.
+                if (! $active && $user->is(auth()->user())) {
+                    continue;
+                }
+
+                $this->authorize('update', $user);
+
+                if ($user->active !== $active) {
+                    $user->update(['active' => $active]);
+                    $audit->record($active ? 'user.activated' : 'user.deactivated', $user);
+                    $count++;
+                }
             }
 
-            $this->authorize('update', $user);
+            return $count;
+        };
 
-            if ($user->active !== $active) {
-                $user->update(['active' => $active]);
-                $audit->record($active ? 'user.activated' : 'user.deactivated', $user);
-                $count++;
-            }
+        try {
+            // Bulk ACTIVATION consumes seats — all-or-nothing under the
+            // tenant seat lock (ADR-0021); deactivation only frees seats.
+            $count = $active
+                ? $seats->reserve((int) auth()->user()->tenant_id, $apply)
+                : $apply();
+        } catch (SeatLimitExceeded $e) {
+            $this->dispatch('notify', type: 'error', message: $e->getMessage());
+
+            return;
         }
 
         $this->clearSelection();

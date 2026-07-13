@@ -3,6 +3,7 @@
 namespace App\Modules\Monitoring\Models;
 
 use App\Shared\Casts\AsValueObject;
+use App\Shared\Tenancy\BelongsToTenant;
 use App\Shared\ValueObjects\MetricValue;
 use App\Shared\ValueObjects\Provenance;
 use Database\Factories\CommentFactory;
@@ -22,9 +23,16 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  *
  * author_handle and text are third-party personal data (DP-005) and are
  * encrypted at rest via Laravel encrypted casts.
+ *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
+ * @property int $id
+ * @property int|null $tenant_id
  */
 class Comment extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<CommentFactory> */
     use HasFactory;
 

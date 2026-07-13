@@ -42,23 +42,11 @@ class ApifyClient
 
         $startedAt = microtime(true);
 
-        try {
-            $response = Http::withToken($token)
-                ->acceptJson()
-                ->timeout((int) config('services.apify.timeout'))
-                ->connectTimeout(10)
-                ->post($url, $input);
-        } catch (ConnectionException $e) {
-            $timedOut = str_contains(strtolower($e->getMessage()), 'time');
-
-            throw new ProviderCallException(
-                $sourceId,
-                $timedOut ? ErrorCategory::Timeout : ErrorCategory::Network,
-                $timedOut
-                    ? "Apify actor [{$actorId}] request timed out."
-                    : "Apify actor [{$actorId}] was unreachable (network error).",
-            );
-        }
+        $response = $this->request($sourceId, $actorId, fn () => Http::withToken($token)
+            ->acceptJson()
+            ->timeout((int) config('services.apify.timeout'))
+            ->connectTimeout(10)
+            ->post($url, $input));
 
         $requestMs = (microtime(true) - $startedAt) * 1000;
 
@@ -95,6 +83,148 @@ class ApifyClient
             sourceVersion: $actorId,
             rateLimit: $this->rateLimitState($response),
         );
+    }
+
+    /**
+     * Run an actor via the ASYNC endpoint (start run → poll → read dataset).
+     * Required for batched inputs (whole-roster story polls, direct-URL
+     * refresh): Apify's synchronous endpoint 408s at its 300s wall, and a
+     * client-side abort of a still-running actor is billed anyway — the
+     * async path waits out long runs without double-billing (cost plan
+     * recs 3/8). Same security posture as runActor: token only in the
+     * Authorization header, sanitized classified errors only.
+     *
+     * @param  array<string, mixed>  $input  actor input document
+     */
+    public function runActorAsync(string $sourceId, string $actorId, array $input): ProviderResponse
+    {
+        $token = (string) config('services.apify.token');
+
+        if ($token === '') {
+            throw new ProviderCallException(
+                $sourceId,
+                ErrorCategory::Authentication,
+                'Apify token is not configured (set APIFY_TOKEN).',
+            );
+        }
+
+        $base = rtrim((string) config('services.apify.base_url'), '/');
+        $deadline = microtime(true) + max(60, (int) config('services.apify.async_timeout'));
+        $startedAt = microtime(true);
+
+        $start = $this->request($sourceId, $actorId, fn () => Http::withToken($token)
+            ->acceptJson()
+            ->timeout(90)
+            ->connectTimeout(10)
+            ->post("{$base}/acts/{$actorId}/runs?waitForFinish=60", $input));
+
+        $this->assertSuccessful($sourceId, $actorId, $start);
+
+        $run = $start->json('data');
+
+        if (! is_array($run) || ! is_string($run['id'] ?? null)) {
+            throw new ProviderCallException(
+                $sourceId,
+                ErrorCategory::MalformedResponse,
+                "Apify actor [{$actorId}] run-start returned no run id.",
+                $start->status(),
+            );
+        }
+
+        $runId = $run['id'];
+        $status = (string) ($run['status'] ?? 'READY');
+
+        while (! in_array($status, ['SUCCEEDED', 'FAILED', 'TIMED-OUT', 'ABORTED'], true)) {
+            if (microtime(true) >= $deadline) {
+                throw new ProviderCallException(
+                    $sourceId,
+                    ErrorCategory::Timeout,
+                    "Apify actor [{$actorId}] async run did not finish within the configured deadline.",
+                );
+            }
+
+            $poll = $this->request($sourceId, $actorId, fn () => Http::withToken($token)
+                ->acceptJson()
+                ->timeout(90)
+                ->connectTimeout(10)
+                ->get("{$base}/actor-runs/{$runId}?waitForFinish=60"));
+
+            $this->assertSuccessful($sourceId, $actorId, $poll);
+
+            $run = is_array($poll->json('data')) ? $poll->json('data') : [];
+            $status = (string) ($run['status'] ?? 'RUNNING');
+        }
+
+        if ($status !== 'SUCCEEDED') {
+            throw new ProviderCallException(
+                $sourceId,
+                $status === 'TIMED-OUT' ? ErrorCategory::Timeout : ErrorCategory::UpstreamError,
+                "Apify actor [{$actorId}] async run ended {$status}.",
+            );
+        }
+
+        $datasetId = $run['defaultDatasetId'] ?? null;
+
+        if (! is_string($datasetId) || $datasetId === '') {
+            throw new ProviderCallException(
+                $sourceId,
+                ErrorCategory::MalformedResponse,
+                "Apify actor [{$actorId}] run succeeded but exposed no dataset id.",
+            );
+        }
+
+        $itemsResponse = $this->request($sourceId, $actorId, fn () => Http::withToken($token)
+            ->acceptJson()
+            ->timeout(120)
+            ->connectTimeout(10)
+            ->get("{$base}/datasets/{$datasetId}/items?clean=true&format=json"));
+
+        $this->assertSuccessful($sourceId, $actorId, $itemsResponse);
+
+        $items = $itemsResponse->json();
+
+        if (! is_array($items) || ($items !== [] && ! array_is_list($items))) {
+            throw new ProviderCallException(
+                $sourceId,
+                is_array($items) ? ErrorCategory::SchemaDrift : ErrorCategory::MalformedResponse,
+                "Apify actor [{$actorId}] dataset returned a non-list body.",
+                $itemsResponse->status(),
+            );
+        }
+
+        $this->assertNotAccessError($sourceId, $actorId, $items, $itemsResponse->status());
+
+        /** @var list<mixed> $items */
+        return new ProviderResponse(
+            items: $items,
+            httpStatus: $itemsResponse->status(),
+            responseBytes: strlen($itemsResponse->body()),
+            requestMs: (microtime(true) - $startedAt) * 1000,
+            sourceVersion: $actorId,
+            rateLimit: $this->rateLimitState($itemsResponse),
+        );
+    }
+
+    /**
+     * Run one HTTP call with the shared connection-failure classification.
+     *
+     * @param  callable(): Response  $call
+     */
+    private function request(string $sourceId, string $actorId, callable $call): Response
+    {
+        try {
+            return $call();
+        } catch (ConnectionException $e) {
+            $timedOut = str_contains(strtolower($e->getMessage()), 'time');
+
+            throw new ProviderCallException(
+                $sourceId,
+                $timedOut ? ErrorCategory::Timeout : ErrorCategory::Network,
+                $timedOut
+                    ? "Apify actor [{$actorId}] request timed out."
+                    : "Apify actor [{$actorId}] was unreachable (network error).",
+            );
+        }
     }
 
     private function assertSuccessful(string $sourceId, string $actorId, Response $response): void

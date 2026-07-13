@@ -5,6 +5,7 @@ namespace App\Modules\CRM\Models;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Shared\Casts\AsValueObject;
 use App\Shared\Enums\ShipmentStatus;
+use App\Shared\Tenancy\BelongsToTenant;
 use App\Shared\ValueObjects\MetricValue;
 use Carbon\CarbonImmutable;
 use Database\Factories\ShipmentFactory;
@@ -24,7 +25,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
  * shipment_resulting_content pivot (spec D2), empty until REQ-M3-008
  * matching lands in Step 3.
  *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property int $seeding_campaign_id
  * @property int $creator_id
  * @property ShipmentStatus $status
@@ -40,6 +44,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
  */
 class Shipment extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<ShipmentFactory> */
     use HasFactory;
 
@@ -99,6 +105,13 @@ class Shipment extends Model
      */
     public function resultingContent(): BelongsToMany
     {
-        return $this->belongsToMany(ContentItem::class, 'shipment_resulting_content')->withTimestamps();
+        $relation = $this->belongsToMany(ContentItem::class, 'shipment_resulting_content')->withTimestamps();
+
+        // Stamp the owner's tenant on attach()/sync() (ADR-0019). Template
+        // instances (withCount/whereHas/eager-load) carry no tenant_id and
+        // must not pin a NULL pivot value.
+        return $this->tenant_id === null
+            ? $relation
+            : $relation->withPivotValue('tenant_id', $this->tenant_id);
     }
 }

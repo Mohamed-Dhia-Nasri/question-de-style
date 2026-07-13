@@ -92,8 +92,13 @@ class ArchiveStoryMediaJob implements ShouldQueue
         $disk = (string) config('qds.ingestion.media_disk');
         $extension = $this->extensionFor($response->header('Content-Type'));
 
+        // ADR-0019: per-tenant prefix, tenant taken from the Story ROW (the
+        // job payload may carry no context when dispatched from platform
+        // cycles). Existing archives keep their stored paths — playback
+        // always reads media_url from the row, never rebuilds it.
         $path = sprintf(
-            'stories/%s/%d/%s.%s',
+            'tenants/%d/stories/%s/%d/%s.%s',
+            $story->tenant_id,
             strtolower($story->platform->value),
             $story->platform_account_id,
             $story->external_id,
@@ -147,6 +152,11 @@ class ArchiveStoryMediaJob implements ShouldQueue
             str_contains($contentType, 'image/png') => 'png',
             str_contains($contentType, 'image/webp') => 'webp',
             str_contains($contentType, 'image/heic') => 'heic',
+            // Any other video subtype (e.g. video/quicktime) keeps a
+            // video extension so downstream recognition routes it to the
+            // video + SPOKEN_BRAND path instead of misclassifying it as an
+            // image and silently skipping speech detection.
+            str_contains($contentType, 'video/') => 'mp4',
             default => 'bin',
         };
     }

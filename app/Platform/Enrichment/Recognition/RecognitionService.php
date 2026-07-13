@@ -5,6 +5,7 @@ namespace App\Platform\Enrichment\Recognition;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\RecognitionDetection;
 use App\Modules\Monitoring\Models\Story;
+use App\Platform\Enrichment\Http\GoogleSpeechClient;
 use App\Platform\Enrichment\Http\GoogleVideoIntelligenceClient;
 use App\Platform\Enrichment\Http\GoogleVisionClient;
 use App\Platform\Enrichment\Support\ConfidenceScore;
@@ -35,8 +36,9 @@ use Illuminate\Database\UniqueConstraintViolationException;
  * - Images (IMAGE_POST/CAROUSEL, image stories): SRC-google-cloud-vision.
  * - Videos (REEL/VIDEO/SHORT, video stories): SRC-google-video-intelligence,
  *   OPTIONAL per the data-source matrix — only used when configured.
- * - SPOKEN_BRAND (SRC-google-speech-to-text): requires an audio derivation
- *   pipeline that is not yet canonically specified — reported as a skip,
+ * - SPOKEN_BRAND (SRC-google-speech-to-text): the AudioExtractor derives a
+ *   ≤60s mono FLAC track from the video with local ffmpeg; when ffmpeg is
+ *   missing or no audio can be derived, the stage is reported as a skip,
  *   never fabricated.
  *
  * A provider without configured credentials is skipped; its outputs stay
@@ -50,6 +52,8 @@ class RecognitionService
     public function __construct(
         private readonly GoogleVisionClient $vision,
         private readonly GoogleVideoIntelligenceClient $videoIntelligence,
+        private readonly GoogleSpeechClient $speech,
+        private readonly AudioExtractor $audio,
         private readonly RecognitionNormalizer $normalizer,
         private readonly MediaFetcher $media,
         private readonly ProviderCallRecorder $recorder,
@@ -65,15 +69,12 @@ class RecognitionService
         $updated = 0;
         $skipped = [];
 
-        // Spoken-brand detection needs an audio track extracted from video
-        // media; no canonical audio-derivation pipeline exists yet.
-        $skipped[] = 'speech:no-audio-derivation-pipeline';
-
         // No configured provider → nothing to annotate; don't download
         // media for nobody (cost control).
-        if (! $this->vision->isConfigured() && ! $this->videoIntelligence->isConfigured()) {
+        if (! $this->vision->isConfigured() && ! $this->videoIntelligence->isConfigured() && ! $this->speech->isConfigured()) {
             $skipped[] = 'vision:not-configured';
             $skipped[] = 'video-intelligence:not-configured';
+            $skipped[] = 'speech:not-configured';
 
             return ['status' => 'completed-empty', 'created' => 0, 'updated' => 0, 'skipped' => $skipped];
         }
@@ -116,6 +117,44 @@ class RecognitionService
 
                 $created += $c;
                 $updated += $u;
+            }
+
+            // SPOKEN_BRAND: derive a ≤60s audio track locally, then
+            // transcribe. Each gate records its own skip marker so a
+            // missing detection is always explainable.
+            if (! $this->speech->isConfigured()) {
+                $skipped[] = 'speech:not-configured';
+            } elseif (! $this->audio->isAvailable()) {
+                $skipped[] = 'speech:ffmpeg-unavailable';
+            } else {
+                $audioBytes = $this->audio->extract($videoBytes);
+
+                if ($audioBytes === null) {
+                    // Muted/undecodable media — unavailable, never fabricated.
+                    $skipped[] = 'speech:audio-extraction-failed';
+                } else {
+                    try {
+                        [$c, $u] = $this->annotate(
+                            $target,
+                            SourceRegistry::GOOGLE_SPEECH_TO_TEXT,
+                            'speech.recognize',
+                            $correlationId,
+                            $retryCount,
+                            fn (): NormalizedBatch => $this->normalizer->speechBatch($this->speech->recognize($audioBytes)),
+                        );
+
+                        $created += $c;
+                        $updated += $u;
+                    } catch (ProviderCallException $e) {
+                        // Speech is the newest, most rate-limit-prone stage and
+                        // it now bills per video. A transient speech failure
+                        // must NOT fail the whole run and re-bill the already-
+                        // succeeded Vision + Video-Intelligence stages on every
+                        // retry — the failure is recorded (annotate) and the
+                        // run completes with SPOKEN_BRAND simply unavailable.
+                        $skipped[] = 'speech:provider-error';
+                    }
+                }
             }
         }
 

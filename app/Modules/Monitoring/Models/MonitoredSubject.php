@@ -6,6 +6,7 @@ use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\Creator;
 use App\Shared\Enums\MonitoredSubjectType;
 use App\Shared\Enums\Platform;
+use App\Shared\Tenancy\BelongsToTenant;
 use Database\Factories\MonitoredSubjectFactory;
 use Illuminate\Database\Eloquent\Casts\AsEnumCollection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -25,7 +26,10 @@ use Illuminate\Support\Collection;
  *
  * Internal configuration — not externally sourced, so no Provenance envelope.
  *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property MonitoredSubjectType $subject_type
  * @property int|null $creator_id
  * @property Collection<int, Platform>|null $platforms
@@ -34,6 +38,8 @@ use Illuminate\Support\Collection;
  */
 class MonitoredSubject extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<MonitoredSubjectFactory> */
     use HasFactory;
 

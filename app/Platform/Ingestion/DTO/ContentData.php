@@ -28,5 +28,11 @@ final readonly class ContentData
         /** @var list<MetricValue> public counts, each tier PUBLIC (DP-001) */
         public array $publicMetrics,
         public Provenance $provenance,
+        /**
+         * Canonical public page URL (post/reel/video page, never a CDN
+         * media URL). Feeds the campaign-linked direct-URL metric refresh;
+         * null when the provider payload does not carry it.
+         */
+        public ?string $permalink = null,
     ) {}
 }

@@ -29,4 +29,13 @@ interface IngestionService
      * because stories expire (REQ-M1-004).
      */
     public function startMonitoringCycle(bool $storiesOnly = false): void;
+
+    /**
+     * Start one queued on-demand cycle over a single creator's platform
+     * accounts (operator "run monitoring now"). Same fan-out and cycle
+     * bookkeeping as the roster cycle, scoped by ingestion_cycles.creator_id;
+     * duplicate runs for the same creator are prevented. The recurring
+     * roster cycle remains the steady-state path.
+     */
+    public function startCreatorCycle(int $creatorId): void;
 }

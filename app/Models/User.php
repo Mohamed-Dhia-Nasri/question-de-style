@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Shared\Enums\RoleName;
+use App\Shared\Tenancy\BelongsToTenant;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -18,11 +19,19 @@ use Spatie\Permission\Traits\HasRoles;
  * roleId. spatie/laravel-permission stores roles in a pivot, so the
  * single-role rule is enforced at the application layer: always assign via
  * syncRoles([$role]), never assignRole() on top of an existing role.
+ *
+ * Every user belongs to exactly one tenant (ADR-0019); tenant_id is
+ * deliberately NOT mass assignable — it is stamped from TenantContext or
+ * set explicitly by TenantProvisioner. users.email stays globally unique
+ * (the login identity spans tenants).
+ *
+ * @property int $id
+ * @property int|null $tenant_id
  */
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, HasRoles, Notifiable;
+    use BelongsToTenant, HasFactory, HasRoles, Notifiable;
 
     /**
      * The attributes that are mass assignable.

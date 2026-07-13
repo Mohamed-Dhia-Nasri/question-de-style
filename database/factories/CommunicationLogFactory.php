@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Modules\CRM\Models\CommunicationLog;
 use App\Modules\CRM\Models\Creator;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -14,6 +15,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class CommunicationLogFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = CommunicationLog::class;
 
     /**
@@ -22,6 +25,7 @@ class CommunicationLogFactory extends Factory
     public function definition(): array
     {
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'creator_id' => Creator::factory(),
             'campaign_id' => null,
             'channel' => 'email',

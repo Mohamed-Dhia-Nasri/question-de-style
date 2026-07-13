@@ -6,6 +6,7 @@ use App\Modules\CRM\Models\Creator;
 use App\Modules\Monitoring\Models\MonitoredSubject;
 use App\Shared\Enums\MonitoredSubjectType;
 use App\Shared\Enums\Platform;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -17,6 +18,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class MonitoredSubjectFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = MonitoredSubject::class;
 
     /**
@@ -25,6 +28,7 @@ class MonitoredSubjectFactory extends Factory
     public function definition(): array
     {
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'subject_type' => MonitoredSubjectType::Creator,
             'label' => fake()->name(),
             'creator_id' => Creator::factory(),

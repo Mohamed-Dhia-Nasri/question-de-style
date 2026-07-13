@@ -55,7 +55,10 @@ flowchart LR
 
 P0 and P4 carry no module `REQ-*` of their own (they are foundation and hardening work
 described in the [roadmap](../80-delivery/00-roadmap.md)); they are intentionally absent
-from the requirement rows below and this is not an orphan.
+from the requirement rows below and this is not an orphan. The "white-label" deliverable
+named in the P4 node above is void per
+[ADR-0016](../05-decisions/decision-log.md#adr-0016) (no external clients in v1) unless
+that ADR is superseded.
 
 ## Legend
 
@@ -96,7 +99,7 @@ from the requirement rows below and this is not an orphan.
 |-----|--------|--------------------------|--------------------------|-------|--------|--------------------|
 | REQ-M2-001 | M2 | Creator, PlatformAccount | SRC-apify-instagram-scraper, SRC-clockworks-tiktok-scraper, SRC-youtube-data-api-v3 | P2 | APPROVED | — |
 | REQ-M2-002 | M2 | Creator, PlatformAccount, MetricSnapshot, SectorClassification | SRC-apify-instagram-profile-scraper, SRC-clockworks-tiktok-scraper, SRC-youtube-data-api-v3 (derived; filters run on stored public data) | P2 | APPROVED | audience country/age/gender filters → DEF-001 |
-| REQ-M2-003 | M2 | GeoAttribution | SRC-apify-instagram-profile-scraper, SRC-clockworks-tiktok-scraper, SRC-youtube-data-api-v3 | P2 | APPROVED | — |
+| REQ-M2-003 | M2 | GeoAttribution | SRC-apify-instagram-profile-scraper, SRC-clockworks-tiktok-scraper, SRC-youtube-data-api-v3 | P2 | APPROVED | automatic inference → P2; operator-assigned geography shipped early per [ADR-0018](../05-decisions/decision-log.md#adr-0018) |
 | REQ-M2-004 | M2 | Creator, PlatformAccount, MetricSnapshot | — (aggregation of stored records) | P2 | APPROVED | — |
 | REQ-M2-005 | M2 | SectorClassification | — (SVC-EnrichmentAI; `ENUM-SectorLabel`, multi-label + relevance %) | P2 | APPROVED | — |
 | REQ-M2-006 | M2 | MetricSnapshot, ContentItem | — (DERIVED average AND median) | P2 | APPROVED | — |
@@ -110,7 +113,7 @@ from the requirement rows below and this is not an orphan.
 
 | REQ | Module | Primary entities (ENT-*) | External sources (SRC-*) | Phase | Status | Deferred sub-scope |
 |-----|--------|--------------------------|--------------------------|-------|--------|--------------------|
-| REQ-M3-001 | M3 | Creator, PlatformAccount | — (system of record; cross-platform identity merge) | P3 | APPROVED | — |
+| REQ-M3-001 | M3 | Creator, PlatformAccount | — (system of record; cross-platform identity merge) | P3 | APPROVED | automatic + dedicated merge → ADR-0014 (v1: operator-managed identity) |
 | REQ-M3-002 | M3 | Contact | — (manual CRM entry) | P3 | APPROVED | contact auto-extraction → DEF-002 |
 | REQ-M3-003 | M3 | BrandPreference | — (manual CRM entry) | P3 | APPROVED | — |
 | REQ-M3-004 | M3 | CommunicationLog, Creator | — (`ENUM-RelationshipStatus`; manual + logged) | P3 | APPROVED | — |
@@ -121,7 +124,7 @@ from the requirement rows below and this is not an orphan.
 | REQ-M3-009 | M3 | Campaign, SeedingCampaign, MetricSnapshot, ContentItem, Shipment, Product | — (DERIVED EMV/CPE/CPM; reach tiering per REQ-M1-006; via FACT-SeedingContent) | P3 | APPROVED | CONFIRMED reach in results → DEF-003 |
 | REQ-M3-010 | M3 | DocumentAttachment | — (uploads) | P3 | APPROVED | — |
 | REQ-M3-011 | M3 | Task | — (`ENUM-TaskStatus`) | P3 | APPROVED | — |
-| REQ-M3-012 | M3 | User, Role | — (`ENUM-RoleName`; CLIENT_VIEWER sees only approved reports for their brands) | P3 | APPROVED | — |
+| REQ-M3-012 | M3 | User, Role | — (`ENUM-RoleName`; CLIENT_VIEWER sees only approved reports for their brands) | P3 | APPROVED | external client access (CLIENT_VIEWER surface) → ADR-0016 (v1: ADMIN-only User/Role writes; CLIENT_VIEWER deny-everything) |
 | REQ-M3-013 | M3 | Product, Shipment, ContentItem, MetricSnapshot (via FACT-*/ROLLUP-*) | — (SVC-Analytics; ROLLUP-SeedingByProduct) | P3 | APPROVED | CONFIRMED reach/impressions → DEF-003 |
 
 ## Orphan-detection rule (linter MUST flag)

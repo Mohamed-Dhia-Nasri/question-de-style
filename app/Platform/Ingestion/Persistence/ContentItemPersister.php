@@ -38,23 +38,32 @@ class ContentItemPersister
                 continue;
             }
 
+            // ADR-0019: the natural key is (tenant_id, platform, external_id)
+            // — the lookup is EXPLICITLY scoped to the account's tenant
+            // (explicit beats ambient in pipeline code), never relying on the
+            // TenantScope alone.
             $existing = ContentItem::query()
+                ->where('tenant_id', $account->tenant_id)
                 ->where('platform', $item->platform->value)
                 ->where('external_id', $item->externalId)
                 ->first();
 
             if ($existing === null) {
-                ContentItem::query()->create([
+                $contentItem = new ContentItem([
                     'platform_account_id' => $account->id,
                     'platform' => $item->platform,
                     'content_type' => $item->contentType,
                     'external_id' => $item->externalId,
                     'caption' => $item->caption,
                     'media_urls' => $item->mediaUrls,
+                    'permalink' => $item->permalink,
                     'published_at' => $item->publishedAt,
                     'public_metrics' => $item->publicMetrics,
                     'provenance' => $item->provenance,
                 ]);
+                // Explicit ownership from the parent account row (ADR-0019).
+                $contentItem->tenant_id = $account->tenant_id;
+                $contentItem->save();
 
                 $created++;
 
@@ -64,6 +73,9 @@ class ContentItemPersister
             $updates = [
                 'caption' => $item->caption,
                 'media_urls' => $item->mediaUrls,
+                // Keep the known permalink when a provider omits it (the
+                // direct-URL refresh depends on it staying populated).
+                'permalink' => $item->permalink ?? $existing->permalink,
                 'published_at' => $item->publishedAt ?? $existing->published_at,
                 'public_metrics' => $item->publicMetrics,
                 'provenance' => $item->provenance,

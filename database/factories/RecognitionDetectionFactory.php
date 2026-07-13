@@ -12,6 +12,7 @@ use App\Shared\Enums\VerificationStatus;
 use App\Shared\ValueObjects\ConfidenceAssessment;
 use App\Shared\ValueObjects\Provenance;
 use Carbon\CarbonImmutable;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -22,6 +23,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class RecognitionDetectionFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = RecognitionDetection::class;
 
     /**
@@ -32,6 +35,7 @@ class RecognitionDetectionFactory extends Factory
         $brand = fake()->company();
 
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'content_item_id' => ContentItem::factory(),
             'story_id' => null,
             'recognition_type' => RecognitionType::Logo,

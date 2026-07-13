@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Modules\CRM\Models\Client;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -13,6 +14,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class ClientFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = Client::class;
 
     /**
@@ -21,6 +24,7 @@ class ClientFactory extends Factory
     public function definition(): array
     {
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'name' => fake()->company(),
             'country' => fake()->randomElement(['DE', 'AT', 'CH']),
         ];

@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Modules\Monitoring\Models\ContentHashtag;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Platform\Enrichment\Hashtags\HashtagNormalizer;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -14,6 +15,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class ContentHashtagFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = ContentHashtag::class;
 
     /**
@@ -24,6 +27,7 @@ class ContentHashtagFactory extends Factory
         $original = '#'.fake()->unique()->lexify('tag????');
 
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'content_item_id' => ContentItem::factory(),
             'original' => $original,
             'normalized' => HashtagNormalizer::normalize($original),

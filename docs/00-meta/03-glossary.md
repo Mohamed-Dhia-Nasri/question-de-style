@@ -11,7 +11,7 @@ depends_on:
   - docs/20-cross-cutting/00-data-principles.md
   - docs/20-cross-cutting/01-deferred-register.md
   - docs/05-decisions/decision-log.md
-last_reviewed: 2026-07-02
+last_reviewed: 2026-07-12
 ---
 
 # Glossary and Enum Registry
@@ -160,9 +160,14 @@ The set of creators the agency actively monitors — modelled as [`GL-MonitoredS
 
 ### CRM, campaigns, and seeding
 
+<a id="gl-tenant"></a>
+### GL-Tenant
+**DE:** Mandant / Kundenkonto. The subscribing customer organisation that owns its users, staff, configuration, and business data ([ADR-0019](../05-decisions/decision-log.md#adr-0019)). Every user belongs to exactly one tenant; every tenant-owned record carries the tenant's ownership key. Not to be confused with [`GL-Client`](#gl-client) — a client is a CRM record *inside* a tenant. Entity shape: [`ENT-Tenant`](../30-data-model/00-data-model.md#ent-tenant).
+
+<a id="gl-client"></a>
 <a id="gl-campaign"></a>
 ### GL-Client
-An agency client; the top of the client → brand → product hierarchy. `CLIENT_VIEWER` reporting is scoped to a client's brands. Entity: [`ENT-Client`](../30-data-model/00-data-model.md#ent-client).
+An agency client; the top of the client → brand → product hierarchy. `CLIENT_VIEWER` reporting is scoped to a client's brands. Entity: [`ENT-Client`](../30-data-model/00-data-model.md#ent-client). *Amended 2026-07-07 — as-built reconciliation (see [ADR-0016](../05-decisions/decision-log.md#adr-0016)):* v1 ships no external client access, so no client-scoped reporting surface exists; the scoping rule stands only if ADR-0016 is superseded.
 
 ### GL-Brand
 A brand belonging to a client — the entity mentions, campaigns, seeding and products attach to, and a primary aggregation dimension. Entity: [`ENT-Brand`](../30-data-model/00-data-model.md#ent-brand).
@@ -185,6 +190,8 @@ A product / SKU under a brand. It is the key that lets seeding results be aggreg
 | Organic | Organisch | Coverage arises organically; no paid/gifting agreement recorded. |
 
 Entity shape: [`ENT-SeedingCampaign`](../30-data-model/00-data-model.md); requirement [`REQ-M3-006`](../50-modules/module-3-crm-seeding.md).
+
+*Amended 2026-07-07 — as-built reconciliation:* the four variants are registered as the closed enum [`ENUM-SeedingType`](#enum-seedingtype).
 
 <a id="gl-shipment"></a>
 ### GL-Shipment
@@ -222,7 +229,11 @@ Entity shape: [`ENT-SeedingCampaign`](../30-data-model/00-data-model.md); requir
 
 <a id="gl-role"></a>
 ### GL-Role
-**DE:** Rolle. A permission role assigned to users; role names are the closed set in [`ENUM-RoleName`](#enum-rolename). Note: `CLIENT_VIEWER` sees only **approved reports for their own brands** ([`REQ-M3-012`](../50-modules/module-3-crm-seeding.md)). Entity shape: [`ENT-Role`](../30-data-model/00-data-model.md).
+**DE:** Rolle. A permission role assigned to users; role names are the closed set in [`ENUM-RoleName`](#enum-rolename). Note: `CLIENT_VIEWER` sees only **approved reports for their own brands** ([`REQ-M3-012`](../50-modules/module-3-crm-seeding.md)). Entity shape: [`ENT-Role`](../30-data-model/00-data-model.md). *Amended 2026-07-07 — as-built reconciliation (see [ADR-0016](../05-decisions/decision-log.md#adr-0016)):* v1 has no external clients; `CLIENT_VIEWER` remains a defined role whose access is deny-everything, and the approved-reports surface is not built unless ADR-0016 is superseded.
+
+<a id="gl-seat"></a>
+### GL-Seat
+**DE:** Nutzerplatz / Seat. One active tenant member's slot under the subscription's seat allowance ([ADR-0021](../05-decisions/decision-log.md#adr-0021)). Every **active** [`GL-User`](#gl-user) consumes one seat, including the tenant owner; deactivated users and pending invitations consume none. The effective allowance is the subscription's `seatsOverride`, falling back to the plan's `maxSeats`; a downgrade below current usage never removes members — it blocks further seat-consuming team changes instead. Entity shapes: [`ENT-SubscriptionPlan`](../30-data-model/00-data-model.md#ent-subscriptionplan) and [`ENT-TenantSubscription`](../30-data-model/00-data-model.md#ent-tenantsubscription).
 
 <a id="gl-deferreditem"></a>
 ### GL-DeferredItem
@@ -265,7 +276,7 @@ Supported social platforms.
 | `TIKTOK` | TikTok. |
 | `YOUTUBE` | YouTube. |
 
-<a id="enum-mentiontype"></a>
+<a id="enum-monitoredsubjecttype"></a>
 ### ENUM-MonitoredSubjectType
 The kind of thing a [`GL-MonitoredSubject`](#gl-monitoredsubject) watches.
 - `CREATOR` — a tracked agency creator (the v1 roster focus).
@@ -274,6 +285,7 @@ The kind of thing a [`GL-MonitoredSubject`](#gl-monitoredsubject) watches.
 - `HASHTAG` — a hashtag (deferred, DEF-006).
 - `HANDLE` — a social handle (deferred, DEF-006).
 
+<a id="enum-mentiontype"></a>
 ### ENUM-MentionType
 How a [`GL-Mention`](#gl-mention) most likely came about.
 
@@ -402,6 +414,21 @@ Lifecycle of a seeding campaign (see [`GL-Seeding`](#gl-seeding)).
 | `COMPLETED` | Finished. |
 | `CANCELLED` | Called off. |
 
+<a id="enum-seedingtype"></a>
+### ENUM-SeedingType
+The seeding variant recorded on a seeding campaign (see [`GL-Seeding`](#gl-seeding)); the variants are specified in [module-3 §2.5](../50-modules/module-3-crm-seeding.md#req-m3-006) (`REQ-M3-006`, AC-M3-010).
+
+| Value | Meaning |
+|---|---|
+| `GIFTING` | Product sent as a gift; **no** posting obligation (DE: Reines Gifting). |
+| `GIFTING_WITH_POST` | Product sent **with** an agreed posting obligation (DE: Gifting mit Beitragspflicht). |
+| `PAID_PLUS_PRODUCT` | Paid collaboration **plus** product (DE: Bezahlt plus Produkt). |
+| `ORGANIC` | No agency arrangement; coverage arises organically (DE: Organisch). |
+
+**Rule:** an `ORGANIC` seeding run never by itself justifies classifying a resulting Mention as `PAID`/`SEEDED` — the proof rule in [`ENUM-MentionType`](#enum-mentiontype) applies (AC-M3-011).
+
+*Amended 2026-07-07 — as-built reconciliation:* registers the value set implemented as `App\Shared\Enums\SeedingType` and DB-enforced by a `CHECK` constraint on `seeding_campaigns.seeding_type`; see the [decision log](../05-decisions/decision-log.md).
+
 <a id="enum-shipmentstatus"></a>
 ### ENUM-ShipmentStatus
 Lifecycle of a [`GL-Shipment`](#gl-shipment).
@@ -457,6 +484,8 @@ Permission role names (see [`GL-Role`](#gl-role)).
 | `ANALYST` | Works with monitoring/discovery data and reports. |
 | `CLIENT_VIEWER` | External client; sees **only** approved reports for their own brands. |
 
+**Note (Amended 2026-07-07 — as-built reconciliation, see [ADR-0016](../05-decisions/decision-log.md#adr-0016)):** v1 ships no external client access. `CLIENT_VIEWER` stays a defined value (the set remains CLOSED) but is **deny-everything** for all agency data; the approved-reports behaviour described above is void unless ADR-0016 is superseded.
+
 <a id="enum-sectorlabel"></a>
 ### ENUM-SectorLabel
 Content sector labels used by [`GL-SectorClassification`](#gl-sectorclassification).
@@ -493,6 +522,36 @@ Formats a [`GL-Export`](#gl-export) can produce.
 | `PDF` | PDF document. |
 | `EXCEL` | Excel workbook. |
 | `CSV` | Comma-separated values. |
+
+<a id="enum-subscriptionstatus"></a>
+### ENUM-SubscriptionStatus
+Lifecycle state of a tenant's Stripe subscription ([`ENT-TenantSubscription`](../30-data-model/00-data-model.md#ent-tenantsubscription)). Mirrors **Stripe's canonical subscription states** — no invented lifecycle ([ADR-0021](../05-decisions/decision-log.md#adr-0021)).
+
+| Value | Meaning |
+|---|---|
+| `INCOMPLETE` | Created; the first payment has not completed yet. |
+| `INCOMPLETE_EXPIRED` | The first payment never completed; terminal. |
+| `TRIALING` | In a trial period; full product access. |
+| `ACTIVE` | Paid and current; full product access. |
+| `PAST_DUE` | A renewal payment failed; the **dunning grace** window — access retained. |
+| `CANCELED` | Canceled; terminal. |
+| `UNPAID` | Dunning exhausted without payment; product access blocked. |
+| `PAUSED` | Collection paused; product access blocked. |
+
+**Rule:** `ACTIVE`, `TRIALING`, and `PAST_DUE` allow product access; every other state (or no subscription) blocks the product surfaces ([ADR-0021](../05-decisions/decision-log.md#adr-0021)).
+
+*Added 2026-07-12 ([ADR-0021](../05-decisions/decision-log.md#adr-0021)):* implemented as `App\Shared\Enums\SubscriptionStatus`.
+
+<a id="enum-billinginterval"></a>
+### ENUM-BillingInterval
+The renewal cadence of an [`ENT-SubscriptionPlan`](../30-data-model/00-data-model.md#ent-subscriptionplan). Mirrors the Stripe price `recurring.interval` ([ADR-0021](../05-decisions/decision-log.md#adr-0021)).
+
+| Value | Meaning |
+|---|---|
+| `MONTH` | Renews monthly. |
+| `YEAR` | Renews yearly. |
+
+*Added 2026-07-12 ([ADR-0021](../05-decisions/decision-log.md#adr-0021)):* implemented as `App\Shared\Enums\BillingInterval`.
 
 ---
 

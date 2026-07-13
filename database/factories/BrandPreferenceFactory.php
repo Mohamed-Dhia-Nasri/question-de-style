@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Modules\CRM\Models\BrandPreference;
 use App\Modules\CRM\Models\Creator;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -14,6 +15,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class BrandPreferenceFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = BrandPreference::class;
 
     /**
@@ -22,6 +25,7 @@ class BrandPreferenceFactory extends Factory
     public function definition(): array
     {
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'creator_id' => Creator::factory(),
             'preferred_brands' => [fake()->company(), fake()->company()],
             'restricted_brands' => [fake()->company()],

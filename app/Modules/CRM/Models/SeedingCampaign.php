@@ -2,8 +2,11 @@
 
 namespace App\Modules\CRM\Models;
 
+use App\Shared\Casts\AsValueObject;
 use App\Shared\Enums\SeedingCampaignStatus;
 use App\Shared\Enums\SeedingType;
+use App\Shared\Tenancy\BelongsToTenant;
+use App\Shared\ValueObjects\MetricValue;
 use Database\Factories\SeedingCampaignFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -22,16 +25,27 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * the primary product only — the authoritative per-unit product lives on
  * each Shipment. creatorIds is the seeding_campaign_creator pivot.
  *
+ * `spend` is the agency-entered amount spent (MetricValue envelope, tier
+ * CONFIRMED, metric 'spend') — the CPE/CPM input (AC-M3-015). FLAGGED
+ * DEVIATION (spec D1): no canonical ENT-SeedingCampaign field, awaiting a
+ * data-model doc amendment.
+ *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property int|null $campaign_id
  * @property string $name
  * @property SeedingType $seeding_type
  * @property int $brand_id
  * @property int|null $product_id
  * @property SeedingCampaignStatus $status
+ * @property MetricValue|null $spend
  */
 class SeedingCampaign extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<SeedingCampaignFactory> */
     use HasFactory;
 
@@ -42,6 +56,7 @@ class SeedingCampaign extends Model
         'brand_id',
         'product_id',
         'status',
+        'spend',
     ];
 
     /** @return array<string, string> */
@@ -50,6 +65,7 @@ class SeedingCampaign extends Model
         return [
             'seeding_type' => SeedingType::class,
             'status' => SeedingCampaignStatus::class,
+            'spend' => AsValueObject::class.':'.MetricValue::class,
         ];
     }
 
@@ -74,12 +90,25 @@ class SeedingCampaign extends Model
     /** @return BelongsToMany<Creator, $this> */
     public function creators(): BelongsToMany
     {
-        return $this->belongsToMany(Creator::class, 'seeding_campaign_creator')->withTimestamps();
+        $relation = $this->belongsToMany(Creator::class, 'seeding_campaign_creator')->withTimestamps();
+
+        // Stamp the owner's tenant on attach()/sync() (ADR-0019). Template
+        // instances (withCount/whereHas/eager-load) carry no tenant_id and
+        // must not pin a NULL pivot value.
+        return $this->tenant_id === null
+            ? $relation
+            : $relation->withPivotValue('tenant_id', $this->tenant_id);
     }
 
     /** @return HasMany<Shipment, $this> */
     public function shipments(): HasMany
     {
         return $this->hasMany(Shipment::class);
+    }
+
+    /** @return HasMany<DocumentAttachment, $this> */
+    public function documentAttachments(): HasMany
+    {
+        return $this->hasMany(DocumentAttachment::class);
     }
 }

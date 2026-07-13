@@ -19,13 +19,13 @@ depends_on:
   - DP-002
   - DP-003
   - ADR-0008
-last_reviewed: 2026-07-02
+last_reviewed: 2026-07-12
 ---
 
 <a id="metrics-catalog"></a>
 # QDS Data Model — Entities, Envelopes, and Metrics Catalog
 
-This file is the **single home for the shape of every persisted thing** in QDS: the four shared embedded envelopes, all 28 domain entities (`ENT-*`), and the metrics catalog (`MET-*`). A coding agent implementing schemas, DTOs, or migrations reads shapes **here and only here**.
+This file is the **single home for the shape of every persisted thing** in QDS: the four shared embedded envelopes, all 32 domain entities (`ENT-*`), and the metrics catalog (`MET-*`). A coding agent implementing schemas, DTOs, or migrations reads shapes **here and only here**.
 
 Scope guardrails for this file:
 
@@ -38,7 +38,7 @@ Scope guardrails for this file:
 
 ## 1. ER Overview
 
-QDS models a small number of **identity anchors** (a real-world `ENT-Creator` and its per-platform `ENT-PlatformAccount`s), the **public content** those accounts publish (`ENT-ContentItem`, `ENT-Story`, `ENT-Comment`), the **AI-derived observations** layered on top of that content (`ENT-Mention`, `ENT-RecognitionDetection`, `ENT-SentimentAnalysis`, `ENT-SectorClassification`, `ENT-GeoAttribution`, `ENT-AuthenticityAssessment`, `ENT-SuitabilityScore`), the **time-series** of public/derived metrics (`ENT-MetricSnapshot`), the **client → brand → product hierarchy** (`ENT-Client`, `ENT-Brand`, `ENT-Product`), and the **CRM + seeding operational records** (`ENT-Contact`, `ENT-BrandPreference`, `ENT-Campaign`, `ENT-SeedingCampaign`, `ENT-Shipment`, `ENT-CommunicationLog`, `ENT-DocumentAttachment`, `ENT-Task`, `ENT-Shortlist`) plus access control (`ENT-User`, `ENT-Role`). `ENT-MonitoredSubject` is the configuration record that tells Module 1 what to watch for.
+QDS models a small number of **identity anchors** (a real-world `ENT-Creator` and its per-platform `ENT-PlatformAccount`s), the **public content** those accounts publish (`ENT-ContentItem`, `ENT-Story`, `ENT-Comment`), the **AI-derived observations** layered on top of that content (`ENT-Mention`, `ENT-RecognitionDetection`, `ENT-SentimentAnalysis`, `ENT-SectorClassification`, `ENT-GeoAttribution`, `ENT-AuthenticityAssessment`, `ENT-SuitabilityScore`), the **time-series** of public/derived metrics (`ENT-MetricSnapshot`), the **client → brand → product hierarchy** (`ENT-Client`, `ENT-Brand`, `ENT-Product`), and the **CRM + seeding operational records** (`ENT-Contact`, `ENT-BrandPreference`, `ENT-Campaign`, `ENT-SeedingCampaign`, `ENT-Shipment`, `ENT-CommunicationLog`, `ENT-DocumentAttachment`, `ENT-Task`, `ENT-Shortlist`) plus access control (`ENT-User`, `ENT-Role`). `ENT-MonitoredSubject` is the configuration record that tells Module 1 what to watch for. Since [ADR-0019](../05-decisions/decision-log.md#adr-0019) all of the above are owned by the customer account `ENT-Tenant` (see the tenancy note in §3). The **commercial layer** ([ADR-0021](../05-decisions/decision-log.md#adr-0021)) adds the billing records: the deliberately **global** plan catalog `ENT-SubscriptionPlan` plus the tenant-owned `ENT-TenantSubscription` and `ENT-TeamInvitation`.
 
 The four **envelopes** — `Provenance`, `ConfidenceAssessment`, `MetricValue`, `ReachEstimate` — are **embedded value objects**, not standalone tables. They have no module write-owner; they are carried as fields inside owning entities.
 
@@ -57,6 +57,7 @@ Key relationships (verbs read owner→related):
 - A `Client` **has many** `Brand`s; a `Brand` **has many** `Product`s.
 - A `Brand` **is targeted by many** `Campaign`s and `SeedingCampaign`s, and is the entity a `Mention` attributes content to (via its `MonitoredSubject`).
 - A `Shipment` **ships one** `Product` to one `Creator` and, once matched ([REQ-M3-008](../90-traceability/00-req-matrix.md)), **results in** the `ContentItem`s the creator posted — the join that powers **per-product aggregation across creators** (see [analytics model](01-analytics-model.md)).
+- A `Tenant` **holds at most one live** `TenantSubscription` against one `SubscriptionPlan`, and **issues many** `TeamInvitation`s ([ADR-0021](../05-decisions/decision-log.md#adr-0021)).
 
 ```mermaid
 erDiagram
@@ -141,6 +142,9 @@ Wraps any single quantitative metric so its tier travels with the number ([DP-00
 |---|---|---|---|
 | `amount` | number | Yes | The metric magnitude. |
 | `tier` | [`ENUM-MetricTier`](../00-meta/03-glossary.md#enum-metrictier) | Yes | Reference by name. See §4 for which metric maps to which tier. |
+| `metric` | string | No | Optional metric label (e.g. `followers`, `views`, `likes`, `spend`) so a stored **list** of `MetricValue`s stays attributable per metric — needed to reconstruct per-metric growth series from `ENT-MetricSnapshot.metrics`. Omitted when the owning field already names the metric (e.g. `followerCount`). |
+
+*Amended 2026-07-07 — as-built reconciliation:* the optional `metric` label is an as-built addition to this envelope (implemented in `App\Shared\ValueObjects\MetricValue`; serialized only when present).
 
 ### ReachEstimate
 
@@ -158,7 +162,81 @@ Specialized envelope for reach, which is never a plain public count. True unique
 
 For every entity below, the **write-owner and reader modules are canonical in** [`../70-shared/00-ownership-matrix.md`](../70-shared/00-ownership-matrix.md) — this file does not restate them.
 
+> **Tenancy (amended 2026-07-11, [ADR-0019](../05-decisions/decision-log.md#adr-0019)).** The platform is multi-tenant: every entity in this section **except** `ENT-Tenant` itself and the deliberately global plan catalog [`ENT-SubscriptionPlan`](#ent-subscriptionplan) ([ADR-0021](../05-decisions/decision-log.md#adr-0021)) is **tenant-owned** and carries a required `tenantId` (`ENT-Tenant` id) ownership key, not restated in each field table below. Natural keys marked unique on an entity are unique **within a tenant** unless explicitly stated as global (the global keys are `ENT-User.email` and, since [ADR-0021](../05-decisions/decision-log.md#adr-0021), the Stripe identifiers `ENT-Tenant.stripeCustomerId`, `ENT-SubscriptionPlan.code` / `stripePriceId`, and `ENT-TenantSubscription.stripeSubscriptionId`). Cross-tenant links between tenant-owned records are structurally rejected at the database level (composite tenant foreign keys). The operational registers (§ [operational registers](#operational-registers)) are classified per table in that section.
+
+<a id="ent-tenant"></a>
+### ENT-Tenant
+
+The customer account (subscribing organisation) that owns its users, configuration, and business data ([ADR-0019](../05-decisions/decision-log.md#adr-0019)). The single canonical tenancy abstraction — never duplicated by an organization/workspace/team construct. Subscription and seat-allowance fields are deliberately absent until the billing phase. *Amended 2026-07-12 ([ADR-0021](../05-decisions/decision-log.md#adr-0021)):* the billing phase has arrived — the tenant is the billable Stripe customer (`stripeCustomerId` below); subscription state lives on [`ENT-TenantSubscription`](#ent-tenantsubscription) and seat allowances on [`ENT-SubscriptionPlan`](#ent-subscriptionplan), never on this entity.
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `id` | id | Yes | |
+| `name` | string | Yes | Customer organisation name. |
+| `ownerUserId` | `ENT-User` id | No | Exactly one owner in practice (set at provisioning); DB-enforced to belong to this tenant. Nullable only for the create-order chicken-and-egg. Also the subject of the `billing.manage` owner-only gate ([ADR-0021](../05-decisions/decision-log.md#adr-0021)). |
+| `stripeCustomerId` | string | No | The tenant's Stripe customer handle ([ADR-0021](../05-decisions/decision-log.md#adr-0021)) — **globally unique**, **not mass assignable**, and the **only trusted webhook→tenant mapping**. DB column `stripe_customer_id`; force-filled once under a row lock. |
+| `createdAt` | timestamp | Yes | |
+| `updatedAt` | timestamp | Yes | |
+
 > **Stories are `ENT-Story`, never a `ContentItem`.** `STORY` is **not** a member of [`ENUM-ContentType`](../00-meta/03-glossary.md#enum-contenttype); ephemeral stories are modeled exclusively as `ENT-Story`. A `ContentItem` never carries a "story" content-type. (Stated once, here.)
+
+<a id="ent-subscriptionplan"></a>
+### ENT-SubscriptionPlan
+
+*Added 2026-07-12 ([ADR-0021](../05-decisions/decision-log.md#adr-0021)).* A plan in the billing catalog. Deliberately a **global** table (no `tenantId`) — plan definitions are platform vocabulary, the same class as the role/permission definitions of [ADR-0019](../05-decisions/decision-log.md#adr-0019). Written **only** by the idempotent config sync (`qds:billing-sync-plans` from `config/billing.php`); there is **no UI write path**. Plan gating reads this catalog — never plan-code literals.
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `id` | id | Yes | |
+| `code` | string | Yes | Stable machine identifier of the plan. **Globally unique** (the catalog is global). |
+| `name` | string | Yes | Human-facing plan name. |
+| `stripePriceId` | string | No | The Stripe price this plan maps to; **globally unique** when set. Commercial values come from the environment. |
+| `billingInterval` | [`ENUM-BillingInterval`](../00-meta/03-glossary.md#enum-billinginterval) | Yes | Reference by name. |
+| `maxSeats` | number | Yes | The plan's seat allowance (see the seat rule under [`ENT-TenantSubscription`](#ent-tenantsubscription)). |
+| `features` | list of string | No | Entitlement flags (json list) read by plan gating; empty in v1. |
+| `isActive` | boolean | Yes | Whether the plan is currently offered. |
+
+<a id="ent-tenantsubscription"></a>
+### ENT-TenantSubscription
+
+*Added 2026-07-12 ([ADR-0021](../05-decisions/decision-log.md#adr-0021)).* A tenant's Stripe subscription. Tenant-owned (required `tenantId` per the tenancy note above). State **mirrors Stripe's canonical lifecycle** — no invented states — and is written exclusively by the verified-webhook `SubscriptionSynchronizer`; no QDS surface mutates it directly.
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `id` | id | Yes | |
+| `subscriptionPlanId` | `ENT-SubscriptionPlan` id | Yes | The plan subscribed to; the FK is restrictive (a referenced plan cannot be deleted). |
+| `stripeSubscriptionId` | string | Yes | Stripe's subscription identifier; **globally unique**. |
+| `status` | [`ENUM-SubscriptionStatus`](../00-meta/03-glossary.md#enum-subscriptionstatus) | Yes | Reference by name. |
+| `seatsOverride` | number | No | Bespoke per-tenant seat allowance overriding the plan's `maxSeats`. |
+| `cancelAtPeriodEnd` | boolean | Yes | Whether the subscription lapses at the period boundary. |
+| `trialEndsAt` | timestamp | No | |
+| `currentPeriodEndsAt` | timestamp | No | |
+| `endedAt` | timestamp | No | |
+| `lastStripeEventAt` | timestamp | No | `event.created` watermark guarding against out-of-order webhook delivery. |
+
+Two invariants are enforced on this entity at the database level:
+
+- **At most one live subscription per tenant** — a partial unique index on `tenantId` over non-terminal rows (terminal = `CANCELED`, `INCOMPLETE_EXPIRED`).
+- **Seat rule** ([ADR-0021](../05-decisions/decision-log.md#adr-0021)): every **active** `ENT-User` consumes one seat, including the owner; deactivated users and pending invitations consume none. Effective allowance = `seatsOverride` ?? the plan's `maxSeats`; enforcement is transactional under a per-tenant row lock, and a downgrade below current usage never removes members — the tenant goes over-limit, which blocks further seat-consuming team changes.
+
+> The webhook idempotency ledger **`stripe_events`** is **not** an `ENT-*` entity — it is global platform infrastructure of the provider-telemetry class, listed with the [operational registers](#operational-registers).
+
+<a id="ent-teaminvitation"></a>
+### ENT-TeamInvitation
+
+*Added 2026-07-12 ([ADR-0021](../05-decisions/decision-log.md#adr-0021)).* A tenant-bound invitation to join the tenant's team. Tenant-owned (required `tenantId` per the tenancy note above). Only the SHA-256 hash of the single-use 256-bit token is stored — the plaintext token is never persisted.
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `id` | id | Yes | |
+| `email` | string | Yes | Invited address. One **pending** invitation per `(tenantId, lower(email))` — partial unique index. |
+| `role` | [`ENUM-RoleName`](../00-meta/03-glossary.md#enum-rolename) | Yes | Reference by name. Staff values only — never `CLIENT_VIEWER` ([ADR-0016](../05-decisions/decision-log.md#adr-0016)). |
+| `tokenHash` | string | Yes | SHA-256 of the single-use 256-bit invitation token; the plaintext is never stored. |
+| `invitedByUserId` | `ENT-User` id | Yes | Inviting user; composite tenant FK. |
+| `acceptedUserId` | `ENT-User` id | No | The account created on acceptance; composite tenant FK. |
+| `expiresAt` | timestamp | Yes | Config-bound expiry. |
+| `acceptedAt` | timestamp | No | |
+| `revokedAt` | timestamp | No | |
 
 <a id="ent-creator"></a>
 ### ENT-Creator
@@ -185,11 +263,16 @@ One per-platform presence of a `Creator`. **Externally sourced → embeds `Prove
 | `id` | id | Yes | |
 | `creatorId` | `ENT-Creator` id | No | Null until merged/attributed to a `Creator`. |
 | `platform` | [`ENUM-Platform`](../00-meta/03-glossary.md#enum-platform) | Yes | Reference by name. |
-| `handle` | string | Yes | @handle / channel id on that platform. |
+| `handle` | string | Yes | @handle / channel id on that platform. Unique per platform (see amendment below). |
 | `bio` | string | No | Public bio/description. |
 | `externalLinks` | list of url | No | Links from the public profile. Contact auto-extraction (email/phone) is **not** done — see [DEF-002](../20-cross-cutting/01-deferred-register.md). |
 | `followerCount` | `MetricValue` | No | Public follower count (tier `PUBLIC`). |
 | `provenance` | `Provenance` | Yes | Externally sourced; see [DP-002](../20-cross-cutting/00-data-principles.md). |
+
+*Amended 2026-07-07 — as-built reconciliation:* two uniqueness rules are enforced on this entity at the database level:
+
+- **`unique(platform, handle)`** — the `(platform, handle)` pair is treated as the account's external platform identifier, so the same handle on the same platform can never be ingested twice (duplicate prevention, [module 1](../50-modules/module-1-monitoring.md) AC-M1-001). *Amended 2026-07-11 ([ADR-0019](../05-decisions/decision-log.md#adr-0019)):* the key is now **`unique(tenantId, platform, handle)`** — two tenants may track the same public handle; each ingests it independently. **Caveat:** platform handles are mutable and reusable (a creator renaming frees the handle), so the durable long-term key is a platform-native **immutable account id**; that field is not yet captured, and the entity should be re-keyed when it is added.
+- **`unique(creatorId, platform)`** (partial — applies only where `creatorId` is set; migration `2026_07_07_100001`) — the database backstop for the §1 invariant "one per `ENUM-Platform` presence", closing the concurrent-write race that the application-layer guard (`CreatorWriter::assertPlatformFree`) cannot catch. Unassigned accounts (`creatorId` null) are exempt.
 
 <a id="ent-contentitem"></a>
 ### ENT-ContentItem
@@ -202,11 +285,16 @@ A public post/reel/video/etc. **Externally sourced → embeds `Provenance`.**
 | `platformAccountId` | `ENT-PlatformAccount` id | Yes | Author account. |
 | `platform` | [`ENUM-Platform`](../00-meta/03-glossary.md#enum-platform) | Yes | |
 | `contentType` | [`ENUM-ContentType`](../00-meta/03-glossary.md#enum-contenttype) | Yes | Reference by name. `STORY` is never a value here (use `ENT-Story`). |
+| `externalId` | string | No | The platform's native content identifier; `(tenantId, platform, externalId)` is **unique** (tenant-scoped since [ADR-0019](../05-decisions/decision-log.md#adr-0019)), making re-ingestion idempotent within a tenant (no duplicate is ever created for the same platform item in the same tenant). |
 | `caption` | string | No | Public caption/description. |
 | `mediaUrls` | list of url | No | Public media references. |
+| `permalink` | url | No | Canonical **public page URL** of the post/reel/video — never an expiring CDN media URL (those live in `mediaUrls`). Captured at ingestion; feeds the campaign-linked direct-URL metric refresh of [ADR-0017](../05-decisions/decision-log.md#adr-0017). |
 | `publishedAt` | timestamp | No | Publish time as reported by the source. |
 | `publicMetrics` | list of `MetricValue` | No | Views/likes/comments/shares/saves at tier `PUBLIC`. |
+| `humanOverrides` | list of field names | No | Names of fields an analyst has corrected on this record; ingestion skips these fields, so a later poll never clobbers a human correction ([DP-004](../20-cross-cutting/00-data-principles.md)). |
 | `provenance` | `Provenance` | Yes | Externally sourced. |
+
+*Amended 2026-07-07 — as-built reconciliation:* `externalId` (+ its `(platform, externalId)` unique key), `humanOverrides`, and `permalink` (see [ADR-0017](../05-decisions/decision-log.md#adr-0017)) are as-built additions to this shape. All three are nullable: provider payloads do not always carry an identifier or permalink (rows ingested before `permalink` existed gain one on their next re-poll), and `humanOverrides` stays empty until an analyst corrects a field.
 
 <a id="ent-story"></a>
 ### ENT-Story
@@ -218,11 +306,15 @@ Ephemeral story content, archived before expiry ([REQ-M1-004](../90-traceability
 | `id` | id | Yes | |
 | `platformAccountId` | `ENT-PlatformAccount` id | Yes | |
 | `platform` | [`ENUM-Platform`](../00-meta/03-glossary.md#enum-platform) | Yes | |
+| `externalId` | string | No | The platform's native story identifier; `(tenantId, platform, externalId)` is **unique** (tenant-scoped since [ADR-0019](../05-decisions/decision-log.md#adr-0019)), making story re-ingestion idempotent within a tenant. |
 | `mediaUrl` | url | No | Archived media (stored before expiry). |
 | `capturedAt` | timestamp | Yes | When QDS archived it. |
 | `expiresAt` | timestamp | No | Platform expiry time if known. |
 | `publicMetrics` | list of `MetricValue` | No | Any public story metrics, tier `PUBLIC`. |
+| `humanOverrides` | list of field names | No | Names of fields an analyst has corrected; ingestion skips these fields so re-ingestion never clobbers a human correction ([DP-004](../20-cross-cutting/00-data-principles.md)). |
 | `provenance` | `Provenance` | Yes | Externally sourced. |
+
+*Amended 2026-07-07 — as-built reconciliation:* `externalId` (+ its `(platform, externalId)` unique key) and `humanOverrides` are as-built additions to this shape — the same idempotent-ingestion and correction-preservation additions as on `ENT-ContentItem`.
 
 <a id="ent-comment"></a>
 ### ENT-Comment
@@ -313,7 +405,7 @@ A timestamped point in a metric time series; the substrate for historical growth
 | `platformAccountId` | `ENT-PlatformAccount` id | No | Snapshot of an account-level metric. |
 | `contentItemId` | `ENT-ContentItem` id | No | Snapshot of a content-level metric. |
 | `capturedAt` | timestamp | Yes | Snapshot time (defines the series x-axis). |
-| `metrics` | list of `MetricValue` | Yes | Each value carries its own [`ENUM-MetricTier`](../00-meta/03-glossary.md#enum-metrictier). |
+| `metrics` | list of `MetricValue` | Yes | Each value carries its own [`ENUM-MetricTier`](../00-meta/03-glossary.md#enum-metrictier) and, as-built, the optional `metric` label (see [§2](#envelopes)) so per-metric growth series can be reconstructed from the list. |
 | `provenance` | `Provenance` | Yes | Externally sourced; there is no external history API. |
 
 <a id="ent-sectorclassification"></a>
@@ -421,7 +513,10 @@ A marketing campaign ([REQ-M3-005](../90-traceability/00-req-matrix.md)).
 | `status` | [`ENUM-CampaignStatus`](../00-meta/03-glossary.md#enum-campaignstatus) | Yes | Reference by name. |
 | `startAt` | timestamp | No | |
 | `endAt` | timestamp | No | |
-| `creatorIds` | list of `ENT-Creator` ids | No | Participating creators. |
+| `creatorIds` | list of `ENT-Creator` ids | No | Participating creators. Persisted as the `campaign_creator` join table (see amendment below). |
+| `spend` | `MetricValue` | No | Agency-entered total spend (tier `CONFIRMED`, `metric` label `spend`) — the spend input for CPE/CPM ([REQ-M3-009](../90-traceability/00-req-matrix.md), §4 note). |
+
+*Amended 2026-07-07 — as-built reconciliation:* `spend` is an as-built addition (the agency knows what it spent — same tier-`CONFIRMED` precedent as `ENT-Product.unitValue`). `creatorIds` is not stored as an embedded list: it is persisted as the **`campaign_creator`** join table with unique `(campaignId, creatorId)` pairs.
 
 <a id="ent-seedingcampaign"></a>
 ### ENT-SeedingCampaign
@@ -433,11 +528,14 @@ A gifting/seeding program ([REQ-M3-006](../90-traceability/00-req-matrix.md)).
 | `id` | id | Yes | |
 | `campaignId` | `ENT-Campaign` id | No | Parent campaign, if any. |
 | `name` | string | Yes | |
-| `seedingType` | string | Yes | gifting / gifting-with-post / paid+product / organic. |
+| `seedingType` | [`ENUM-SeedingType`](../00-meta/03-glossary.md#enum-seedingtype) | Yes | Reference by name; the four seeding variants (gifting / gifting-with-post / paid+product / organic) are the closed set canonical in the glossary. |
 | `brandId` | `ENT-Brand` id | Yes | Brand being seeded. |
 | `productId` | `ENT-Product` id | No | Primary product; the authoritative per-unit product is on each `ENT-Shipment`. |
 | `status` | [`ENUM-SeedingCampaignStatus`](../00-meta/03-glossary.md#enum-seedingcampaignstatus) | Yes | Reference by name. |
-| `creatorIds` | list of `ENT-Creator` ids | No | Seeded creators. |
+| `creatorIds` | list of `ENT-Creator` ids | No | Seeded creators. Persisted as the `seeding_campaign_creator` join table (see amendment below). |
+| `spend` | `MetricValue` | No | Agency-entered total spend for the seeding run (tier `CONFIRMED`, `metric` label `spend`) — the spend input for CPE/CPM ([REQ-M3-009](../90-traceability/00-req-matrix.md), §4 note). |
+
+*Amended 2026-07-07 — as-built reconciliation:* `seedingType` was originally typed here as a free string; the value set is now the closed [`ENUM-SeedingType`](../00-meta/03-glossary.md#enum-seedingtype) (DB-enforced by a `CHECK` on `seeding_campaigns.seeding_type`). `spend` is an as-built addition (same shape as `ENT-Campaign.spend`). `creatorIds` is persisted as the **`seeding_campaign_creator`** join table with unique `(seedingCampaignId, creatorId)` pairs.
 
 <a id="ent-shipment"></a>
 ### ENT-Shipment
@@ -459,7 +557,9 @@ A physical shipment within a seeding campaign ([REQ-M3-007](../90-traceability/0
 | `postingRequired` | boolean | No | Whether a post was agreed. |
 | `posted` | boolean | No | Whether the creator posted about the product. |
 | `postedAt` | timestamp | No | Publish time of the resulting content. |
-| `resultingContentIds` | list of `ENT-ContentItem` ids | No | Content matched to this shipment via [REQ-M3-008](../90-traceability/00-req-matrix.md) — the join to metrics. |
+| `resultingContentIds` | list of `ENT-ContentItem` ids | No | Content matched to this shipment via [REQ-M3-008](../90-traceability/00-req-matrix.md) — the join to metrics. Persisted as the `shipment_resulting_content` join table (see amendment below). |
+
+*Amended 2026-07-07 — as-built reconciliation:* `resultingContentIds` is not stored as an embedded list: it is persisted as the **`shipment_resulting_content`** join table with unique `(shipmentId, contentItemId)` pairs, so `FACT-SeedingContent` in the [analytics model](01-analytics-model.md) can join it directly.
 
 <a id="ent-communicationlog"></a>
 ### ENT-CommunicationLog
@@ -472,7 +572,7 @@ A logged interaction with a creator ([REQ-M3-004](../90-traceability/00-req-matr
 | `creatorId` | `ENT-Creator` id | Yes | Counterparty. |
 | `campaignId` | `ENT-Campaign` id | No | Context, if any. |
 | `channel` | string | Yes | Email / DM / call / etc. |
-| `direction` | string | Yes | inbound / outbound. |
+| `direction` | string | Yes | inbound / outbound. *Amended 2026-07-07 — as-built reconciliation:* a **closed two-value set** (`inbound` \| `outbound`) enforced at the application layer (form validation); the column stays a plain string — no glossary `ENUM-*` is registered and no DB `CHECK` exists. |
 | `summary` | string | Yes | What happened. |
 | `occurredAt` | timestamp | Yes | |
 
@@ -486,9 +586,12 @@ A stored document/attachment ([REQ-M3-010](../90-traceability/00-req-matrix.md))
 | `id` | id | Yes | |
 | `creatorId` | `ENT-Creator` id | No | Attached to a creator. |
 | `campaignId` | `ENT-Campaign` id | No | Attached to a campaign. |
+| `seedingCampaignId` | `ENT-SeedingCampaign` id | No | Attached to a seeding run. |
 | `fileName` | string | Yes | |
 | `storageUrl` | url | Yes | Reference to stored blob. |
 | `uploadedAt` | timestamp | Yes | |
+
+*Amended 2026-07-07 — as-built reconciliation:* `seedingCampaignId` is an as-built addition — documents attach to creators, campaigns, **or seeding runs** ([module 3](../50-modules/module-3-crm-seeding.md) §2.9). Any combination of the three anchors may be set (no XOR constraint), and deleting a referenced record is restricted while attachments exist (restrict-on-delete, matching the sibling anchors).
 
 <a id="ent-task"></a>
 ### ENT-Task
@@ -504,6 +607,9 @@ A task / deadline / follow-up ([REQ-M3-011](../90-traceability/00-req-matrix.md)
 | `dueAt` | timestamp | No | |
 | `creatorId` | `ENT-Creator` id | No | Related creator. |
 | `campaignId` | `ENT-Campaign` id | No | Related campaign. |
+| `reminderSentAt` | timestamp | No | Idempotency stamp for the one-time deadline reminder: `NULL` until the reminder fires, stamped once, never re-fired. |
+
+*Amended 2026-07-07 — as-built reconciliation:* `reminderSentAt` is an as-built addition backing the deadline reminder of [REQ-M3-011](../90-traceability/00-req-matrix.md). The v1 reminder channel is **in-app only** (the tasks UI's overdue/due-soon affordances plus an audited `task.reminder_fired` event) — no email/push provider exists in the frozen stack ([ADR-0001](../05-decisions/decision-log.md#adr-0001)).
 
 <a id="ent-user"></a>
 ### ENT-User
@@ -513,10 +619,15 @@ An application user ([REQ-M3-012](../90-traceability/00-req-matrix.md)).
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `id` | id | Yes | |
-| `email` | string | Yes | Login identity. |
+| `tenantId` | `ENT-Tenant` id | Yes | The user's single tenant ([ADR-0019](../05-decisions/decision-log.md#adr-0019)) — one user belongs to exactly one tenant. |
+| `email` | string | Yes | Login identity. **Globally** unique across tenants (the one deliberate global natural key). |
 | `displayName` | string | Yes | |
 | `roleId` | `ENT-Role` id | Yes | Exactly one role. |
 | `active` | boolean | Yes | |
+
+*Amended 2026-07-07 — as-built reconciliation:* the role assignment is not a literal `role_id` column — roles live on the permission library's standard pivot, and the **exactly-one-role invariant is enforced at the application layer** (every assignment path replaces the full role set; regression-tested). No parallel role tables exist.
+
+*Amended 2026-07-11 ([ADR-0019](../05-decisions/decision-log.md#adr-0019)):* `tenantId` added. Role and permission **definitions** stay global (they are platform vocabulary, not tenant data); role **membership** is per-user and therefore per-tenant.
 
 <a id="ent-role"></a>
 ### ENT-Role
@@ -526,13 +637,13 @@ An access-control role ([REQ-M3-012](../90-traceability/00-req-matrix.md)).
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `id` | id | Yes | |
-| `name` | [`ENUM-RoleName`](../00-meta/03-glossary.md#enum-rolename) | Yes | Reference by name. `CLIENT_VIEWER` sees only approved reports for its brands. |
+| `name` | [`ENUM-RoleName`](../00-meta/03-glossary.md#enum-rolename) | Yes | Reference by name. `CLIENT_VIEWER` sees only approved reports for its brands. *Amended 2026-07-07 (see [ADR-0016](../05-decisions/decision-log.md#adr-0016)):* v1 ships **no external client access** — `CLIENT_VIEWER` remains a defined value whose access is deny-everything for agency data (its sole grant opens the empty containment page); the approved-reports surface described here is void unless ADR-0016 is superseded. |
 | `permissions` | list of string | Yes | Permission grants for the role. |
 
 <a id="ent-client"></a>
 ### ENT-Client
 
-An agency client — the top of the client → brand → product hierarchy ([REQ-M3-005](../90-traceability/00-req-matrix.md)). `CLIENT_VIEWER` reporting is scoped to a client's brands.
+An agency client — the top of the client → brand → product hierarchy ([REQ-M3-005](../90-traceability/00-req-matrix.md)). `CLIENT_VIEWER` reporting is scoped to a client's brands. *Amended 2026-07-07 (see [ADR-0016](../05-decisions/decision-log.md#adr-0016)):* the `CLIENT_VIEWER` reporting surface is void in v1 (no external client access); the entity itself is unaffected — it anchors the brand/product hierarchy regardless.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
@@ -569,6 +680,17 @@ A product / SKU under a brand. It is the key that lets seeding results be **aggr
 | `category` | [`ENUM-SectorLabel`](../00-meta/03-glossary.md#enum-sectorlabel) | No | Reference by name. |
 
 ---
+
+<a id="operational-registers"></a>
+### Operational registers (non-ENT infrastructure)
+
+*Added 2026-07-07 — as-built reconciliation.* This document canonically owns the **domain** model (`ENT-*` shapes and shared envelopes). The application additionally persists **operational registers** — pipeline telemetry, work-queue bookkeeping, and configuration — that are deliberately **not** `ENT-*` entities and are not governed by §3: they carry no domain semantics, appear in no analytics fact/rollup, and may change shape with the pipeline that owns them (their migrations are their reference). As built they are:
+
+- **Ingestion observability / bookkeeping** — `provider_calls`, `provider_health_states`, `ingestion_alerts`, `quarantined_records` (redacted, retention-limited per [DP-005](../20-cross-cutting/00-data-principles.md)), `provider_response_samples`, `ingestion_cycles` (incl. `creator_id` for on-demand single-creator runs and `full_depth` for the periodic sweep of [ADR-0017](../05-decisions/decision-log.md#adr-0017)).
+- **Enrichment infrastructure** — `hashtag_lists`, `content_hashtags`, `review_actions` ([DP-004](../20-cross-cutting/00-data-principles.md) correction history), `enrichment_runs`, `emv_configurations`, `emv_results` (REQ-M1-011 EMV configuration and outputs).
+- **Billing / webhook infrastructure** — `stripe_events` ([ADR-0021](../05-decisions/decision-log.md#adr-0021)): the webhook idempotency ledger (`stripeEventId` unique, `type`, `createdAt`) — **append-only and payload-free**.
+
+*Amended 2026-07-11 ([ADR-0019](../05-decisions/decision-log.md#adr-0019)) — tenancy classification of the registers:* the **ingestion observability registers are GLOBAL platform telemetry** (one shared provider stack; no `tenantId`), while the **enrichment registers are tenant-owned** (they hold tenant configuration and per-content outputs and carry `tenantId`). Also tenant-owned: `export_jobs` and `monitoring_plan_settings`; `audit_logs` carries a *nullable* tenant attribution (system actions have none). *Amended 2026-07-12 ([ADR-0021](../05-decisions/decision-log.md#adr-0021)):* `stripe_events` is **GLOBAL platform infrastructure** (one shared webhook endpoint; no `tenantId`) — the provider-telemetry class, analogous to `analytics_watermarks`.
 
 ## 4. Metrics Catalog (MET-*)
 

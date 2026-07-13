@@ -10,6 +10,7 @@ use App\Platform\Analytics\RollupReader;
 use App\Platform\Enrichment\Metrics\DerivedMetricsService;
 use App\Shared\Enums\ContentType;
 use App\Shared\Enums\Platform;
+use App\Shared\Livewire\Concerns\RunsCreatorMonitoringNow;
 use Illuminate\Contracts\View\View;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -25,9 +26,13 @@ use Livewire\WithPagination;
  * Posting frequency renders Unavailable (no canonical formula — flagged
  * decision gap); audience demographics render Unavailable (DEF-001);
  * contact auto-extraction renders Unavailable (DEF-002).
+ *
+ * Hosts the shared "run monitoring now" lever (RunsCreatorMonitoringNow)
+ * so an operator can poll this creator on demand from the detail page.
  */
 class CreatorDetail extends Component
 {
+    use RunsCreatorMonitoringNow;
     use WithPagination;
 
     public Creator $creator;

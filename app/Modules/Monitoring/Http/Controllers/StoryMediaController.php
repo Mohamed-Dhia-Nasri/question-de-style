@@ -28,6 +28,16 @@ class StoryMediaController
 
         abort_if($story->media_url === null, 404, 'No archived media for this story.');
 
+        // Mirror stream()'s existence check so a story whose file was pruned
+        // (retention delete committed but the media_url=null update lost to a
+        // crash, or any archival gap) yields a clean 404 here instead of a
+        // signed URL that 404s only when the bytes are fetched.
+        abort_unless(
+            Storage::disk((string) config('qds.ingestion.media_disk'))->exists($story->media_url),
+            404,
+            'No archived media for this story.',
+        );
+
         $expiresAt = now()->addMinutes(
             max(1, (int) config('qds.ingestion.signed_url_ttl_minutes')),
         );
@@ -38,10 +48,17 @@ class StoryMediaController
         ]);
     }
 
-    /** Serve the media for a valid, unexpired signature. */
+    /**
+     * Serve the media. The route enforces `signed` (valid, unexpired
+     * signature) and `auth`; here we re-authorize via StoryPolicy so the
+     * byte stream is not the single point that trusts the signature alone —
+     * the tenant backstop denies a story owned by another tenant even if a
+     * signed URL leaks, and the route binding already resolves the story
+     * tenant-scoped.
+     */
     public function stream(Request $request, Story $story): StreamedResponse
     {
-        abort_unless($request->hasValidSignature(), 403);
+        Gate::authorize('view', $story);
 
         abort_if($story->media_url === null, 404);
 

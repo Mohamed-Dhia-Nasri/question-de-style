@@ -7,6 +7,7 @@ use App\Platform\Export\Writers\CsvWriter;
 use App\Platform\Export\Writers\PdfWriter;
 use App\Platform\Export\Writers\XlsxWriter;
 use App\Shared\Enums\ExportFormat;
+use App\Shared\Tenancy\TenantContext;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -36,7 +37,13 @@ class DefaultExportService implements ExportService
             ExportFormat::Pdf => $this->pdf->write($document),
         };
 
-        $path = 'exports/'.now()->format('Y/m').'/'.Str::uuid().'.'.self::extension($format);
+        // ADR-0019: new artifacts live under a per-tenant prefix (existing
+        // rows keep their stored paths — readers only ever use file_path
+        // from the ledger row). GenerateExportJob guarantees the context.
+        $tenantId = app(TenantContext::class)->id();
+        $prefix = $tenantId !== null ? "tenants/{$tenantId}/" : '';
+
+        $path = $prefix.'exports/'.now()->format('Y/m').'/'.Str::uuid().'.'.self::extension($format);
 
         Storage::disk(self::disk())->put($path, $bytes);
 

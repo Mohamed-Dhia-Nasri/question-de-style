@@ -8,6 +8,7 @@ use App\Platform\Export\ReportBuilder;
 use App\Platform\Export\ReportFilters;
 use App\Platform\Export\Support\ExportJobStatus;
 use App\Shared\Enums\ExportFormat;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -17,6 +18,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class ExportJobFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = ExportJob::class;
 
     public function definition(): array
@@ -24,6 +27,7 @@ class ExportJobFactory extends Factory
         $filters = ReportFilters::validate(['grain' => 'month']);
 
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'user_id' => User::factory(),
             'report' => ReportBuilder::MONITORING_SUMMARY,
             'format' => ExportFormat::Csv,

@@ -5,6 +5,7 @@ namespace App\Modules\Monitoring\Models;
 use App\Modules\CRM\Models\Campaign;
 use App\Shared\Casts\AsValueObject;
 use App\Shared\Enums\MentionType;
+use App\Shared\Tenancy\BelongsToTenant;
 use App\Shared\ValueObjects\ConfidenceAssessment;
 use App\Shared\ValueObjects\Provenance;
 use Database\Factories\MentionFactory;
@@ -25,7 +26,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * otherwise LIKELY_ORGANIC/UNKNOWN — organic is never asserted as fact and
  * no CONFIRMED_ORGANIC value exists (ADR-0008).
  *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property int $monitored_subject_id
  * @property int|null $content_item_id
  * @property int|null $story_id
@@ -36,6 +40,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class Mention extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<MentionFactory> */
     use HasFactory;
 

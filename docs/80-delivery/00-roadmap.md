@@ -309,6 +309,9 @@ in v1 ([ADR-0005](../05-decisions/decision-log.md#adr-0005)). Low-confidence
 content-to-campaign matches (`REQ-M3-008`) route to a review queue per `DP-004`.
 `REQ-M3-012` completes the permission behaviour — notably `CLIENT_VIEWER` sees
 only approved reports for their brands — on the auth substrate stood up in P0.
+*(v1 scope — [ADR-0016](../05-decisions/decision-log.md#adr-0016): no external
+client access ships in v1; the `CLIENT_VIEWER` approved-reports surface is
+dropped and the role stays defined, deny-everything.)*
 
 Because no CRUD-generation framework is used
 ([ADR-0012](../05-decisions/decision-log.md#adr-0012)), every Module 3 surface —
@@ -342,7 +345,8 @@ results ([DEF-003](../20-cross-cutting/01-deferred-register.md)); OAuth analytic
 
 **Goal.** Operationalise and harden the whole platform for production: data-quality
 and health monitoring, cost/rate-limit governance, media storage lifecycle,
-GDPR tooling, and white-label client reporting.
+GDPR tooling, and white-label client reporting *(void per
+[ADR-0016](../05-decisions/decision-log.md#adr-0016) — no external clients in v1)*.
 
 **Delivers (operational capabilities across all modules):**
 
@@ -353,7 +357,9 @@ GDPR tooling, and white-label client reporting.
 - Media storage lifecycle management (notably expiring `ENT-Story` media).
 - GDPR tooling: retention limits and data-subject deletion, satisfying `DP-005`.
 - White-label client reports (building on `SVC-Export` and the `CLIENT_VIEWER`
-  behaviour delivered in P3).
+  behaviour delivered in P3). *(Void —
+  [ADR-0016](../05-decisions/decision-log.md#adr-0016): no external clients in
+  v1 — unless that ADR is superseded.)*
 
 **Exit criteria.**
 
@@ -362,6 +368,8 @@ GDPR tooling, and white-label client reporting.
 - Media (including expiring stories) follows a defined storage lifecycle.
 - Retention and deletion workflows satisfy `DP-005` (GDPR + platform ToS).
 - White-label client reports are producible for a brand's approved reports.
+  *(Void — [ADR-0016](../05-decisions/decision-log.md#adr-0016) — unless
+  superseded.)*
 
 **Deferred, excluded from this phase (and all of v1):**
 [DEF-001](../20-cross-cutting/01-deferred-register.md),
@@ -379,7 +387,7 @@ GDPR tooling, and white-label client reporting.
 | **P1 — Monitoring** | `REQ-M1-001`..`REQ-M1-012`; `SVC-Monitoring`, `SVC-EnrichmentAI`, `SVC-Export`; sentiment, comment analysis, recognition, EMV, dashboards + exports | P0; [ADR-0006](../05-decisions/decision-log.md#adr-0006); AI sources in [data source matrix](../40-integrations/00-data-source-matrix.md); [Module 1 spec](../50-modules/module-1-monitoring.md) |
 | **P2 — Discovery** | `REQ-M2-001`..`REQ-M2-011`; `SVC-Discovery`; search, filters, geo, unified profile, sector classification, avg+median performance, authenticity, collaboration detection, scoring, comparison, shortlists | P0; P1 (`ENT-Creator` identity + `ENT-MetricSnapshot`); [Module 2 spec](../50-modules/module-2-discovery.md); [ownership matrix](../70-shared/00-ownership-matrix.md) |
 | **P3 — CRM & Seeding** | `REQ-M3-001`..`REQ-M3-013`; `SVC-CRM`; central DB + identity merge, contacts, preferences, comms, campaigns, seeding, shipments, matching, results, documents, tasks, roles/permissions — all CRUD hand-built as Livewire components (no Filament) | P0; P1 (`ENT-Mention`, `ENT-ContentItem`, `ENT-MetricSnapshot`); [ADR-0005](../05-decisions/decision-log.md#adr-0005), [ADR-0012](../05-decisions/decision-log.md#adr-0012); [Module 3 spec](../50-modules/module-3-crm-seeding.md); [ownership matrix](../70-shared/00-ownership-matrix.md) |
-| **P4 — Hardening** | Data-quality/health monitoring (TikTok fragility), cost/rate-limit governance, media storage lifecycle, GDPR tooling, white-label client reports | P1, P2, P3; `DP-005`; [data source matrix](../40-integrations/00-data-source-matrix.md) |
+| **P4 — Hardening** | Data-quality/health monitoring (TikTok fragility), cost/rate-limit governance, media storage lifecycle, GDPR tooling, white-label client reports *(void per [ADR-0016](../05-decisions/decision-log.md#adr-0016))* | P1, P2, P3; `DP-005`; [data source matrix](../40-integrations/00-data-source-matrix.md) |
 
 ---
 
@@ -398,7 +406,8 @@ GDPR tooling, and white-label client reporting.
   means they build on real data rather than mocks.
 - **Hardening (P4) comes last** because operational concerns — source-breakage
   detection, cost governance, media lifecycle, GDPR tooling, and white-label
-  reporting — are only meaningful once the modules that generate the load,
+  reporting *(void per [ADR-0016](../05-decisions/decision-log.md#adr-0016))* —
+  are only meaningful once the modules that generate the load,
   the data, and the reports exist.
 
 ---

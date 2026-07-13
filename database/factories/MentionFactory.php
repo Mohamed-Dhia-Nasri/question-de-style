@@ -13,6 +13,7 @@ use App\Shared\Enums\VerificationStatus;
 use App\Shared\ValueObjects\ConfidenceAssessment;
 use App\Shared\ValueObjects\Provenance;
 use Carbon\CarbonImmutable;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -25,6 +26,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class MentionFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = Mention::class;
 
     /**
@@ -35,6 +38,7 @@ class MentionFactory extends Factory
         $type = fake()->randomElement([MentionType::LikelyOrganic, MentionType::Unknown]);
 
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'monitored_subject_id' => MonitoredSubject::factory(),
             'content_item_id' => ContentItem::factory(),
             'story_id' => null,

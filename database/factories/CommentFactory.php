@@ -9,6 +9,7 @@ use App\Shared\Enums\MetricTier;
 use App\Shared\ValueObjects\MetricValue;
 use App\Shared\ValueObjects\Provenance;
 use Carbon\CarbonImmutable;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -21,6 +22,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class CommentFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = Comment::class;
 
     /**
@@ -29,6 +32,7 @@ class CommentFactory extends Factory
     public function definition(): array
     {
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'content_item_id' => ContentItem::factory(),
             'parent_comment_id' => null,
             'author_handle' => fake()->userName(),

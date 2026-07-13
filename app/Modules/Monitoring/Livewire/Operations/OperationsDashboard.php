@@ -2,6 +2,8 @@
 
 namespace App\Modules\Monitoring\Livewire\Operations;
 
+use App\Modules\Monitoring\Models\MetricSnapshot;
+use App\Modules\Monitoring\Models\Story;
 use App\Platform\Export\Models\ExportJob;
 use App\Platform\Export\Support\ExportJobStatus;
 use App\Platform\Ingestion\Models\IngestionAlert;
@@ -9,6 +11,7 @@ use App\Platform\Ingestion\Models\IngestionCycle;
 use App\Platform\Ingestion\Observability\ProviderHealthService;
 use App\Platform\Ingestion\SourceRegistry;
 use App\Shared\Authorization\PermissionsCatalog;
+use App\Shared\Tenancy\TenantContext;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\DB;
 use Livewire\Component;
@@ -30,8 +33,10 @@ class OperationsDashboard extends Component
         abort_unless(auth()->user()?->can(PermissionsCatalog::OPERATIONS_VIEW) === true, 403);
     }
 
-    public function render(ProviderHealthService $health): View
+    public function render(ProviderHealthService $health, TenantContext $context): View
     {
+        $tenantId = $context->id();
+
         $lastCycle = IngestionCycle::query()
             ->where('stories_only', false)
             ->latest('started_at')
@@ -57,18 +62,28 @@ class OperationsDashboard extends Component
                 ->orderByDesc('failed_at')
                 ->limit(5)
                 ->get(['id', 'queue', 'failed_at']),
+            // Freshness reflects the VIEWER's own ingest activity only —
+            // metric_snapshots/stories are tenant-owned, so a raw max() would
+            // leak whether other tenants are actively ingesting (ADR-0019).
             'snapshotFreshness' => [
-                'account' => DB::table('metric_snapshots')->whereNotNull('platform_account_id')->max('captured_at'),
-                'content' => DB::table('metric_snapshots')->whereNotNull('content_item_id')->max('captured_at'),
+                'account' => MetricSnapshot::query()->whereNotNull('platform_account_id')->max('captured_at'),
+                'content' => MetricSnapshot::query()->whereNotNull('content_item_id')->max('captured_at'),
             ],
-            'storyFreshness' => DB::table('stories')->max('captured_at'),
+            'storyFreshness' => Story::query()->max('captured_at'),
             'analyticsRefresh' => $lastRefresh,
             'failedExports' => ExportJob::query()
                 ->where('status', ExportJobStatus::Failed)
                 ->latest('failed_at')
                 ->limit(5)
                 ->get(),
+            // Data-quality alerts carry the tenant whose roster their message
+            // names; show the viewer's own plus the global provider-level
+            // incidents (tenant_id NULL), never a competitor's roster.
             'alerts' => IngestionAlert::query()
+                ->where(function ($q) use ($tenantId): void {
+                    $q->whereNull('tenant_id')
+                        ->when($tenantId !== null, fn ($q) => $q->orWhere('tenant_id', $tenantId));
+                })
                 ->latest('created_at')
                 ->limit(8)
                 ->get(),

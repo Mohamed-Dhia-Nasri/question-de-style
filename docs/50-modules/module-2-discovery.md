@@ -185,6 +185,12 @@ principles, and sources by name/link only.
 <a id="req-m2-003"></a>
 ### 3.3 REQ-M2-003 — Geographic attribution with confidence
 
+> **v1 note ([ADR-0018](../05-decisions/decision-log.md#adr-0018)).** Ahead of P2,
+> operators may assign a creator's geography manually from the CRM; the entry is a
+> `GeoAttribution` at `HUMAN_REVIEWED` written through the M2-owned `CreatorGeography`
+> seam. The automatic inference below stays deferred with this phase and never
+> overwrites an operator assignment (DP-004).
+
 - **AC-M2-003a** — Discovery writes a `GeoAttribution` record per creator/account.
   Because location is inferred, `GeoAttribution` carries a `ConfidenceAssessment`
   envelope and is **never** presented as a fact (DP-003).

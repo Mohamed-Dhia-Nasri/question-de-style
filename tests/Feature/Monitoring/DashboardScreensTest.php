@@ -6,18 +6,27 @@ use App\Models\User;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\Monitoring\Livewire\Dashboard\ContentDetail;
+use App\Modules\Monitoring\Livewire\Dashboard\CreatorDetail;
 use App\Modules\Monitoring\Livewire\Dashboard\CreatorsIndex;
 use App\Modules\Monitoring\Models\ContentItem;
+use App\Modules\Monitoring\Models\MetricSnapshot;
 use App\Modules\Monitoring\Models\MonitoredSubject;
 use App\Modules\Monitoring\Models\SentimentAnalysis;
+use App\Platform\Analytics\Contracts\AnalyticsService;
+use App\Platform\Ingestion\Jobs\RunCreatorCycleJob;
+use App\Shared\Authorization\PermissionsCatalog;
 use App\Shared\Enums\ConfidenceLevel;
+use App\Shared\Enums\MetricTier;
 use App\Shared\Enums\MonitoredSubjectType;
 use App\Shared\Enums\Platform;
 use App\Shared\Enums\RoleName;
 use App\Shared\Enums\SentimentLabel;
 use App\Shared\Enums\VerificationStatus;
 use App\Shared\ValueObjects\ConfidenceAssessment;
+use App\Shared\ValueObjects\MetricValue;
+use App\Shared\ValueObjects\Provenance;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -98,6 +107,59 @@ class DashboardScreensTest extends TestCase
             ->assertSet('sortField', 'display_name')
             ->set('sortField', 'users.email') // tampered query string
             ->assertOk();
+    }
+
+    public function test_creators_index_sorts_by_rollup_metrics_and_account_counts(): void
+    {
+        $roster = function (string $name, int $accounts): Creator {
+            $creator = Creator::factory()->create(['display_name' => $name]);
+            MonitoredSubject::factory()->create([
+                'subject_type' => MonitoredSubjectType::Creator->value,
+                'creator_id' => $creator->id,
+                'active' => true,
+            ]);
+            foreach (array_slice([Platform::Instagram, Platform::TikTok], 0, $accounts) as $platform) {
+                PlatformAccount::factory()->create(['creator_id' => $creator->id, 'platform' => $platform]);
+            }
+
+            return $creator;
+        };
+
+        $snapshotFollowers = function (Creator $creator, int $followers): void {
+            MetricSnapshot::create([
+                'platform_account_id' => $creator->platformAccounts()->first()->id,
+                'captured_at' => '2026-06-15 12:00:00',
+                'metrics' => [new MetricValue($followers, MetricTier::Public, 'followers')],
+                'provenance' => new Provenance('SRC-apify-instagram-scraper', now()->toImmutable(), 'v1'),
+            ]);
+        };
+
+        $big = $roster('Big Creator', 2);
+        $small = $roster('Small Creator', 1);
+        $roster('Bare Creator', 1); // no snapshots → no rollup bucket
+
+        $snapshotFollowers($big, 9000);
+        $snapshotFollowers($small, 100);
+
+        app(AnalyticsService::class)->refreshRollups();
+
+        $this->actingAs($this->analyst());
+
+        // Followers asc → smallest first; a creator WITHOUT a rollup bucket
+        // sorts last in EITHER direction (unavailable never masquerades as
+        // the biggest or smallest value).
+        Livewire::test(CreatorsIndex::class)
+            ->call('sortBy', 'followers')
+            ->assertSeeInOrder(['Small Creator', 'Big Creator', 'Bare Creator'])
+            ->call('sortBy', 'followers') // toggle → desc
+            ->assertSeeInOrder(['Big Creator', 'Small Creator', 'Bare Creator']);
+
+        // Account count sorts on the real column; ties break by name.
+        Livewire::test(CreatorsIndex::class)
+            ->call('sortBy', 'platform_accounts_count')
+            ->assertSeeInOrder(['Bare Creator', 'Small Creator', 'Big Creator'])
+            ->call('sortBy', 'platform_accounts_count')
+            ->assertSeeInOrder(['Big Creator', 'Bare Creator', 'Small Creator']);
     }
 
     public function test_creators_index_keeps_filter_state_in_the_query_string(): void
@@ -189,6 +251,47 @@ class DashboardScreensTest extends TestCase
             ->assertSee('Queue depth')
             ->assertSee('Analytics rollups')
             ->assertSee('SRC-clockworks-tiktok-scraper');
+    }
+
+    public function test_creator_detail_run_monitoring_now_queues_an_on_demand_cycle(): void
+    {
+        config(['qds.ingestion.enabled' => true]);
+
+        $creator = Creator::factory()->create();
+        PlatformAccount::factory()->create(['creator_id' => $creator->id]);
+
+        $this->actingAs($this->analyst());
+
+        Queue::fake();
+
+        Livewire::test(CreatorDetail::class, ['creator' => $creator])
+            ->call('runMonitoringNow')
+            ->assertOk()
+            ->assertDispatched('notify', type: 'success');
+
+        $this->assertDatabaseHas('monitored_subjects', ['creator_id' => $creator->id, 'active' => true]);
+        Queue::assertPushed(fn (RunCreatorCycleJob $job) => $job->creatorId === $creator->id);
+    }
+
+    public function test_creator_detail_run_monitoring_now_requires_the_roster_permission(): void
+    {
+        config(['qds.ingestion.enabled' => true]);
+
+        $creator = Creator::factory()->create();
+        PlatformAccount::factory()->create(['creator_id' => $creator->id]);
+
+        // monitoring.view mounts the page; the run lever needs monitoring.manage.
+        $viewer = User::factory()->create();
+        $viewer->givePermissionTo(PermissionsCatalog::MONITORING_VIEW);
+        $this->actingAs($viewer);
+
+        Queue::fake();
+
+        Livewire::test(CreatorDetail::class, ['creator' => $creator])->assertOk()
+            ->call('runMonitoringNow')
+            ->assertForbidden();
+
+        Queue::assertNotPushed(RunCreatorCycleJob::class);
     }
 
     public function test_client_viewer_is_denied_on_every_module1_surface(): void

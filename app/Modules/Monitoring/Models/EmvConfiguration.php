@@ -4,6 +4,7 @@ namespace App\Modules\Monitoring\Models;
 
 use App\Models\User;
 use App\Platform\Enrichment\Support\EmvConfigurationStatus;
+use App\Shared\Tenancy\BelongsToTenant;
 use Carbon\CarbonImmutable;
 use Database\Factories\EmvConfigurationFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -25,7 +26,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * FLAGGED DEVIATION: not a canonical ENT-* — awaiting a data-model doc
  * amendment (see the create_emv_tables migration).
  *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property string $name
  * @property string $formula_version
  * @property string $rate_card_version
@@ -42,6 +46,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class EmvConfiguration extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<EmvConfigurationFactory> */
     use HasFactory;
 

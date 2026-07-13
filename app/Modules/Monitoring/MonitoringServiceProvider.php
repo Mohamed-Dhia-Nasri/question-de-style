@@ -2,12 +2,17 @@
 
 namespace App\Modules\Monitoring;
 
+use App\Modules\Monitoring\Contracts\ContentMatchFeedback;
+use App\Modules\Monitoring\Contracts\RosterEnrollment;
 use App\Modules\Monitoring\Livewire\Dashboard\ContentDetail;
 use App\Modules\Monitoring\Livewire\Dashboard\CreatorDetail;
 use App\Modules\Monitoring\Livewire\Dashboard\CreatorsIndex;
+use App\Modules\Monitoring\Livewire\Dashboard\HomeOverview;
 use App\Modules\Monitoring\Livewire\Dashboard\MonitoringOverview;
 use App\Modules\Monitoring\Livewire\Emv\EmvConfigurationsIndex;
 use App\Modules\Monitoring\Livewire\Exports\ExportsIndex;
+use App\Modules\Monitoring\Livewire\Hashtags\HashtagListsIndex;
+use App\Modules\Monitoring\Livewire\Operations\MonitoringPlanSettings;
 use App\Modules\Monitoring\Livewire\Operations\OperationsDashboard;
 use App\Modules\Monitoring\Livewire\Review\ReviewQueueIndex;
 use App\Modules\Monitoring\Models\Comment;
@@ -36,6 +41,8 @@ use App\Modules\Monitoring\Policies\RecognitionDetectionPolicy;
 use App\Modules\Monitoring\Policies\ReviewActionPolicy;
 use App\Modules\Monitoring\Policies\SentimentAnalysisPolicy;
 use App\Modules\Monitoring\Policies\StoryPolicy;
+use App\Modules\Monitoring\Services\ContentMatchFeedbackRecorder;
+use App\Modules\Monitoring\Services\RosterEnrollmentService;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Livewire\Livewire;
@@ -53,6 +60,19 @@ use Livewire\Livewire;
  */
 class MonitoringServiceProvider extends ServiceProvider
 {
+    public function register(): void
+    {
+        // XMC-002 (module-3 §5): M3 confirms/denies content↔campaign matches;
+        // the M1-side recorder is the only writer of mentions.campaign_id
+        // (ENT-Mention is M1-owned — ownership matrix).
+        $this->app->bind(ContentMatchFeedback::class, ContentMatchFeedbackRecorder::class);
+
+        // Roster enrollment seam: the CRM's creator lifecycle enrolls /
+        // withdraws roster subjects through this M1-side writer
+        // (ENT-MonitoredSubject is M1-owned — ownership matrix).
+        $this->app->bind(RosterEnrollment::class, RosterEnrollmentService::class);
+    }
+
     public function boot(): void
     {
         $this->loadRoutesFrom(__DIR__.'/routes.php');
@@ -75,11 +95,14 @@ class MonitoringServiceProvider extends ServiceProvider
 
         Livewire::component('monitoring.review-queue-index', ReviewQueueIndex::class);
         Livewire::component('monitoring.emv-configurations-index', EmvConfigurationsIndex::class);
+        Livewire::component('monitoring.hashtag-lists-index', HashtagListsIndex::class);
         Livewire::component('monitoring.monitoring-overview', MonitoringOverview::class);
+        Livewire::component('monitoring.home-overview', HomeOverview::class);
         Livewire::component('monitoring.creators-index', CreatorsIndex::class);
         Livewire::component('monitoring.creator-detail', CreatorDetail::class);
         Livewire::component('monitoring.content-detail', ContentDetail::class);
         Livewire::component('monitoring.operations-dashboard', OperationsDashboard::class);
+        Livewire::component('monitoring.monitoring-plan-settings', MonitoringPlanSettings::class);
         Livewire::component('monitoring.exports-index', ExportsIndex::class);
     }
 }

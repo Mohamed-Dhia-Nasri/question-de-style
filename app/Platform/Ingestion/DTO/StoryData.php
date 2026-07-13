@@ -26,5 +26,12 @@ final readonly class StoryData
         /** @var list<MetricValue> public story metrics, tier PUBLIC */
         public array $publicMetrics,
         public Provenance $provenance,
+        /**
+         * Handle of the account that posted the story, as reported by the
+         * provider. Required to attribute items when one BATCHED actor run
+         * covers many roster handles (cost plan rec 3); null on legacy
+         * single-handle fetches where the account is already known.
+         */
+        public ?string $ownerHandle = null,
     ) {}
 }

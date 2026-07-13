@@ -10,6 +10,7 @@ depends_on:
   - ADR-0001
   - ADR-0002
   - ADR-0003
+  - ADR-0017
   - DP-002
   - DEF-003
   - ../30-data-model/00-data-model.md
@@ -59,6 +60,7 @@ For each platform and each data need, the exact `SRC-*` provider and its provide
 | Stories (before expiry) | `SRC-apify-instagram-story-details` (PUBLIC) | — | — |
 | Comments (with timestamps, likes, replies) — **Deferred in v1** ([DEF-005](../20-cross-cutting/01-deferred-register.md#def-005)) | `SRC-apify-instagram-comment-scraper` (PUBLIC) | `SRC-clockworks-tiktok-scraper` (PUBLIC) | `SRC-youtube-data-api-v3` (PUBLIC) |
 | Keyword / hashtag / topic search + discovery | `SRC-apify-instagram-scraper` (PUBLIC) | `SRC-clockworks-tiktok-scraper` (PUBLIC) | `SRC-youtube-data-api-v3` (PUBLIC) |
+| Direct post-URL metric refresh of campaign-linked content — *added 2026-07-07, as-built reconciliation ([ADR-0017](../05-decisions/decision-log.md#adr-0017))* | `SRC-apify-instagram-scraper` (PUBLIC, `directUrls` input) | — (actor has no per-URL input; covered by the refresh window + full-depth sweep, [ADR-0017](../05-decisions/decision-log.md#adr-0017)) | — |
 | In-reel transcript (optional add-on) | `SRC-apify-instagram-reel-scraper` (transcript add-on, PUBLIC) | — | — |
 | Contact details (email / phone) | Deferred — [DEF-002](../20-cross-cutting/01-deferred-register.md#def-002) (profile scraper does **not** return email/phone; manual CRM entry only) | Deferred — [DEF-002](../20-cross-cutting/01-deferred-register.md#def-002) | Deferred — [DEF-002](../20-cross-cutting/01-deferred-register.md#def-002) |
 | Audience demographics (country/age/gender) | Deferred — [DEF-001](../20-cross-cutting/01-deferred-register.md#def-001) | Deferred — [DEF-001](../20-cross-cutting/01-deferred-register.md#def-001) | Deferred — [DEF-001](../20-cross-cutting/01-deferred-register.md#def-001) |
@@ -129,16 +131,16 @@ One short contract per provider: what it returns and its key limits. These are t
 
 ### Instagram (Apify actors) — provider tier PUBLIC
 
-- **`SRC-apify-instagram-scraper`** — Primary Instagram actor. Returns posts, reels, comments, and profiles, and supports hashtag + keyword search. Used as the general-purpose IG collector and IG discovery entry point.
+- **`SRC-apify-instagram-scraper`** — Primary Instagram actor. Returns posts, reels, comments, and profiles, and supports hashtag + keyword search. Used as the general-purpose IG collector and IG discovery entry point. *Amended 2026-07-07 — as-built reconciliation ([ADR-0017](../05-decisions/decision-log.md#adr-0017)):* now **ACTIVE**, used **exclusively** for direct post-URL metric refresh of campaign-linked content that has aged out of the roster's refresh window (operation `content.refresh`, adapter `InstagramDirectUrlAdapter`): one run re-fetches current public counts for known post/reel page URLs via the actor's `directUrls` input; multi-URL batches use the async run endpoint. Default actor `apify~instagram-scraper`, env-overridable via `APIFY_ACTOR_INSTAGRAM_DIRECT`. It is **not** a roster-polling source (verified price-identical-or-worse than the specialized actors for feed polling) — roster polling stays on the specialized actors above/below.
 - **`SRC-apify-instagram-reel-scraper`** — Returns reels including play/view counts. Offers an **optional transcript add-on** (in-reel spoken text).
 - **`SRC-apify-instagram-profile-scraper`** — Returns profile metrics, bio, and links. **Limit: does NOT return email or phone** — contact details are manual-entry only ([DEF-002](../20-cross-cutting/01-deferred-register.md#def-002)).
 - **`SRC-apify-instagram-post-scraper`** — Returns posts (image posts / carousels).
 - **`SRC-apify-instagram-comment-scraper`** — Returns comments with timestamps, like counts, and threaded replies.
-- **`SRC-apify-instagram-story-details`** — `louisdeconinck` actor. Returns stories. **Limit / feature: NO login required.** Used to archive stories before expiry.
+- **`SRC-apify-instagram-story-details`** — `louisdeconinck` actor. Returns stories. **Limit / feature: NO login required.** Used to archive stories before expiry. *Amended 2026-07-07 — as-built reconciliation ([ADR-0017](../05-decisions/decision-log.md#adr-0017)):* the **underlying actor deviates** from the `louisdeconinck` actor named above — that actor is paid/rental and its `instagram-story-details` slug 404s, so the as-built default is `datavoyantlab~advanced-instagram-stories-scraper` (env-overridable via `APIFY_ACTOR_INSTAGRAM_STORY`). The `SRC-*` contract is unchanged; only the underlying Apify actor differs. The replacement actor is **also paid/rental**: on an Apify account without access it returns an access-error item (surfaced as an AUTHENTICATION failure), so the `stories_enabled` kill switch keeps it dark and the cost circuit breaker stops re-billing failed runs (both per [ADR-0017](../05-decisions/decision-log.md#adr-0017)). Story polling runs only in the story-only cycle (removed from full cycles) as batched multi-username runs — see the cost-posture note below.
 
 ### TikTok — provider tier PUBLIC
 
-- **`SRC-clockworks-tiktok-scraper`** — The **only** TikTok provider. Returns views, likes, comments, shares, and saves; supports keyword search (videos + profiles); returns profiles and comments. **Limit: Apify-only; no official TikTok API is used** ([ADR-0002](../05-decisions/decision-log.md#adr-0002)). Subject to anti-bot fragility — see roadmap P4 data-quality monitoring.
+- **`SRC-clockworks-tiktok-scraper`** — The **only** TikTok provider. Returns views, likes, comments, shares, and saves; supports keyword search (videos + profiles); returns profiles and comments. **Limit: Apify-only; no official TikTok API is used** ([ADR-0002](../05-decisions/decision-log.md#adr-0002)). Subject to anti-bot fragility — see roadmap P4 data-quality monitoring. *Amended 2026-07-07 — as-built reconciliation ([ADR-0017](../05-decisions/decision-log.md#adr-0017)):* profile/channel metadata is read from the content run's embedded `authorMeta` (every video item carries the full profile stats), so **no separate TikTok profile run is dispatched** — the §2.1 profile row is unchanged (same source), it just costs no extra actor run.
 
 ### YouTube — provider tier PUBLIC
 
@@ -149,6 +151,21 @@ One short contract per provider: what it returns and its key limits. These are t
 - **`SRC-google-cloud-vision`** — Image OCR via `TEXT_DETECTION` and brand logo detection via `LOGO_DETECTION`.
 - **`SRC-google-speech-to-text`** — Audio transcript / spoken-brand detection. **German models enabled** (DACH focus).
 - **`SRC-google-video-intelligence`** — Video-wide on-screen text + logo detection. **Optional** deep-analysis pass over full video content.
+
+### Internal (non-provider) source — manual entry
+
+<a id="src-agency-manual-entry"></a>
+
+- **`SRC-agency-manual-entry`** — **Internal marker, not an external provider** ([ADR-0015](../05-decisions/decision-log.md#adr-0015)). Identifies a record whose values were entered by hand by agency staff in the CRM — chiefly operator-curated platform accounts under [ADR-0014](../05-decisions/decision-log.md#adr-0014). Valid as a `Provenance.source` ([DP-002](../20-cross-cutting/00-data-principles.md#dp-002)); `fetchedAt` is the entry time and `sourceVersion` names the entry surface. It performs no collection and has no cost, rate limit, or ToS surface — the frozen **external** stack ([ADR-0001](../05-decisions/decision-log.md#adr-0001)) is unchanged.
+
+### Cost-posture actor inputs (ADR-0017)
+
+*Added 2026-07-07 — as-built reconciliation ([ADR-0017](../05-decisions/decision-log.md#adr-0017)).* The provider **set** above is unchanged (still frozen per [ADR-0001](../05-decisions/decision-log.md#adr-0001)/[ADR-0002](../05-decisions/decision-log.md#adr-0002)); what changed is the **inputs** the actors are called with and the dispatch shape, to control provider cost. All knobs are env-tunable (`qds.ingestion.*`); the rationale and full decision live in [ADR-0017](../05-decisions/decision-log.md#adr-0017), not here.
+
+- **Refresh-window date filters** — roster content polls send the provider-side date window (default **14 days**): `onlyPostsNewerThan` on `SRC-apify-instagram-post-scraper` / `SRC-apify-instagram-reel-scraper`, `oldestPostDateUnified` on `SRC-clockworks-tiktok-scraper`. A periodic **full-depth sweep** (default every 7 days, persisted as `ingestion_cycles.full_depth`) omits the filter to catch late engagement.
+- **`skipPinnedPosts: true`** — sent on Instagram post and reel content polls.
+- **Batched story usernames** — story runs send many `usernames` per run (default 25 handles/run, via the async run endpoint), amortizing the story actor's per-run start fee; story polling is gated by the `stories_enabled` kill switch.
+- **Direct-URL refresh input** — `SRC-apify-instagram-scraper` is called with `directUrls` (known post/reel page URLs) only, never as a feed poller (see its contract above).
 
 ---
 
@@ -168,6 +185,7 @@ Rules that apply to every row:
 | `SRC-apify-instagram-profile-scraper` | Profile identity, bio, links | [`ENT-Creator`](../30-data-model/00-data-model.md), [`ENT-PlatformAccount`](../30-data-model/00-data-model.md) |
 | `SRC-apify-instagram-profile-scraper` | Public follower / following counts | [`ENT-PlatformAccount`](../30-data-model/00-data-model.md) (as `MetricValue`, tier PUBLIC) |
 | `SRC-apify-instagram-post-scraper`, `SRC-apify-instagram-scraper` | Image posts / carousels + public counts | [`ENT-ContentItem`](../30-data-model/00-data-model.md) (`ContentType` IMAGE_POST / CAROUSEL) |
+| `SRC-apify-instagram-scraper` (direct-URL refresh, `content.refresh` — *added 2026-07-07, [ADR-0017](../05-decisions/decision-log.md#adr-0017)*) | Current public counts + permalink for known post/reel page URLs | [`ENT-ContentItem`](../30-data-model/00-data-model.md) (metric refresh of existing campaign-linked items) |
 | `SRC-apify-instagram-reel-scraper` | Reels + play/view counts | [`ENT-ContentItem`](../30-data-model/00-data-model.md) (`ContentType` REEL) |
 | `SRC-apify-instagram-reel-scraper` (transcript add-on) | In-reel transcript | [`ENT-RecognitionDetection`](../30-data-model/00-data-model.md) (`SPOKEN_BRAND` context) |
 | `SRC-apify-instagram-story-details` | Story frames / metadata (pre-expiry) | [`ENT-Story`](../30-data-model/00-data-model.md) |
@@ -181,6 +199,7 @@ Rules that apply to every row:
 | `SRC-google-cloud-vision` | OCR text (`TEXT_DETECTION`), logos (`LOGO_DETECTION`) | [`ENT-RecognitionDetection`](../30-data-model/00-data-model.md) (`IMAGE_TEXT_OCR`, `LOGO`) |
 | `SRC-google-speech-to-text` | Transcript / spoken brand mentions | [`ENT-RecognitionDetection`](../30-data-model/00-data-model.md) (`SPOKEN_BRAND`) |
 | `SRC-google-video-intelligence` | Video-wide on-screen text + logos | [`ENT-RecognitionDetection`](../30-data-model/00-data-model.md) (`ON_SCREEN_TEXT`, `LOGO`) |
+| `SRC-agency-manual-entry` (internal, [ADR-0015](../05-decisions/decision-log.md#adr-0015)) | Operator-typed account identity (platform, handle, bio, links) | [`ENT-PlatformAccount`](../30-data-model/00-data-model.md) |
 
 > [!NOTE]
 > **`STORY` is not a `ContentType`.** Instagram stories map exclusively to `ENT-Story`, never to `ENT-ContentItem`. The `ContentType` enum and this rule are defined once in the [data model](../30-data-model/00-data-model.md) / [glossary](../00-meta/03-glossary.md#enum-contenttype).

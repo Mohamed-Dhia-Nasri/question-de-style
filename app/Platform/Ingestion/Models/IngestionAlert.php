@@ -13,7 +13,12 @@ use Illuminate\Database\Eloquent\Model;
  * flooding. Messages are sanitized before they get here. Operational
  * infrastructure, not an ENT-*.
  *
+ * tenant_id is OPTIONAL (ADR-0019): provider-level incidents stay global
+ * (NULL); the per-tenant data-quality scan stamps the owning tenant so the
+ * operations dashboard shows an operator only their own roster alerts.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property AlertType $alert_type
  * @property string|null $source
  * @property string $fingerprint
@@ -27,6 +32,7 @@ use Illuminate\Database\Eloquent\Model;
 class IngestionAlert extends Model
 {
     protected $fillable = [
+        'tenant_id',
         'alert_type',
         'source',
         'fingerprint',

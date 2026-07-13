@@ -5,6 +5,7 @@ namespace App\Platform\Enrichment\Jobs;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Platform\Enrichment\EnrichmentPipeline;
 use App\Platform\Ingestion\Jobs\Concerns\IngestionJobBehaviour;
+use App\Shared\Tenancy\TenantContext;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -61,7 +62,15 @@ class EnrichContentItemJob implements ShouldBeUnique, ShouldQueue
         }
 
         try {
-            $pipeline->run($contentItem, $this->correlationId, max(0, $this->attempts() - 1));
+            // ADR-0019: enrichment sweeps run tenant-less — the content item
+            // row is the aggregate root; running the pipeline under its
+            // tenant makes every enrichment write (mentions, detections,
+            // sentiment, hashtags, EMV results, enrichment runs) stamp the
+            // right owner, and scopes the per-tenant ACTIVE EmvConfiguration.
+            app(TenantContext::class)->runAs(
+                $contentItem->tenant_id,
+                fn () => $pipeline->run($contentItem, $this->correlationId, max(0, $this->attempts() - 1)),
+            );
         } catch (Throwable $e) {
             $this->handleProviderFailure($e);
         }

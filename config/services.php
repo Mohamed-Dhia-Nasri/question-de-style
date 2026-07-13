@@ -46,7 +46,14 @@ return [
     'apify' => [
         'token' => env('APIFY_TOKEN'),
         'base_url' => env('APIFY_BASE_URL', 'https://api.apify.com/v2'),
-        'timeout' => (int) env('APIFY_TIMEOUT_SECONDS', 240),
+        // Sync run-sync-get-dataset-items calls 408 at Apify's 300s wall; a
+        // client-side abort of a run that later completes server-side is
+        // still billed and would then be retried as a SECOND billed run —
+        // so the client timeout must sit ABOVE the server wall (rec 9).
+        'timeout' => (int) env('APIFY_TIMEOUT_SECONDS', 330),
+        // Overall deadline for the async run+poll path (batched runs that
+        // would blow the 300s sync wall — stories, direct-URL refresh).
+        'async_timeout' => (int) env('APIFY_ASYNC_TIMEOUT_SECONDS', 900),
         'actors' => [
             // SRC-apify-instagram-profile-scraper
             'instagram_profile' => env('APIFY_ACTOR_INSTAGRAM_PROFILE', 'apify~instagram-profile-scraper'),
@@ -66,6 +73,12 @@ return [
             'instagram_story' => env('APIFY_ACTOR_INSTAGRAM_STORY', 'datavoyantlab~advanced-instagram-stories-scraper'),
             // SRC-clockworks-tiktok-scraper — the ONLY TikTok source (ADR-0002)
             'tiktok' => env('APIFY_ACTOR_TIKTOK', 'clockworks~tiktok-scraper'),
+            // SRC-apify-instagram-scraper — the general actor, used ONLY for
+            // direct post-URL metric refresh of campaign-linked content
+            // (qds.ingestion.campaign_refresh). Roster polling stays on the
+            // specialized actors: verified price-identical or cheaper, and
+            // the general actor returns one content type per run.
+            'instagram_direct' => env('APIFY_ACTOR_INSTAGRAM_DIRECT', 'apify~instagram-scraper'),
         ],
     ],
 
@@ -109,6 +122,25 @@ return [
         'api_key' => env('GOOGLE_VIDEO_INTELLIGENCE_API_KEY'),
         'base_url' => env('GOOGLE_VIDEO_INTELLIGENCE_BASE_URL', 'https://videointelligence.googleapis.com/v1'),
         'timeout' => (int) env('GOOGLE_VIDEO_INTELLIGENCE_TIMEOUT_SECONDS', 300),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Stripe (ADR-0021 — SaaS billing processor, NOT a data provider)
+    |--------------------------------------------------------------------------
+    | Outside the frozen SRC-* data-provider set (ADR-0001): Stripe processes
+    | payments and never supplies platform data. Secrets come ONLY from the
+    | environment, travel ONLY in headers, and never appear in logs or
+    | exceptions (the ApifyClient invariants). Card data never touches QDS —
+    | checkout and payment-method entry happen on Stripe-hosted pages.
+    */
+    'stripe' => [
+        'secret' => env('STRIPE_SECRET'),
+        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+        'base_url' => env('STRIPE_BASE_URL', 'https://api.stripe.com/v1'),
+        'timeout' => (int) env('STRIPE_TIMEOUT_SECONDS', 30),
+        // Max accepted Stripe-Signature timestamp skew (replay window).
+        'webhook_tolerance_seconds' => (int) env('STRIPE_WEBHOOK_TOLERANCE_SECONDS', 300),
     ],
 
 ];

@@ -16,6 +16,13 @@ use Carbon\CarbonImmutable;
  */
 final readonly class ShipmentEvidence
 {
+    /**
+     * Signal grammar for shipment references: the SEEDED proving signal the
+     * classifier records (AC-M1-003) and the SeededContentLinker later
+     * parses back into a shipment id (REQ-M3-008).
+     */
+    public const REFERENCE_PREFIX = 'shipment-record:';
+
     public function __construct(
         /** Stable reference for signals, e.g. "shipment-record:42". */
         public string $reference,
@@ -31,5 +38,22 @@ final readonly class ShipmentEvidence
     public function anchorDate(): ?CarbonImmutable
     {
         return $this->deliveredAt ?? $this->shippedAt;
+    }
+
+    public static function referenceFor(int $shipmentId): string
+    {
+        return self::REFERENCE_PREFIX.$shipmentId;
+    }
+
+    /** Parse a classification signal back into a shipment id, if it is one. */
+    public static function shipmentIdFrom(string $signal): ?int
+    {
+        if (! str_starts_with($signal, self::REFERENCE_PREFIX)) {
+            return null;
+        }
+
+        $id = substr($signal, strlen(self::REFERENCE_PREFIX));
+
+        return ctype_digit($id) ? (int) $id : null;
     }
 }

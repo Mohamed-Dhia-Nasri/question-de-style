@@ -8,6 +8,7 @@ use App\Shared\Casts\AsValueObject;
 use App\Shared\Casts\AsValueObjectCollection;
 use App\Shared\Enums\ContentType;
 use App\Shared\Enums\Platform;
+use App\Shared\Tenancy\BelongsToTenant;
 use App\Shared\ValueObjects\MetricValue;
 use App\Shared\ValueObjects\Provenance;
 use Carbon\CarbonImmutable;
@@ -27,13 +28,17 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * has no STORY value (rule F8); ephemeral stories are the separate
  * ENT-Story entity.
  *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property int $platform_account_id
  * @property Platform $platform
  * @property ContentType $content_type
  * @property string|null $external_id
  * @property string|null $caption
  * @property array<int, string>|null $media_urls
+ * @property string|null $permalink canonical public page URL (never a CDN media URL)
  * @property CarbonImmutable|null $published_at
  * @property list<MetricValue>|null $public_metrics
  * @property Provenance $provenance
@@ -41,6 +46,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class ContentItem extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<ContentItemFactory> */
     use HasFactory;
 
@@ -51,6 +58,7 @@ class ContentItem extends Model
         'external_id',
         'caption',
         'media_urls',
+        'permalink',
         'published_at',
         'public_metrics',
         'provenance',

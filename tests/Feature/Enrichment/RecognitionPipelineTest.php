@@ -5,6 +5,7 @@ namespace Tests\Feature\Enrichment;
 use App\Modules\CRM\Models\Brand;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\RecognitionDetection;
+use App\Platform\Enrichment\Recognition\AudioExtractor;
 use App\Platform\Enrichment\Recognition\RecognitionService;
 use App\Platform\Ingestion\Exceptions\ProviderCallException;
 use App\Platform\Ingestion\Models\IngestionAlert;
@@ -43,6 +44,10 @@ class RecognitionPipelineTest extends TestCase
 
     private const IMAGE_BYTES = 'fake-image-bytes';
 
+    private const VIDEO_BYTES = 'fake-video-bytes';
+
+    private const AUDIO_BYTES = 'fake-flac-bytes';
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -64,6 +69,36 @@ class RecognitionPipelineTest extends TestCase
             'content_type' => ContentType::ImagePost,
             'media_urls' => [self::MEDIA_URL],
         ]);
+    }
+
+    private function reel(): ContentItem
+    {
+        return ContentItem::factory()->create([
+            'content_type' => ContentType::Reel,
+            'media_urls' => [self::MEDIA_URL],
+        ]);
+    }
+
+    /** Stub the ffmpeg stage: fixed derived-audio bytes (or none). */
+    private function fakeAudio(?string $audioBytes, bool $ffmpegPresent = true): void
+    {
+        $this->app->instance(AudioExtractor::class, new class($audioBytes, $ffmpegPresent) extends AudioExtractor
+        {
+            public function __construct(
+                private readonly ?string $audioBytes,
+                private readonly bool $ffmpegPresent,
+            ) {}
+
+            public function isAvailable(): bool
+            {
+                return $this->ffmpegPresent;
+            }
+
+            public function extract(string $videoBytes): ?string
+            {
+                return $this->audioBytes;
+            }
+        });
     }
 
     /** @param array<string, mixed> $annotationSet */
@@ -386,5 +421,182 @@ class RecognitionPipelineTest extends TestCase
         $detection->refresh();
         $this->assertSame(VerificationStatus::HumanCorrected, $detection->assessment->verificationStatus);
         $this->assertSame(['human-review:corrected'], $detection->assessment->signals);
+    }
+
+    public function test_spoken_brand_in_video_audio_becomes_a_detection(): void
+    {
+        config(['services.google_speech.api_key' => 'test-speech-key']);
+
+        $this->brand();
+        $content = $this->reel();
+        $this->fakeAudio(self::AUDIO_BYTES);
+
+        $transcript = 'heute zeige ich euch die neue Lumiere Palette';
+
+        Http::fake([
+            '93.184.216.34/*' => Http::response(self::VIDEO_BYTES),
+            'speech.googleapis.com/*' => Http::response([
+                'results' => [['alternatives' => [['transcript' => $transcript, 'confidence' => 0.91]]]],
+            ]),
+        ]);
+
+        $result = $this->enrich($content);
+
+        $this->assertSame('completed', $result['status']);
+        $this->assertSame(1, $result['created']);
+        // The deep-pass provider stays optional and separately reported.
+        $this->assertContains('video-intelligence:not-configured', $result['skipped']);
+
+        $detection = RecognitionDetection::query()->sole()->fresh();
+
+        $this->assertSame(RecognitionType::SpokenBrand, $detection->recognition_type);
+        $this->assertSame($transcript, $detection->detected_text);
+        // The lexicon resolves the spoken alias to the canonical CRM brand.
+        $this->assertSame('Maison Lumière', $detection->detected_brand);
+        $this->assertContains('spoken-brand-transcript-match:Maison Lumière', $detection->assessment->signals);
+        $this->assertSame(SourceRegistry::GOOGLE_SPEECH_TO_TEXT, $detection->provenance->source);
+        $this->assertSame('google-speech-to-text-v1', $detection->provenance->sourceVersion);
+
+        $call = ProviderCall::query()->where('source', SourceRegistry::GOOGLE_SPEECH_TO_TEXT)->sole();
+        $this->assertSame('speech.recognize', $call->operation);
+        $this->assertSame(CallOutcome::Success, $call->outcome);
+    }
+
+    public function test_speech_request_carries_header_key_and_inline_derived_audio_only(): void
+    {
+        config(['services.google_speech.api_key' => 'test-speech-key']);
+
+        $this->brand();
+        $content = $this->reel();
+        $this->fakeAudio(self::AUDIO_BYTES);
+
+        Http::fake([
+            '93.184.216.34/*' => Http::response(self::VIDEO_BYTES),
+            'speech.googleapis.com/*' => Http::response(['results' => []]),
+        ]);
+
+        $this->enrich($content);
+
+        Http::assertSent(function (Request $request): bool {
+            if (! str_contains($request->url(), 'speech.googleapis.com')) {
+                return false;
+            }
+
+            return $request->hasHeader('X-Goog-Api-Key', 'test-speech-key')
+                // The key never travels in the URL.
+                && ! str_contains($request->url(), 'key=')
+                // The DERIVED audio is sent inline (DP-005) — never raw
+                // video bytes, never a URL.
+                && ($request->data()['audio']['content'] ?? null) === base64_encode(self::AUDIO_BYTES)
+                && ! str_contains($request->body(), self::MEDIA_URL);
+        });
+    }
+
+    public function test_transcript_without_a_known_brand_is_not_stored(): void
+    {
+        config(['services.google_speech.api_key' => 'test-speech-key']);
+
+        $this->brand();
+        $content = $this->reel();
+        $this->fakeAudio(self::AUDIO_BYTES);
+
+        Http::fake([
+            '93.184.216.34/*' => Http::response(self::VIDEO_BYTES),
+            'speech.googleapis.com/*' => Http::response([
+                'results' => [['alternatives' => [['transcript' => 'danke fürs zuschauen bis morgen', 'confidence' => 0.95]]]],
+            ]),
+        ]);
+
+        $result = $this->enrich($content);
+
+        // Free speech with no brand signal is not a recognition hit.
+        $this->assertSame('completed-empty', $result['status']);
+        $this->assertSame(0, RecognitionDetection::query()->count());
+    }
+
+    public function test_video_with_no_derivable_audio_skips_spoken_brand(): void
+    {
+        config(['services.google_speech.api_key' => 'test-speech-key']);
+
+        $this->brand();
+        $content = $this->reel();
+        $this->fakeAudio(null); // muted or undecodable media
+
+        Http::fake([
+            '93.184.216.34/*' => Http::response(self::VIDEO_BYTES),
+            'speech.googleapis.com/*' => Http::response(['results' => []]),
+        ]);
+
+        $result = $this->enrich($content);
+
+        // Unavailable, never fabricated — and Google is never called.
+        $this->assertContains('speech:audio-extraction-failed', $result['skipped']);
+        $this->assertSame(0, RecognitionDetection::query()->count());
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'speech.googleapis.com'));
+    }
+
+    public function test_transient_speech_failure_degrades_gracefully_without_failing_the_run(): void
+    {
+        config(['services.google_speech.api_key' => 'test-speech-key']);
+
+        $this->brand();
+        $content = $this->reel();
+        $this->fakeAudio(self::AUDIO_BYTES);
+
+        Http::fake([
+            '93.184.216.34/*' => Http::response(self::VIDEO_BYTES),
+            // Speech rate-limits — a transient provider failure.
+            'speech.googleapis.com/*' => Http::response(['error' => ['message' => 'RESOURCE_EXHAUSTED']], 429),
+        ]);
+
+        // Speech is the newest, most rate-limit-prone stage and now bills per
+        // video — a transient failure must NOT throw out of enrich() and fail
+        // the whole run (which would re-bill vision/video on every retry). It
+        // is recorded and SPOKEN_BRAND stays unavailable (review audio#2).
+        $result = $this->enrich($content);
+
+        $this->assertContains('speech:provider-error', $result['skipped']);
+        $this->assertSame(0, RecognitionDetection::query()->count());
+
+        $call = ProviderCall::query()->where('source', SourceRegistry::GOOGLE_SPEECH_TO_TEXT)->sole();
+        $this->assertSame(CallOutcome::Failure, $call->outcome);
+    }
+
+    public function test_missing_ffmpeg_reports_its_own_skip_marker(): void
+    {
+        config(['services.google_speech.api_key' => 'test-speech-key']);
+
+        $this->brand();
+        $content = $this->reel();
+        $this->fakeAudio(self::AUDIO_BYTES, ffmpegPresent: false);
+
+        Http::fake([
+            '93.184.216.34/*' => Http::response(self::VIDEO_BYTES),
+            'speech.googleapis.com/*' => Http::response(['results' => []]),
+        ]);
+
+        $result = $this->enrich($content);
+
+        $this->assertContains('speech:ffmpeg-unavailable', $result['skipped']);
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'speech.googleapis.com'));
+    }
+
+    public function test_unconfigured_speech_is_skipped_for_video_media(): void
+    {
+        // No speech key (only vision, from setUp) — the audio stage never runs.
+        $this->brand();
+        $content = $this->reel();
+        $this->fakeAudio(self::AUDIO_BYTES);
+
+        Http::fake([
+            '93.184.216.34/*' => Http::response(self::VIDEO_BYTES),
+            'speech.googleapis.com/*' => Http::response(['results' => []]),
+        ]);
+
+        $result = $this->enrich($content);
+
+        $this->assertContains('speech:not-configured', $result['skipped']);
+        $this->assertSame(0, ProviderCall::query()->where('source', SourceRegistry::GOOGLE_SPEECH_TO_TEXT)->count());
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'speech.googleapis.com'));
     }
 }

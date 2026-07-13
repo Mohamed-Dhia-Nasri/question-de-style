@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Campaign;
 use App\Platform\Enrichment\Support\HashtagScope;
+use App\Shared\Tenancy\BelongsToTenant;
 use Database\Factories\HashtagListFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -20,7 +21,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * FLAGGED DEVIATION: not a canonical ENT-* — awaiting a data-model doc
  * amendment (see the create_enrichment_tables migration).
  *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property HashtagScope $scope
  * @property int|null $campaign_id
  * @property int|null $brand_id
@@ -32,6 +36,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class HashtagList extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<HashtagListFactory> */
     use HasFactory;
 

@@ -18,4 +18,12 @@ enum AlertType: string
     case JobFailed = 'JOB_FAILED';
     /** A provider is answering with rate-limit responses — budget/quota at risk. */
     case RateLimitRisk = 'RATE_LIMIT_RISK';
+    /**
+     * The DATA looks wrong even though calls succeed (P4 data-quality):
+     * follower counts collapsing to zero or dropping implausibly fast —
+     * the signature of silent scraper breakage (TikTok fragility).
+     */
+    case MetricAnomaly = 'METRIC_ANOMALY';
+    /** A monitored account's snapshot time series has stopped growing. */
+    case SnapshotGap = 'SNAPSHOT_GAP';
 }

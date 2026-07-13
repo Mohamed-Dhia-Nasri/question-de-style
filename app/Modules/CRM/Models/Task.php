@@ -4,6 +4,7 @@ namespace App\Modules\CRM\Models;
 
 use App\Models\User;
 use App\Shared\Enums\TaskStatus;
+use App\Shared\Tenancy\BelongsToTenant;
 use Carbon\CarbonImmutable;
 use Database\Factories\TaskFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -17,16 +18,26 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * Write-owner: Module 3 CRM (ownership matrix); no reader modules.
  * Manual/internal entity — no Provenance envelope.
  *
+ * `reminder_sent_at` stamps the fired deadline reminder so it fires
+ * exactly once (AC-M3-017). FLAGGED DEVIATION (spec D8): not in the
+ * canonical ENT-Task shape, awaiting a data-model doc amendment.
+ *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property string $title
  * @property TaskStatus $status
  * @property int|null $assignee_user_id
  * @property CarbonImmutable|null $due_at
  * @property int|null $creator_id
  * @property int|null $campaign_id
+ * @property CarbonImmutable|null $reminder_sent_at
  */
 class Task extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<TaskFactory> */
     use HasFactory;
 
@@ -37,6 +48,7 @@ class Task extends Model
         'due_at',
         'creator_id',
         'campaign_id',
+        'reminder_sent_at',
     ];
 
     /** @return array<string, string> */
@@ -45,6 +57,7 @@ class Task extends Model
         return [
             'status' => TaskStatus::class,
             'due_at' => 'immutable_datetime',
+            'reminder_sent_at' => 'immutable_datetime',
         ];
     }
 

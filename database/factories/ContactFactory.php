@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Modules\CRM\Models\Contact;
 use App\Modules\CRM\Models\Creator;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -14,6 +15,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class ContactFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = Contact::class;
 
     /**
@@ -22,6 +25,7 @@ class ContactFactory extends Factory
     public function definition(): array
     {
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'creator_id' => Creator::factory(),
             'email' => fake()->unique()->safeEmail(),
             'phone' => fake()->phoneNumber(),

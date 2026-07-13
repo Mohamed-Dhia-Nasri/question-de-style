@@ -7,6 +7,7 @@ use App\Modules\Monitoring\Models\MetricSnapshot;
 use App\Modules\Monitoring\Models\Story;
 use App\Shared\Casts\AsValueObject;
 use App\Shared\Enums\Platform;
+use App\Shared\Tenancy\BelongsToTenant;
 use App\Shared\ValueObjects\MetricValue;
 use App\Shared\ValueObjects\Provenance;
 use Database\Factories\PlatformAccountFactory;
@@ -22,9 +23,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * Write-owner: Module 3 CRM (ownership matrix). Module 1 reads it as the
  * author anchor for content, stories, and metric snapshots. Externally
  * sourced → mandatory Provenance envelope (DP-002); (platform, handle) is
- * the unique external platform identifier.
+ * the unique external platform identifier, per tenant.
+ *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
  *
  * @property int $id
+ * @property int|null $tenant_id
  * @property int|null $creator_id
  * @property Platform $platform
  * @property string $handle
@@ -35,6 +39,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class PlatformAccount extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<PlatformAccountFactory> */
     use HasFactory;
 

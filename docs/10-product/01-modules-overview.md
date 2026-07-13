@@ -170,7 +170,7 @@ Full spec: [module-3-crm-seeding](../50-modules/module-3-crm-seeding.md).
 | REQ-M3-009 | Campaign & seeding results (content count, views, engagement, reach tiering, EMV, CPE, CPM) | Internal (no external SRC) — computed over M1 metrics/snapshots | **Active**; CONFIRMED reach within results still bounded by [DEF-003](../20-cross-cutting/01-deferred-register.md#def-003) | M3 |
 | REQ-M3-010 | Documents & attachments (`DocumentAttachment`) | Internal (no external SRC) | **Active** | M3 |
 | REQ-M3-011 | Tasks, deadlines, follow-ups (`Task`, `ENUM-TaskStatus`) | Internal (no external SRC) | **Active** | M3 |
-| REQ-M3-012 | Roles & permissions (`ENUM-RoleName`; `CLIENT_VIEWER` sees only approved reports for their brands) | Internal (no external SRC) | **Active** | M3 |
+| REQ-M3-012 | Roles & permissions (`ENUM-RoleName`; `CLIENT_VIEWER` sees only approved reports for their brands) | Internal (no external SRC) | **Active** for ADMIN-only User/Role management; **external `CLIENT_VIEWER` access dropped from v1** → [ADR-0016](../05-decisions/decision-log.md#adr-0016) (role stays defined, deny-everything) | M3 |
 | REQ-M3-013 | Product-level seeding aggregation across influencers (total reach/views/EMV; `Product`, `ROLLUP-SeedingByProduct`) | Internal (no external SRC) — derived analytics | **Active** | M3 |
 
 ---

@@ -28,7 +28,7 @@ depends_on:
   - docs/80-delivery/00-roadmap.md
   - docs/90-traceability/00-req-matrix.md
   - docs/_lint/check-docs.md
-last_reviewed: 2026-07-02
+last_reviewed: 2026-07-12
 ---
 
 # QDS Master Index — File Map, Reading Order & Fact Router
@@ -63,7 +63,7 @@ canonical in a file, every other file **links** to it rather than restating it.
 | 9 | [10-product/01-modules-overview.md](../10-product/01-modules-overview.md) | Scope map: every feature → sources → Active/Deferred → REQ-ID. | requirements scope map (REQ-*) | APPROVED |
 | 10 | [20-cross-cutting/00-data-principles.md](../20-cross-cutting/00-data-principles.md) | DP-*: metric tiering, provenance, confidence, AI-review loop, GDPR/ToS, stack lock. | data principles (DP-*) | APPROVED |
 | 11 | [20-cross-cutting/01-deferred-register.md](../20-cross-cutting/01-deferred-register.md) | DEF-* list + the "unavailable, never empty" UI rule. | deferred items (DEF-*) | APPROVED |
-| 12 | [30-data-model/00-data-model.md](../30-data-model/00-data-model.md) | ER overview + shared envelopes + all 28 domain entities (field tables) + metrics catalog (MET-*). Single home for entity shapes. | entity fields (ENT-*), metrics (MET-*), envelopes | APPROVED |
+| 12 | [30-data-model/00-data-model.md](../30-data-model/00-data-model.md) | ER overview + shared envelopes + all 32 domain entities (field tables) + metrics catalog (MET-*). Single home for entity shapes. | entity fields (ENT-*), metrics (MET-*), envelopes | APPROVED |
 | 13 | [30-data-model/01-analytics-model.md](../30-data-model/01-analytics-model.md) | Analytics star schema: facts (FACT-*), dimensions (DIM-*), rollups (ROLLUP-*). | analytics-model, FACT-*, DIM-*, ROLLUP-* | APPROVED |
 | 14 | [40-integrations/00-data-source-matrix.md](../40-integrations/00-data-source-matrix.md) | Closed provider registry (SRC-*), capability→source matrix, per-source summary, raw→domain mapping, snapshots note. | data sources (SRC-*) | APPROVED |
 | 15 | [50-modules/_module-spec-template.md](../50-modules/_module-spec-template.md) | The 6-section module-spec template. | module-spec template | APPROVED |
@@ -93,7 +93,7 @@ flowchart TD
     E --> F["6. 20-cross-cutting/00-data-principles.md"]
     F --> G["7. 20-cross-cutting/01-deferred-register.md"]
     G --> H["8. 05-decisions/decision-log.md"]
-    H --> I["9. 30-data-model/00-data-model.md<br/>(28 domain entities + 4 shared envelopes)"]
+    H --> I["9. 30-data-model/00-data-model.md<br/>(32 domain entities + 4 shared envelopes)"]
     I --> J["10. 40-integrations/00-data-source-matrix.md"]
     J --> K["11. 70-shared/00-ownership-matrix.md"]
     K --> L["12. 60-architecture/00-system-architecture.md"]
@@ -113,7 +113,7 @@ Ordered list (canonical):
 6. [20-cross-cutting/00-data-principles.md](../20-cross-cutting/00-data-principles.md) — DP-* doctrine.
 7. [20-cross-cutting/01-deferred-register.md](../20-cross-cutting/01-deferred-register.md) — what is out of v1 scope.
 8. [05-decisions/decision-log.md](../05-decisions/decision-log.md) — why the stack and scope are what they are.
-9. [30-data-model/00-data-model.md](../30-data-model/00-data-model.md) — the 28 domain entities, envelopes, metrics; then [01-analytics-model.md](../30-data-model/01-analytics-model.md) — the analytics star schema (facts, dimensions, rollups).
+9. [30-data-model/00-data-model.md](../30-data-model/00-data-model.md) — the 32 domain entities, envelopes, metrics; then [01-analytics-model.md](../30-data-model/01-analytics-model.md) — the analytics star schema (facts, dimensions, rollups).
 10. [40-integrations/00-data-source-matrix.md](../40-integrations/00-data-source-matrix.md) — the closed set of sources.
 11. [70-shared/00-ownership-matrix.md](../70-shared/00-ownership-matrix.md) — who may write each entity.
 12. [60-architecture/00-system-architecture.md](../60-architecture/00-system-architecture.md) — layers, boundaries, services.

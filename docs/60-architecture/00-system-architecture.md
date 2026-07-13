@@ -14,7 +14,7 @@ depends_on:
   - docs/40-integrations/00-data-source-matrix.md
   - docs/10-product/01-modules-overview.md
   - docs/05-decisions/decision-log.md
-last_reviewed: 2026-07-03
+last_reviewed: 2026-07-12
 ---
 
 # System Architecture
@@ -76,6 +76,12 @@ flowchart LR
   Services --> Store
   Sources -->|public data only| Services
 ```
+
+> **v1 scope note ([ADR-0016](../05-decisions/decision-log.md#adr-0016)).** The
+> "Client viewer" actor ships **disabled** in v1: the agency has no external
+> clients, no report content exists, and `CLIENT_VIEWER` is a deny-everything
+> role confined to an empty reports area. The actor stays in the diagram as
+> the reserved integration point a superseding ADR would re-enable.
 
 The external source set is closed and frozen. QDS never invents providers
 (see `DP-006` stack-lock in
@@ -183,7 +189,9 @@ flowchart TB
   `ENUM-ExportFormat`.
 - **L6 Delivery.** One API layer fronts the module services; one web UI
   consumes the API. Role-based access (per `ENUM-RoleName`) is enforced at the
-  API; `CLIENT_VIEWER` may retrieve only approved reports for its brands.
+  API; `CLIENT_VIEWER` may retrieve only approved reports for its brands
+  *(v1: no external clients ship — the client-viewer report retrieval is
+  dropped and the role is deny-everything, [ADR-0016](../05-decisions/decision-log.md#adr-0016))*.
 
 ---
 
@@ -257,6 +265,51 @@ for every entity remains the matrix linked above.
 - **Deferred surfaces render "unavailable".** Any field mapped to a `DEF-*`
   item is rendered by the UI as unavailable, never empty or zero (rule owned by
   [20-cross-cutting/01-deferred-register.md](../20-cross-cutting/01-deferred-register.md)).
+
+---
+
+## 4.3 Tenant context (cross-cutting)
+
+Since [ADR-0019](../05-decisions/decision-log.md#adr-0019) the platform is
+multi-tenant: every business record is owned by an
+[ENT-Tenant](../30-data-model/00-data-model.md#ent-tenant), and a
+**centralized tenant context** is the sole mechanism any layer uses to
+answer "whose data is this unit of work for":
+
+- **Delivery (L6).** Requests bind the context from the authenticated user
+  (one user → one tenant); every downstream service, policy, and component
+  in the request resolves that same context.
+- **Queues.** Dispatched jobs carry the dispatcher's tenant in their
+  payload and restore it around execution — context never leaks between
+  jobs on a long-running worker.
+- **Shared platform services (L2/L3).** `SVC-Ingestion`,
+  `SVC-SnapshotScheduler`, and `SVC-EnrichmentAI` legitimately span
+  tenants; they establish the context **per unit of work** from the
+  aggregate root being processed (platform account, creator, content
+  item) and never write a row whose owner they cannot derive.
+- **Analytics (L5).** `FACT-*` rows and entity `DIM-*` rows carry the
+  tenant key of their source entities; `ROLLUP-*` grains include the
+  tenant (see the [analytics model](../30-data-model/01-analytics-model.md)).
+
+Hard per-request enforcement of the tenant boundary shipped with
+[ADR-0020](../05-decisions/decision-log.md#adr-0020) and is adversarially
+proven: a `Gate::before` backstop denies any cross-tenant subject,
+analytics reads are tenant-scoped, and validation resolves record
+existence tenant-aware — all on top of the boundary that was already
+structural in the storage layer (composite tenant foreign keys). The
+commercial layer of
+[ADR-0021](../05-decisions/decision-log.md#adr-0021) sits on that
+foundation: Stripe tenant-as-customer billing, plan/seat enforcement via
+the `subscribed` middleware and the `SeatLimiter` row lock, and secure
+hashed-token team invitations.
+
+The billing enforcement seam is itself cross-cutting: product route
+groups (dashboard, reports, modules) sit behind the `subscribed`
+middleware, which admits only an entitled subscription state for the
+request's tenant, while the account, billing, team, and auth surfaces
+stay exempt so a lapsed tenant can always recover. Enforcement is
+switched by the `QDS_BILLING_ENFORCED` gate
+([ADR-0021](../05-decisions/decision-log.md#adr-0021)).
 
 ---
 

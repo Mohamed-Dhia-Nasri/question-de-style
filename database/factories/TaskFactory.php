@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Modules\CRM\Models\Task;
 use App\Shared\Enums\TaskStatus;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -14,6 +15,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class TaskFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = Task::class;
 
     /**
@@ -22,12 +25,14 @@ class TaskFactory extends Factory
     public function definition(): array
     {
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'title' => fake()->sentence(3),
             'status' => TaskStatus::Open,
             'assignee_user_id' => null,
             'due_at' => null,
             'creator_id' => null,
             'campaign_id' => null,
+            'reminder_sent_at' => null,
         ];
     }
 }

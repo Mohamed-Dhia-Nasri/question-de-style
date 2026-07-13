@@ -29,13 +29,13 @@
             <thead>
                 <tr>
                     <x-table.th field="display_name" :sort-field="$sortField" :sort-direction="$sortDirection">Creator</x-table.th>
-                    <x-table.th>Accounts</x-table.th>
-                    <x-table.th>Followers</x-table.th>
-                    <x-table.th>Follower growth</x-table.th>
-                    <x-table.th>Avg views</x-table.th>
-                    <x-table.th>Engagement rate</x-table.th>
+                    <x-table.th field="platform_accounts_count" :sort-field="$sortField" :sort-direction="$sortDirection">Accounts</x-table.th>
+                    <x-table.th field="followers" :sort-field="$sortField" :sort-direction="$sortDirection">Followers</x-table.th>
+                    <x-table.th field="follower_growth" :sort-field="$sortField" :sort-direction="$sortDirection">Follower growth</x-table.th>
+                    <x-table.th field="avg_views" :sort-field="$sortField" :sort-direction="$sortDirection">Avg views</x-table.th>
+                    <x-table.th field="engagement_rate" :sort-field="$sortField" :sort-direction="$sortDirection">Engagement rate</x-table.th>
                     <x-table.th>Posting frequency</x-table.th>
-                    <x-table.th>Last post</x-table.th>
+                    <x-table.th field="last_post_at" :sort-field="$sortField" :sort-direction="$sortDirection">Last post</x-table.th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-gray-100 dark:divide-gray-800">

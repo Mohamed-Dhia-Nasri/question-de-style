@@ -60,13 +60,18 @@ class DatabaseSnapshotScheduler implements SnapshotScheduler
                 continue;
             }
 
-            MetricSnapshot::query()->create([
+            $snapshot = new MetricSnapshot([
                 'platform_account_id' => $account->id,
                 'content_item_id' => null,
                 'captured_at' => CarbonImmutable::now(),
                 'metrics' => [$account->follower_count],
                 'provenance' => $account->provenance,
             ]);
+            // ADR-0019: this scheduler runs tenant-less across all tenants —
+            // the snapshot's owner is EXPLICITLY the snapshotted account's
+            // tenant, never guessed from ambient context.
+            $snapshot->tenant_id = $account->tenant_id;
+            $snapshot->save();
 
             $captured++;
         }
@@ -104,13 +109,17 @@ class DatabaseSnapshotScheduler implements SnapshotScheduler
                         continue;
                     }
 
-                    MetricSnapshot::query()->create([
+                    $snapshot = new MetricSnapshot([
                         'platform_account_id' => null,
                         'content_item_id' => $item->id,
                         'captured_at' => CarbonImmutable::now(),
                         'metrics' => $item->public_metrics,
                         'provenance' => $item->provenance,
                     ]);
+                    // ADR-0019: explicit ownership from the snapshotted
+                    // content item's row (see captureAccountSnapshots()).
+                    $snapshot->tenant_id = $item->tenant_id;
+                    $snapshot->save();
 
                     $captured++;
                 }

@@ -3,12 +3,16 @@
 namespace App\Platform\Ingestion\Jobs;
 
 use App\Modules\CRM\Models\PlatformAccount;
+use App\Platform\Ingestion\Contracts\PlatformAccountProfileSync;
+use App\Platform\Ingestion\Contracts\ProvidesProfileFromContent;
 use App\Platform\Ingestion\DTO\ContentData;
 use App\Platform\Ingestion\Exceptions\ProviderCallException;
 use App\Platform\Ingestion\Jobs\Concerns\IngestionJobBehaviour;
 use App\Platform\Ingestion\Observability\ProviderCallRecorder;
+use App\Platform\Ingestion\Observability\ProviderCircuitBreaker;
 use App\Platform\Ingestion\Persistence\ContentItemPersister;
 use App\Platform\Ingestion\Providers\ProviderResolver;
+use App\Shared\Tenancy\TenantContext;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Throwable;
@@ -18,6 +22,18 @@ use Throwable;
  * posts/carousels/reels/videos/shorts via every frozen content provider
  * for the platform (Instagram uses two actors). Persistence is idempotent
  * on (platform, external_id); mutable public metrics refresh in place.
+ *
+ * Cost posture (reviews/PLAN-apify-cost-optimization-2026-07-07.md):
+ * - $fullDepth threads the periodic no-date-filter sweep down to the
+ *   adapters (rec 1); normal runs fetch only the refresh window.
+ * - The replay guard skips providers that already succeeded for this
+ *   correlation — a retry replays FAILED providers only, never re-billing
+ *   the sibling that worked (rec 9).
+ * - The circuit breaker skips providers FAILING with a permanent error
+ *   (rec 9) instead of burning budget on a dead actor.
+ * - Providers whose payload embeds the profile (TikTok authorMeta, rec 4)
+ *   sync it here through the same CRM-owned contract IngestProfileJob
+ *   uses — no separate profile call.
  *
  * Partial provider failure (requirement: "partial failure handling"): each
  * provider records its own ProviderCall; one provider failing never blocks
@@ -29,7 +45,7 @@ class IngestContentJob implements ShouldQueue
     use IngestionJobBehaviour;
     use Queueable;
 
-    public int $tries = 4;
+    public int $tries;
 
     public int $timeout = 600;
 
@@ -39,14 +55,18 @@ class IngestContentJob implements ShouldQueue
         public readonly int $platformAccountId,
         public readonly ?int $cycleId,
         public readonly string $correlationId,
+        public readonly bool $fullDepth = false,
     ) {
         $this->onQueue('ingestion');
+        $this->tries = $this->configuredTries();
     }
 
     public function handle(
         ProviderResolver $resolver,
         ProviderCallRecorder $recorder,
         ContentItemPersister $persister,
+        ProviderCircuitBreaker $breaker,
+        PlatformAccountProfileSync $profileSync,
     ): void {
         $this->attachLogContext();
 
@@ -58,11 +78,39 @@ class IngestContentJob implements ShouldQueue
             return;
         }
 
+        // ADR-0019: scheduled cycles run tenant-less; the account row is the
+        // aggregate root — its tenant scopes this whole unit of work so the
+        // persister and BelongsToTenant stamp new rows correctly.
+        app(TenantContext::class)->runAs(
+            $account->tenant_id,
+            fn () => $this->ingestForAccount($account, $resolver, $recorder, $persister, $breaker, $profileSync),
+        );
+    }
+
+    private function ingestForAccount(
+        PlatformAccount $account,
+        ProviderResolver $resolver,
+        ProviderCallRecorder $recorder,
+        ContentItemPersister $persister,
+        ProviderCircuitBreaker $breaker,
+        PlatformAccountProfileSync $profileSync,
+    ): void {
         $transientFailure = null;
         $allFailed = true;
 
         foreach ($resolver->contentProviders($account->platform) as $provider) {
             $this->source = $provider->source();
+
+            if ($this->attempts() > 1
+                && $this->alreadySucceeded($account->id, $provider->source(), 'content.fetch')) {
+                $allFailed = false;
+
+                continue;
+            }
+
+            if ($breaker->shouldSkip($provider->source())) {
+                continue;
+            }
 
             $context = $recorder->start(
                 source: $provider->source(),
@@ -74,7 +122,7 @@ class IngestContentJob implements ShouldQueue
             );
 
             try {
-                $batch = $provider->fetchContent($account->handle);
+                $batch = $provider->fetchContent($account->handle, $this->fullDepth);
             } catch (Throwable $e) {
                 $recorder->recordFailure($context, $e);
 
@@ -95,12 +143,25 @@ class IngestContentJob implements ShouldQueue
 
             $recorder->recordCompletion($context, $batch, $result);
 
+            if ($provider instanceof ProvidesProfileFromContent
+                && ($profile = $provider->profileFromLastFetch()) !== null) {
+                $profileSync->apply($account, $profile);
+            }
+
             $allFailed = false;
         }
 
         if ($transientFailure !== null && $allFailed) {
             // Nothing succeeded and the failure is retryable — replay the
-            // whole job (idempotent persistence makes replay safe).
+            // whole job (idempotent persistence + the replay guard make
+            // replay safe and bill only the providers that failed).
+            //
+            // KNOWN GAP (review REVIEW-cost-optimization-2026-07-07, cost#7):
+            // when a SIBLING succeeded (posts OK, reels transient-fail) this
+            // does not retry, so the failed sibling's content is abandoned
+            // until the next cadence run. Fixing it means dropping `&&
+            // $allFailed` and leaning on the alreadySucceeded replay guard —
+            // deferred to a focused change with its own retry-behaviour test.
             $this->handleProviderFailure($transientFailure);
 
             return;

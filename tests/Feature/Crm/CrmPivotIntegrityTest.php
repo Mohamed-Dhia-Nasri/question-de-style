@@ -43,6 +43,7 @@ class CrmPivotIntegrityTest extends TestCase
         $this->expectException(QueryException::class);
 
         DB::table('campaign_creator')->insert([
+            'tenant_id' => $this->defaultTenant->id,
             'campaign_id' => $campaign->id,
             'creator_id' => $creator->id,
         ]);
@@ -55,6 +56,7 @@ class CrmPivotIntegrityTest extends TestCase
         $this->expectException(QueryException::class);
 
         DB::table('campaign_creator')->insert([
+            'tenant_id' => $this->defaultTenant->id,
             'campaign_id' => 999_999,
             'creator_id' => $creator->id,
         ]);
@@ -90,6 +92,7 @@ class CrmPivotIntegrityTest extends TestCase
         $this->expectException(QueryException::class);
 
         DB::table('seeding_campaign_creator')->insert([
+            'tenant_id' => $this->defaultTenant->id,
             'seeding_campaign_id' => $seedingCampaign->id,
             'creator_id' => $creator->id,
         ]);
@@ -116,6 +119,7 @@ class CrmPivotIntegrityTest extends TestCase
         $this->expectException(QueryException::class);
 
         DB::table('shipment_resulting_content')->insert([
+            'tenant_id' => $this->defaultTenant->id,
             'shipment_id' => $shipment->id,
             'content_item_id' => $contentItem->id,
         ]);
@@ -128,6 +132,7 @@ class CrmPivotIntegrityTest extends TestCase
         $this->expectException(QueryException::class);
 
         DB::table('shipment_resulting_content')->insert([
+            'tenant_id' => $this->defaultTenant->id,
             'shipment_id' => $shipment->id,
             'content_item_id' => 999_999,
         ]);

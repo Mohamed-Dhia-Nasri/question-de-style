@@ -3,6 +3,10 @@
 namespace Tests\Feature\Export;
 
 use App\Models\User;
+use App\Modules\CRM\Models\Brand;
+use App\Modules\CRM\Models\Product;
+use App\Modules\Monitoring\Livewire\Exports\ExportsIndex;
+use App\Platform\Analytics\Contracts\AnalyticsService;
 use App\Platform\Export\ExportManager;
 use App\Platform\Export\Models\ExportJob;
 use App\Platform\Export\ReportBuilder;
@@ -14,6 +18,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\ValidationException;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
@@ -154,6 +159,105 @@ class ExportFlowTest extends TestCase
 
         $signed = URL::temporarySignedRoute('exports.download', now()->addMinutes(5), ['exportJob' => $staffJob->id]);
         $this->get($signed)->assertForbidden();
+    }
+
+    public function test_seeding_results_export_builds_with_tier_suffixed_columns_and_disclosures(): void
+    {
+        $user = $this->analyst();
+        $this->actingAs($user);
+
+        $job = app(ExportManager::class)
+            ->request($user, ReportBuilder::SEEDING_RESULTS, ExportFormat::Csv, ['grain' => 'month'])
+            ->fresh();
+
+        $this->assertSame(ExportJobStatus::Completed, $job->status);
+        $csv = Storage::disk('exports')->get($job->file_path);
+
+        // Section titles + tier-suffixed columns (Step-4 spec §2.5).
+        $this->assertStringContainsString('ROLLUP-SeedingByProduct', $csv);
+        $this->assertStringContainsString('ROLLUP-SeedingByShipment', $csv);
+        $this->assertStringContainsString('Shipments [CONFIRMED]', $csv);
+        $this->assertStringContainsString('Post rate [DERIVED]', $csv);
+        $this->assertStringContainsString('Total views [PUBLIC]', $csv);
+        $this->assertStringContainsString('Estimated reach [ESTIMATED]', $csv);
+        $this->assertStringContainsString('EMV [ESTIMATED]', $csv);
+
+        // Disclosures: tier legend, CPE/CPM formulas, DEF-003 reach note,
+        // and the EMV model line (Unavailable — no active configuration).
+        $this->assertStringContainsString('Metric tiers: PUBLIC', $csv);
+        $this->assertStringContainsString('CPE = agency-entered spend', $csv);
+        $this->assertStringContainsString('CPM = spend / (total views', $csv);
+        $this->assertStringContainsString('DEF-003', $csv);
+        $this->assertStringContainsString('EMV model: Unavailable', $csv);
+    }
+
+    public function test_seeding_export_mirrors_dashboard_filters_with_slices_and_period_labels(): void
+    {
+        $user = $this->analyst();
+        $this->actingAs($user);
+
+        // Slice + product filters now ride the SAME validated set as the
+        // dashboard (REQ-M1-012 parity); grain=year proves the multi-year
+        // period labels ("2026") replace bare bucket dates.
+        $brand = Brand::factory()->create();
+        $product = Product::factory()->create(['brand_id' => $brand->id]);
+        // Dim lookups feed the filter echo — names live in dims after a refresh.
+        app(AnalyticsService::class)->refreshRollups();
+
+        $job = app(ExportManager::class)
+            ->request($user, ReportBuilder::SEEDING_RESULTS, ExportFormat::Csv, [
+                'grain' => 'year',
+                'brand_id' => $brand->id,
+                'product_id' => $product->id,
+                'platform' => 'INSTAGRAM',
+            ])
+            ->fresh();
+
+        $this->assertSame(ExportJobStatus::Completed, $job->status);
+        $csv = Storage::disk('exports')->get($job->file_path);
+
+        // The slice section joins the document; the filter echo names every
+        // active dimension so the file is self-describing.
+        $this->assertStringContainsString('Slice breakdown', $csv);
+        $this->assertStringContainsString('slice-agnostic', $csv);
+        $this->assertStringContainsString('Filter: Product', $csv);
+        $this->assertStringContainsString($product->name, $csv);
+        $this->assertStringContainsString('"Filter: Platform",INSTAGRAM', $csv);
+        $this->assertStringContainsString('Period', $csv);
+        // Geography columns are CREATOR-scoped by name (never brand/product).
+        $this->assertStringContainsString('Creator country', $csv);
+        $this->assertStringContainsString('CREATOR attribute', $csv);
+
+        // Unknown slice values are rejected, never silently ignored.
+        $this->expectException(ValidationException::class);
+        app(ExportManager::class)->request($user, ReportBuilder::SEEDING_RESULTS, ExportFormat::Csv, [
+            'city' => 'Atlantis',
+        ]);
+    }
+
+    public function test_the_export_kind_list_derives_from_the_report_builder(): void
+    {
+        $this->assertSame(
+            [ReportBuilder::MONITORING_SUMMARY, ReportBuilder::SEEDING_RESULTS],
+            ReportBuilder::reports(),
+        );
+
+        $user = $this->analyst();
+        $this->actingAs($user);
+
+        // The exports screen requests whichever registered kind is picked…
+        Livewire::test(ExportsIndex::class)
+            ->set('report', ReportBuilder::SEEDING_RESULTS)
+            ->call('requestExport')
+            ->assertHasNoErrors();
+
+        $this->assertSame(ReportBuilder::SEEDING_RESULTS, ExportJob::query()->sole()->report);
+
+        // …and an unknown kind is rejected server-side, never silently mapped.
+        Livewire::test(ExportsIndex::class)
+            ->set('report', 'bogus-report')
+            ->call('requestExport')
+            ->assertHasErrors(['report']);
     }
 
     public function test_pruning_deletes_expired_artifacts_and_marks_jobs(): void

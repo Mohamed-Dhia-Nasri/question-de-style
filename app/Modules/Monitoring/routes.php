@@ -5,7 +5,7 @@ use App\Platform\Export\Http\ExportDownloadController;
 use App\Shared\Authorization\PermissionsCatalog;
 use Illuminate\Support\Facades\Route;
 
-Route::middleware(['web', 'auth', 'can:'.PermissionsCatalog::MONITORING_VIEW])
+Route::middleware(['web', 'auth', 'can:'.PermissionsCatalog::MONITORING_VIEW, 'subscribed'])
     ->prefix('monitoring')
     ->as('monitoring.')
     ->group(function () {
@@ -27,6 +27,10 @@ Route::middleware(['web', 'auth', 'can:'.PermissionsCatalog::MONITORING_VIEW])
         // emv.manage inside EmvConfigurationService).
         Route::view('/emv', 'monitoring.emv')->name('emv');
 
+        // Configured hashtag lists — matching evidence registry (mutations
+        // re-authorize on monitoring.manage via HashtagListPolicy).
+        Route::view('/hashtags', 'monitoring.hashtags')->name('hashtags.index');
+
         // Report exports (REQ-M1-012; exports.create via ExportJobPolicy).
         Route::view('/exports', 'monitoring.exports')->name('exports.index');
 
@@ -36,6 +40,13 @@ Route::middleware(['web', 'auth', 'can:'.PermissionsCatalog::MONITORING_VIEW])
             ->middleware('can:'.PermissionsCatalog::OPERATIONS_VIEW)
             ->name('operations');
 
+        // Operator-chosen monitoring plan: polling frequencies + cost
+        // estimate (product-owner decision 2026-07-08). Mutating spend
+        // posture is a manage action, not a view.
+        Route::view('/plan', 'monitoring.plan')
+            ->middleware('can:'.PermissionsCatalog::MONITORING_MANAGE)
+            ->name('plan');
+
         // Mint a short-lived signed URL for archived story media
         // (REQ-M1-004; private object storage, StoryPolicy-checked).
         Route::get('/stories/{story}/media-url', [StoryMediaController::class, 'issue'])
@@ -44,13 +55,16 @@ Route::middleware(['web', 'auth', 'can:'.PermissionsCatalog::MONITORING_VIEW])
 
 // Export artifact download: authenticated + signed + policy-checked, and
 // the artifact must not be expired. Never a public URL (REQ-M1-012).
-Route::middleware(['web', 'auth', 'signed'])
+Route::middleware(['web', 'auth', 'signed', 'subscribed'])
     ->get('/exports/{exportJob}/download', ExportDownloadController::class)
     ->name('exports.download');
 
-// Serve archived story media for a valid, unexpired signature. The signed
-// URL — minted above for an authorized user — is the access credential;
-// its lifetime is qds.ingestion.signed_url_ttl_minutes.
-Route::middleware(['web'])
+// Serve archived story media. Authenticated (so SetTenantContext binds the
+// viewer's tenant and the {story} binding resolves tenant-scoped — a
+// foreign-tenant id 404s) + a valid unexpired signature + a StoryPolicy
+// re-check inside stream(). The signature is one factor, no longer the sole
+// bearer credential for another tenant's private media (ADR-0019 hard
+// enforcement). Lifetime is qds.ingestion.signed_url_ttl_minutes.
+Route::middleware(['web', 'auth', 'signed', 'subscribed'])
     ->get('/monitoring/stories/{story}/media', [StoryMediaController::class, 'stream'])
     ->name('monitoring.stories.media');

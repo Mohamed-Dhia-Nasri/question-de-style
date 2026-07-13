@@ -1,12 +1,15 @@
 <?php
 
+use App\Modules\Billing\Http\Middleware\EnsureTenantSubscribed;
 use App\Shared\Http\Controllers\HealthController;
 use App\Shared\Http\Middleware\AssignRequestId;
 use App\Shared\Http\Middleware\EnsureUserIsActive;
 use App\Shared\Http\Middleware\SetSecureHeaders;
+use App\Shared\Http\Middleware\SetTenantContext;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\AuthenticateSession;
 use Illuminate\Support\Facades\Route;
 
@@ -32,11 +35,35 @@ return Application::configure(basePath: dirname(__DIR__))
         // AuthenticateSession invalidates other sessions when the password
         // changes (e.g. after a reset following account compromise);
         // EnsureUserIsActive revokes access the moment an account is
-        // deactivated, not just at next login.
+        // deactivated, not just at next login. SetTenantContext then binds
+        // the request to the authenticated user's tenant (ADR-0019).
         $middleware->web(append: [
             AuthenticateSession::class,
             EnsureUserIsActive::class,
+            SetTenantContext::class,
         ]);
+
+        // ADR-0021: server-side subscription gate for product surfaces.
+        // Route groups opt in with 'subscribed'; account/billing/team/auth
+        // surfaces never carry it (billing recovery must stay reachable).
+        $middleware->alias([
+            'subscribed' => EnsureTenantSubscribed::class,
+        ]);
+
+        // ADR-0019: the tenant context MUST be bound before route-model
+        // binding runs, or SubstituteBindings resolves tenant-owned models
+        // unscoped (a foreign-tenant id would resolve instead of 404-ing).
+        // SubstituteBindings sits in the framework priority list, so being
+        // appended to the web group is not enough — pin the order:
+        // EnsureUserIsActive → SetTenantContext → SubstituteBindings.
+        $middleware->prependToPriorityList(
+            SubstituteBindings::class,
+            SetTenantContext::class,
+        );
+        $middleware->prependToPriorityList(
+            SetTenantContext::class,
+            EnsureUserIsActive::class,
+        );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

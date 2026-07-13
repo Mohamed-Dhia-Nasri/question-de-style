@@ -90,7 +90,7 @@ class EnrichmentPipelineTest extends TestCase
 
         $this->assertStringStartsWith('completed:', $run->stages['hashtags']);
         $this->assertStringContainsString('vision:not-configured', $run->stages['recognition']);
-        $this->assertStringContainsString('speech:no-audio-derivation-pipeline', $run->stages['recognition']);
+        $this->assertStringContainsString('speech:not-configured', $run->stages['recognition']);
         $this->assertSame('unavailable', $run->stages['sentiment']);
         $this->assertSame('completed:1 mention(s)', $run->stages['attribution']);
         $this->assertStringStartsWith('unavailable:', $run->stages['emv']);

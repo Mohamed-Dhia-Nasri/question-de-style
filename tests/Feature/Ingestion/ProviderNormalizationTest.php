@@ -166,10 +166,15 @@ class ProviderNormalizationTest extends TestCase
         config(['qds.ingestion.short_video_max_seconds' => 60]);
         $this->fakeApifyActor('clockworks~tiktok-scraper', $this->fixture('tiktok-items'));
 
-        $batch = app(TikTokContentAdapter::class)->fetchContent('styleicon');
+        $adapter = app(TikTokContentAdapter::class);
+        $batch = $adapter->fetchContent('styleicon');
 
         $this->assertCount(2, $batch->items);
-        $this->assertCount(1, $batch->rejected); // item without id
+        // The id-less item carries authorMeta — under rec 4 it is the
+        // quiet-day profile marker, silently skipped rather than
+        // quarantined, and the profile is captured from the payload.
+        $this->assertCount(0, $batch->rejected);
+        $this->assertSame('styleicon', $adapter->profileFromLastFetch()?->handle);
 
         /** @var ContentData $short */
         $short = $batch->items[0];
@@ -183,6 +188,43 @@ class ProviderNormalizationTest extends TestCase
         $long = $batch->items[1];
         $this->assertSame(ContentType::Video, $long->contentType); // 184s
         $this->assertNotNull($long->publishedAt); // unix createTime parsed
+    }
+
+    public function test_tiktok_video_with_a_drifted_non_string_id_is_quarantined_not_silently_dropped(): void
+    {
+        // A genuine quiet-day marker carries ONLY author stats. A real video
+        // whose `id` drifts to a non-string (actor emits it as a JSON number,
+        // or renames the key) must NOT be mistaken for a marker and dropped —
+        // it must quarantine loudly, or TikTok content vanishes silently on a
+        // plausible external schema change (review cost#1).
+        $this->fakeApifyActor('clockworks~tiktok-scraper', [
+            [
+                'id' => '7301234567890123456',
+                'text' => 'real video',
+                'webVideoUrl' => 'https://www.tiktok.com/@styleicon/video/7301234567890123456',
+                'createTimeISO' => '2026-07-01T10:00:00.000Z',
+                'playCount' => 1000, 'diggCount' => 50, 'commentCount' => 5, 'shareCount' => 2, 'collectCount' => 1,
+                'videoMeta' => ['duration' => 30],
+                'authorMeta' => ['name' => 'styleicon', 'fans' => 90000],
+            ],
+            [
+                // Same shape, but the id drifted to a NUMBER — a video by every
+                // other signal (videoMeta/playCount/webVideoUrl), not a marker.
+                'id' => 7301234567890123499,
+                'text' => 'drifted id',
+                'webVideoUrl' => 'https://www.tiktok.com/@styleicon/video/7301234567890123499',
+                'playCount' => 500, 'diggCount' => 10, 'commentCount' => 1, 'shareCount' => 0, 'collectCount' => 0,
+                'videoMeta' => ['duration' => 20],
+                'authorMeta' => ['name' => 'styleicon', 'fans' => 90000],
+            ],
+        ]);
+
+        $batch = app(TikTokContentAdapter::class)->fetchContent('styleicon');
+
+        // The good video is accepted; the drifted one is quarantined, NOT
+        // silently returned-as-null and dropped.
+        $this->assertCount(1, $batch->items);
+        $this->assertCount(1, $batch->rejected);
     }
 
     public function test_youtube_profile_maps_channel_and_respects_hidden_subscribers(): void

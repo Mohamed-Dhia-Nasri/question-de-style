@@ -3,6 +3,7 @@
 namespace App\Modules\Monitoring\Models;
 
 use App\Models\User;
+use App\Shared\Tenancy\BelongsToTenant;
 use Carbon\CarbonImmutable;
 use Database\Factories\ContentHashtagFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -20,7 +21,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * FLAGGED DEVIATION: not a canonical ENT-* — awaiting a data-model doc
  * amendment (see the create_enrichment_tables migration).
  *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property int $content_item_id
  * @property string $original
  * @property string $normalized
@@ -34,6 +38,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class ContentHashtag extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<ContentHashtagFactory> */
     use HasFactory;
 

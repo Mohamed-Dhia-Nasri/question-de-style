@@ -6,9 +6,11 @@ use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\Monitoring\Models\MonitoredSubject;
 use App\Platform\Ingestion\Jobs\IngestProfileJob;
+use App\Platform\Ingestion\Jobs\IngestStoriesBatchJob;
 use App\Platform\Ingestion\Jobs\PollMonitoredAccountJob;
 use App\Platform\Ingestion\Jobs\RunMonitoringCycleJob;
 use App\Platform\Ingestion\Models\IngestionCycle;
+use App\Platform\Ingestion\Support\AdaptiveCadence;
 use App\Platform\Ingestion\Support\CycleStatus;
 use App\Shared\Enums\MonitoredSubjectType;
 use App\Shared\Enums\Platform;
@@ -59,14 +61,16 @@ class MonitoringCycleTest extends TestCase
 
         Queue::fake();
 
-        (new RunMonitoringCycleJob)->handle();
+        (new RunMonitoringCycleJob)->handle(app(AdaptiveCadence::class));
 
         $cycle = IngestionCycle::query()->firstOrFail();
         $this->assertSame(CycleStatus::Running, $cycle->status);
         $this->assertSame(2, $cycle->accounts_count);
-        // Instagram: profile + content + stories = 3; YouTube: profile + content = 2.
-        $this->assertSame(5, $cycle->jobs_expected);
-        $this->assertSame(5, $cycle->jobs_pending);
+        // Instagram: profile + content = 2; YouTube: profile + content = 2.
+        // Stories are NOT part of full cycles (cost plan rec 2) — they run
+        // in the story-only cycle exclusively.
+        $this->assertSame(4, $cycle->jobs_expected);
+        $this->assertSame(4, $cycle->jobs_pending);
 
         Queue::assertPushed(PollMonitoredAccountJob::class, 2);
         Queue::assertPushed(
@@ -101,7 +105,7 @@ class MonitoringCycleTest extends TestCase
 
         Queue::fake();
 
-        (new RunMonitoringCycleJob)->handle();
+        (new RunMonitoringCycleJob)->handle(app(AdaptiveCadence::class));
 
         $cycle = IngestionCycle::query()->firstOrFail();
         $this->assertSame(1, $cycle->accounts_count); // TikTok account only
@@ -115,8 +119,8 @@ class MonitoringCycleTest extends TestCase
 
         Queue::fake();
 
-        (new RunMonitoringCycleJob)->handle();
-        (new RunMonitoringCycleJob)->handle(); // duplicate start — must no-op
+        (new RunMonitoringCycleJob)->handle(app(AdaptiveCadence::class));
+        (new RunMonitoringCycleJob)->handle(app(AdaptiveCadence::class)); // duplicate start — must no-op
 
         $this->assertSame(1, IngestionCycle::query()->count());
         Queue::assertPushed(PollMonitoredAccountJob::class, 2); // still only the first fan-out
@@ -128,13 +132,90 @@ class MonitoringCycleTest extends TestCase
 
         Queue::fake();
 
-        (new RunMonitoringCycleJob(storiesOnly: true))->handle();
+        (new RunMonitoringCycleJob(storiesOnly: true))->handle(app(AdaptiveCadence::class));
 
         $cycle = IngestionCycle::query()->firstOrFail();
         $this->assertTrue($cycle->stories_only);
-        $this->assertSame(1, $cycle->jobs_expected); // 1 story job, Instagram only
+        // One BATCHED story job covers the whole Instagram roster chunk
+        // (cost plan rec 3) — per-account poll jobs are never dispatched.
+        $this->assertSame(1, $cycle->jobs_expected);
 
-        Queue::assertPushed(PollMonitoredAccountJob::class, 1);
+        Queue::assertPushed(IngestStoriesBatchJob::class, 1);
+        Queue::assertPushed(
+            fn (IngestStoriesBatchJob $job) => count($job->platformAccountIds) === 1,
+        );
+        Queue::assertNotPushed(PollMonitoredAccountJob::class);
+    }
+
+    public function test_a_stale_story_cycle_does_not_consume_the_daily_gap_slot(): void
+    {
+        $this->rosterWithTwoAccounts();
+        config(['qds.ingestion.stories_enabled' => true, 'qds.ingestion.stories_per_day' => 1]);
+
+        // A story cycle that started recently but was reaped to STALE (worker
+        // died / breaker open / all batch jobs failed) collected nothing, so
+        // it must NOT suppress the next slot — stories expire in 24h with no
+        // same-day retry (review cost#3).
+        IngestionCycle::query()->create([
+            'correlation_id' => 'corr-stale-story',
+            'stories_only' => true,
+            'status' => CycleStatus::Stale,
+            'accounts_count' => 1,
+            'jobs_expected' => 1,
+            'jobs_pending' => 0,
+            'jobs_failed' => 1,
+            'started_at' => now()->subMinutes(30),
+            'finished_at' => now()->subMinutes(10),
+        ]);
+
+        Queue::fake();
+
+        (new RunMonitoringCycleJob(storiesOnly: true))->handle(app(AdaptiveCadence::class));
+
+        // A new story cycle IS created despite the recent stale one.
+        $this->assertSame(2, IngestionCycle::query()->count());
+        Queue::assertPushed(IngestStoriesBatchJob::class, 1);
+    }
+
+    public function test_a_recent_completed_story_cycle_still_consumes_the_gap_slot(): void
+    {
+        $this->rosterWithTwoAccounts();
+        config(['qds.ingestion.stories_enabled' => true, 'qds.ingestion.stories_per_day' => 1]);
+
+        // A cycle that actually polled recently correctly blocks the slot.
+        IngestionCycle::query()->create([
+            'correlation_id' => 'corr-done-story',
+            'stories_only' => true,
+            'status' => CycleStatus::Completed,
+            'accounts_count' => 1,
+            'jobs_expected' => 1,
+            'jobs_pending' => 0,
+            'jobs_failed' => 0,
+            'started_at' => now()->subMinutes(30),
+            'finished_at' => now()->subMinutes(20),
+        ]);
+
+        Queue::fake();
+
+        (new RunMonitoringCycleJob(storiesOnly: true))->handle(app(AdaptiveCadence::class));
+
+        $this->assertSame(1, IngestionCycle::query()->count());
+        Queue::assertNotPushed(IngestStoriesBatchJob::class);
+    }
+
+    public function test_story_cycle_is_gated_by_the_kill_switch(): void
+    {
+        $this->rosterWithTwoAccounts();
+
+        config(['qds.ingestion.stories_enabled' => false]);
+
+        Queue::fake();
+
+        (new RunMonitoringCycleJob(storiesOnly: true))->handle(app(AdaptiveCadence::class));
+
+        // No cycle row, no jobs — the paid story actor is never invoked.
+        $this->assertSame(0, IngestionCycle::query()->count());
+        Queue::assertNotPushed(IngestStoriesBatchJob::class);
     }
 
     public function test_cycle_completes_when_the_last_slot_finishes(): void

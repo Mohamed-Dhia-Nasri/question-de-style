@@ -7,8 +7,10 @@ use App\Platform\Ingestion\Contracts\PlatformAccountProfileSync;
 use App\Platform\Ingestion\DTO\ProfileData;
 use App\Platform\Ingestion\Jobs\Concerns\IngestionJobBehaviour;
 use App\Platform\Ingestion\Observability\ProviderCallRecorder;
+use App\Platform\Ingestion\Observability\ProviderCircuitBreaker;
 use App\Platform\Ingestion\Persistence\PersistenceResult;
 use App\Platform\Ingestion\Providers\ProviderResolver;
+use App\Shared\Tenancy\TenantContext;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Throwable;
@@ -25,7 +27,7 @@ class IngestProfileJob implements ShouldQueue
     use IngestionJobBehaviour;
     use Queueable;
 
-    public int $tries = 4;
+    public int $tries;
 
     public int $timeout = 300;
 
@@ -37,12 +39,14 @@ class IngestProfileJob implements ShouldQueue
         public readonly string $correlationId,
     ) {
         $this->onQueue('ingestion');
+        $this->tries = $this->configuredTries();
     }
 
     public function handle(
         ProviderResolver $resolver,
         ProviderCallRecorder $recorder,
         PlatformAccountProfileSync $profileSync,
+        ProviderCircuitBreaker $breaker,
     ): void {
         $this->attachLogContext();
 
@@ -54,8 +58,38 @@ class IngestProfileJob implements ShouldQueue
             return;
         }
 
+        // ADR-0019: scheduled cycles run tenant-less; derive the tenant from
+        // the account row (the aggregate root) for this whole unit of work.
+        app(TenantContext::class)->runAs(
+            $account->tenant_id,
+            fn () => $this->ingestForAccount($account, $resolver, $recorder, $profileSync, $breaker),
+        );
+    }
+
+    private function ingestForAccount(
+        PlatformAccount $account,
+        ProviderResolver $resolver,
+        ProviderCallRecorder $recorder,
+        PlatformAccountProfileSync $profileSync,
+        ProviderCircuitBreaker $breaker,
+    ): void {
         $provider = $resolver->profileProvider($account->platform);
         $this->source = $provider->source();
+
+        if ($this->attempts() > 1
+            && $this->alreadySucceeded($account->id, $provider->source(), 'profile.fetch')) {
+            $this->completeCycleSlot(failed: false);
+
+            return;
+        }
+
+        if ($breaker->shouldSkip($provider->source())) {
+            // Permanent-failure breaker open (cost plan rec 9): no call, no
+            // billing; the slot completes as failed so the cycle stays honest.
+            $this->completeCycleSlot(failed: true);
+
+            return;
+        }
 
         $context = $recorder->start(
             source: $provider->source(),

@@ -7,8 +7,11 @@ use App\Modules\Monitoring\Models\EmvConfiguration;
 use App\Modules\Monitoring\Models\EmvResult;
 use App\Platform\Enrichment\Support\EmvConfigurationStatus;
 use App\Shared\Enums\MetricTier;
+use App\Shared\Tenancy\TenantContext;
 use App\Shared\ValueObjects\MetricValue;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * EMV calculation (REQ-M1-011, MET-EMV): Σ (metric_i × rate_i) over one
@@ -32,10 +35,60 @@ class EmvCalculator
 {
     public function activeConfiguration(): ?EmvConfiguration
     {
+        // ADR-0019: "ACTIVE" is a PER-TENANT notion (one active rate card
+        // per tenant). This lookup deliberately relies on the model's
+        // TenantScope: callers must run under the content item's tenant
+        // context (EnrichContentItemJob wraps the pipeline in runAs), so the
+        // query resolves that tenant's active configuration — never another
+        // tenant's rate card.
         return EmvConfiguration::query()
             ->where('status', EmvConfigurationStatus::Active)
             ->where('effective_from', '<=', CarbonImmutable::now()->toDateString())
             ->first();
+    }
+
+    /**
+     * The configurations that PRODUCED the currently-reported EMV figures:
+     * the distinct models behind the latest emv_results row per content
+     * item — exactly the population the analytics fact loaders stamp EMV
+     * from. Disclosure surfaces must cite these, not the merely-active
+     * configuration (deep-review finding M4): activating a new rate card
+     * never re-stamps existing results, so "active" can diverge from what
+     * the on-screen money figure was computed with (GL-EMV / AC-M1-011 —
+     * "every report must show the model + rates used").
+     *
+     * @return Collection<int, EmvConfiguration>
+     */
+    public function producingConfigurations(): Collection
+    {
+        // The raw emv_results subquery bypasses TenantScope, so it is
+        // tenant-scoped here (defense in depth) rather than trusting the
+        // outer EmvConfiguration::whereIn to launder foreign ids. Guarded so
+        // platform context (no bound tenant) reads unfiltered, matching the
+        // rest of the analytics/enrichment reads.
+        $tenantId = app(TenantContext::class)->id();
+
+        $ids = DB::query()
+            ->fromSub(
+                DB::table('emv_results')
+                    ->when($tenantId !== null, fn ($q) => $q->where('tenant_id', $tenantId))
+                    ->selectRaw(<<<'SQL'
+                    emv_configuration_id,
+                    row_number() OVER (
+                        PARTITION BY content_item_id
+                        ORDER BY calculated_at DESC, id DESC
+                    ) AS rn
+                SQL),
+                'latest'
+            )
+            ->where('rn', 1)
+            ->distinct()
+            ->pluck('emv_configuration_id');
+
+        return EmvConfiguration::query()
+            ->whereIn('id', $ids)
+            ->orderBy('id')
+            ->get();
     }
 
     public function calculate(ContentItem $content): ?EmvResult

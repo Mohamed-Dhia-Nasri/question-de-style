@@ -43,7 +43,11 @@ class YouTubeContentAdapter implements ContentProvider
         return Platform::YouTube;
     }
 
-    public function fetchContent(string $handle): NormalizedBatch
+    // $fullDepth is accepted for contract parity but not applied: the
+    // uploads-playlist walk is already capped at content_results_limit and
+    // YouTube Data API quota is free — there is no per-result billing to
+    // window (cost plan rec 1 targets the Apify actors only).
+    public function fetchContent(string $handle, bool $fullDepth = false): NormalizedBatch
     {
         $totalMs = 0.0;
         $totalBytes = 0;

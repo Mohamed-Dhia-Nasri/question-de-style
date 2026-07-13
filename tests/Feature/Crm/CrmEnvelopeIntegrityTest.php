@@ -2,7 +2,9 @@
 
 namespace Tests\Feature\Crm;
 
+use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\Product;
+use App\Modules\CRM\Models\SeedingCampaign;
 use App\Modules\CRM\Models\Shipment;
 use App\Shared\Enums\MetricTier;
 use App\Shared\ValueObjects\MetricValue;
@@ -10,10 +12,12 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * The two M3 Step-1 MetricValue envelopes — products.unit_value and
- * shipments.product_value_at_ship — round-trip through AsValueObject with
- * tier CONFIRMED (agency-known monetary values; spec doctrine §4).
- * MetricValue has NO currency field: the canonical shape is amount + tier.
+ * The M3 MetricValue envelopes — products.unit_value and
+ * shipments.product_value_at_ship (Step 1), plus campaigns.spend and
+ * seeding_campaigns.spend (Step 4, spec D1) — round-trip through
+ * AsValueObject with tier CONFIRMED (agency-known monetary values; spec
+ * doctrine §4). MetricValue has NO currency field: the canonical shape is
+ * amount + tier (+ the flagged optional metric label).
  */
 class CrmEnvelopeIntegrityTest extends TestCase
 {
@@ -61,5 +65,58 @@ class CrmEnvelopeIntegrityTest extends TestCase
 
         $raw = json_decode((string) $fresh->getRawOriginal('product_value_at_ship'), true);
         $this->assertSame('CONFIRMED', $raw['tier']);
+    }
+
+    public function test_campaign_spend_round_trips_at_tier_confirmed(): void
+    {
+        $campaign = Campaign::factory()->create([
+            'spend' => new MetricValue(2500.0, MetricTier::Confirmed, 'spend'),
+        ]);
+
+        $fresh = $campaign->fresh();
+        $this->assertNotNull($fresh);
+
+        $this->assertInstanceOf(MetricValue::class, $fresh->spend);
+        $this->assertSame(2500.0, $fresh->spend->amount);
+        $this->assertSame(MetricTier::Confirmed, $fresh->spend->tier);
+        $this->assertSame('spend', $fresh->spend->metric);
+
+        // Raw jsonb carries the tier and metric label with the number (DP-001).
+        $raw = json_decode((string) $fresh->getRawOriginal('spend'), true);
+        $this->assertSame('CONFIRMED', $raw['tier']);
+        $this->assertSame('spend', $raw['metric']);
+    }
+
+    public function test_seeding_campaign_spend_round_trips_at_tier_confirmed(): void
+    {
+        $seeding = SeedingCampaign::factory()->create([
+            'spend' => new MetricValue(780.5, MetricTier::Confirmed, 'spend'),
+        ]);
+
+        $fresh = $seeding->fresh();
+        $this->assertNotNull($fresh);
+
+        $this->assertInstanceOf(MetricValue::class, $fresh->spend);
+        $this->assertSame(780.5, $fresh->spend->amount);
+        $this->assertSame(MetricTier::Confirmed, $fresh->spend->tier);
+        $this->assertSame('spend', $fresh->spend->metric);
+
+        $raw = json_decode((string) $fresh->getRawOriginal('spend'), true);
+        $this->assertSame('CONFIRMED', $raw['tier']);
+        $this->assertSame('spend', $raw['metric']);
+    }
+
+    public function test_spend_is_nullable_on_both_tables(): void
+    {
+        // Absent spend stays NULL — never a zero envelope (DP-001).
+        $campaign = Campaign::factory()->create(['spend' => null]);
+        $seeding = SeedingCampaign::factory()->create(['spend' => null]);
+
+        $freshCampaign = $campaign->fresh();
+        $freshSeeding = $seeding->fresh();
+        $this->assertNotNull($freshCampaign);
+        $this->assertNotNull($freshSeeding);
+        $this->assertNull($freshCampaign->spend);
+        $this->assertNull($freshSeeding->spend);
     }
 }

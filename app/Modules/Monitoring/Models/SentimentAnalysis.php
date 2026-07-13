@@ -4,6 +4,7 @@ namespace App\Modules\Monitoring\Models;
 
 use App\Shared\Casts\AsValueObject;
 use App\Shared\Enums\SentimentLabel;
+use App\Shared\Tenancy\BelongsToTenant;
 use App\Shared\ValueObjects\ConfidenceAssessment;
 use Database\Factories\SentimentAnalysisFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -20,7 +21,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * (DP-004). Comment analysis is deferred (DEF-005): v1 sentiment runs on
  * captions/transcripts only, so comment_id stays unused.
  *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property int|null $content_item_id
  * @property int|null $comment_id
  * @property SentimentLabel $label
@@ -29,6 +33,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class SentimentAnalysis extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<SentimentAnalysisFactory> */
     use HasFactory;
 

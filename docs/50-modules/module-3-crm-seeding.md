@@ -6,6 +6,7 @@ canonical_for:
   - "AC-M3-*"
   - "XMC-001"
   - "XMC-002"
+  - "XMC-003"
 depends_on:
   - "REQ-M3-001"
   - "REQ-M3-002"
@@ -59,7 +60,7 @@ Provide agency staff with a single, authoritative CRM that:
 3. Plans and executes campaigns and product-seeding, including the four seeding variants.
 4. Tracks shipments and, where content is observed, matches it back to the originating campaign.
 5. Reports campaign and seeding **results** (content count, views, engagement, reach tiering, EMV, CPE, CPM).
-6. Enforces role-based access, including strict `CLIENT_VIEWER` scoping.
+6. Enforces role-based access, including strict `CLIENT_VIEWER` scoping. *(v1 scope — [ADR-0016](../05-decisions/decision-log.md#adr-0016): no external client access ships in v1; `CLIENT_VIEWER` remains a defined, deny-everything role.)*
 
 ### 1.2 In scope (Active requirements)
 
@@ -108,6 +109,7 @@ All requirement IDs below are canonical in the [Modules Overview](../10-product/
 - M3 is the **sole write-owner and system of record** for `Creator` and `PlatformAccount` (see [Ownership Matrix](../70-shared/00-ownership-matrix.md)). All `Creator` writes route through the CRM/ingestion service `SVC-CRM`. Module 1 and Module 2 **propose** new creators via the cross-module contract [XMC-001](#5-cross-module-contracts--services); they never write `Creator` or `PlatformAccount` directly.
 - A merge joins two or more `PlatformAccount` records (one per [ENUM-Platform](../00-meta/03-glossary.md#enum-platform)) under one `Creator`. Merge and un-merge are auditable operations.
 - Merge decisions about identity are inferences and therefore carry a `ConfidenceAssessment` (per [DP-003](../20-cross-cutting/00-data-principles.md)); an ambiguous automatic merge routes to a human review queue rather than committing silently.
+- **v1 scope ([ADR-0014](../05-decisions/decision-log.md#adr-0014)):** creator identity is **operator-managed** — an operator curates each `Creator`'s platform accounts by hand, and is the sole identity authority. The **automatic** merge-candidate review queue and the **dedicated auditable/reversible merge/un-merge** described in the two bullets above are **deferred out of v1**; duplicates are reconciled by an operator manually. The central database and cross-platform identity themselves are delivered.
 
 <a id="req-m3-002"></a>
 ### 2.2 REQ-M3-002 — Contact & address management
@@ -169,6 +171,7 @@ All requirement IDs below are canonical in the [Modules Overview](../10-product/
 ### 2.10 REQ-M3-012 — Roles & permissions
 
 - `User` and `Role` are written by `ADMIN` only. Roles use [ENUM-RoleName](../00-meta/03-glossary.md#enum-rolename). `CLIENT_VIEWER` sees **only approved reports for their own brands** — no raw CRM, no unapproved data, no cross-brand data.
+- **v1 scope ([ADR-0016](../05-decisions/decision-log.md#adr-0016)):** the agency has no external clients, so no client login, approved-report surface, or report-approval workflow ships in v1. `CLIENT_VIEWER` remains a defined [ENUM-RoleName](../00-meta/03-glossary.md#enum-rolename) value whose access is deny-everything; ADMIN-only `User`/`Role` writes are delivered unchanged.
 
 <a id="req-m3-013"></a>
 ### 2.11 REQ-M3-013 — Product-level seeding aggregation
@@ -225,6 +228,8 @@ M3 reads `ContentItem`, `Story`, and `Comment` (all M1-owned) and never writes t
 ## 4. Acceptance Criteria
 
 Given/When/Then criteria (format defined in [conventions](../00-meta/01-conventions.md)). These `AC-M3-*` IDs are canonical to this file.
+
+> **Editorial note (Amended 2026-07-07 — as-built reconciliation).** The IDs `AC-M3-018` and `AC-M3-019` are each defined **twice** in this section: once under "REQ-M3-009 — Results" / "REQ-M3-013 — Product-level seeding aggregation" (the shipment-lifecycle and product-rollup criteria) and once under "REQ-M3-012 — Roles & permissions" (the ADMIN-only write and `CLIENT_VIEWER` criteria). The collision predates this amendment and is left in place — existing IDs are never renumbered. When citing either ID, disambiguate by section, e.g. "AC-M3-018 (results)" vs "AC-M3-018 (roles)".
 
 <a id="req-m3-001"></a>
 ### REQ-M3-001 — Central DB + identity merge
@@ -293,7 +298,7 @@ Given/When/Then criteria (format defined in [conventions](../00-meta/01-conventi
 ### REQ-M3-012 — Roles & permissions
 
 - **AC-M3-018** — Given a non-ADMIN user, When they attempt to write `User`/`Role`, Then the action is denied.
-- **AC-M3-019** — Given a `CLIENT_VIEWER` for brand A, When they log in, Then they see only **approved** reports for brand A — no raw CRM data, no unapproved data, and no brand-B data ([ENUM-RoleName](../00-meta/03-glossary.md#enum-rolename)).
+- **AC-M3-019** — Given a `CLIENT_VIEWER` for brand A, When they log in, Then they see only **approved** reports for brand A — no raw CRM data, no unapproved data, and no brand-B data ([ENUM-RoleName](../00-meta/03-glossary.md#enum-rolename)). *(Deferred out of v1 — [ADR-0016](../05-decisions/decision-log.md#adr-0016): no external client access ships; `CLIENT_VIEWER` is deny-everything.)*
 
 ---
 
@@ -305,6 +310,9 @@ M3 is implemented by service `SVC-CRM` and consumes `SVC-Export` (PDF/Excel/CSV 
 | --- | --- | --- |
 | **XMC-001** Creator proposal | M1 / M2 → M3 (`SVC-CRM`) | M1/M2 propose a new creator/platform account; `SVC-CRM` is the only writer of `Creator`/`PlatformAccount`. |
 | **XMC-002** Content-match feedback | M3 → M1 | M3 confirms/denies a `ContentItem`↔campaign match; corrections feed the human-in-the-loop loop ([DP-004](../20-cross-cutting/00-data-principles.md)). |
+| **XMC-003** Roster enrollment | M3 (`SVC-CRM`) → M1 | M3's creator lifecycle asks the M1-side roster service to change monitoring **configuration** — `MonitoredSubject` stays M1-write-owned per the [Ownership Matrix](../70-shared/00-ownership-matrix.md), the mirror image of XMC-001's direction. Creating a `Creator` **enrolls** it as an active `CREATOR` `MonitoredSubject` (idempotent — an existing entry is never overwritten) so the next scheduled cycle picks it up without operator action, per roster-first monitoring ([ADR-0011](../05-decisions/decision-log.md#adr-0011)). Deleting a `Creator` **withdraws** its roster entries in the same transaction. |
+
+> **Amended 2026-07-07 — as-built reconciliation.** XMC-003 documents an as-built seam (product decision 2026-07-07; M3 `CreatorWriter` → M1 `RosterEnrollmentService`) that the declared contract list above did not yet name. Its lifecycle-coupled semantics: roster **configuration** is coupled to the creator's lifecycle, so a roster entry alone no longer blocks a creator delete (it is withdrawn with the creator); monitoring **history** still does — `Mention` records anchored to the roster entry make the database's restrict FK abort the whole delete transaction, which is surfaced to the operator rather than forced.
 
 ```mermaid
 flowchart LR
@@ -312,10 +320,13 @@ flowchart LR
   M2[Module 2 Discovery] -- XMC-001 propose creator --> CRM
   M1 -- ContentItem, Mention, MetricSnapshot (read) --> CRM
   CRM -- XMC-002 match feedback --> M1
+  CRM -- XMC-003 roster enroll / withdraw --> M1
   CRM -- EMV request --> ENR[SVC-EnrichmentAI]
   CRM -- report export --> EXP[SVC-Export]
   CRM -- approved reports only --> CV[CLIENT_VIEWER]
 ```
+
+> **v1 scope ([ADR-0016](../05-decisions/decision-log.md#adr-0016)):** the `CRM → CLIENT_VIEWER` "approved reports only" edge above is not built in v1 — no external client access ships; `CLIENT_VIEWER` remains a defined, deny-everything role.
 
 Human corrections captured in M3 (identity merges, content matches, mention labels) are stored and feed back into future rules per [DP-004](../20-cross-cutting/00-data-principles.md).
 
@@ -335,4 +346,4 @@ Human corrections captured in M3 (identity merges, content matches, mention labe
 
 ### 6.3 Roadmap position
 
-M3 ships in phase **P3** of the [Roadmap](../80-delivery/00-roadmap.md). It is sequenced after P1/P2 because it consumes `Creator` identity and `MetricSnapshot` data produced earlier. P4 hardening adds GDPR retention/deletion tooling and white-label client reports that further serve `CLIENT_VIEWER`.
+M3 ships in phase **P3** of the [Roadmap](../80-delivery/00-roadmap.md). It is sequenced after P1/P2 because it consumes `Creator` identity and `MetricSnapshot` data produced earlier. P4 hardening adds GDPR retention/deletion tooling and white-label client reports that further serve `CLIENT_VIEWER`. *(The white-label client-report deliverable is void — [ADR-0016](../05-decisions/decision-log.md#adr-0016): no external client access in v1 — unless that ADR is superseded.)*

@@ -28,6 +28,7 @@ class CheckConstraintsTest extends TestCase
         $this->expectException(QueryException::class);
 
         DB::table('mentions')->insert([
+            'tenant_id' => $this->defaultTenant->id,
             'monitored_subject_id' => $mention->monitored_subject_id,
             'content_item_id' => $mention->content_item_id,
             'mention_type' => 'CONFIRMED_ORGANIC',
@@ -92,6 +93,7 @@ class CheckConstraintsTest extends TestCase
         $this->expectException(QueryException::class);
 
         DB::table('stories')->insert([
+            'tenant_id' => $this->defaultTenant->id,
             'platform_account_id' => $story->platform_account_id,
             'platform' => 'SNAPCHAT',
             'captured_at' => now(),

@@ -4,8 +4,10 @@ namespace App\Platform\Ingestion\Jobs\Concerns;
 
 use App\Platform\Ingestion\Exceptions\ProviderCallException;
 use App\Platform\Ingestion\Models\IngestionCycle;
+use App\Platform\Ingestion\Models\ProviderCall;
 use App\Platform\Ingestion\Observability\AlertService;
 use App\Platform\Ingestion\Support\AlertType;
+use App\Platform\Ingestion\Support\CallOutcome;
 use App\Platform\Ingestion\Support\CycleStatus;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -24,13 +26,41 @@ use Throwable;
 trait IngestionJobBehaviour
 {
     /**
-     * Exponential backoff between retries (seconds).
+     * Exponential backoff between retries (seconds). Env-tunable (cost
+     * plan rec 9) — every retry can re-bill provider calls.
      *
      * @return list<int>
      */
     public function backoff(): array
     {
-        return [60, 300, 900, 1800];
+        $configured = array_values(array_filter(array_map(
+            'intval',
+            explode(',', (string) config('qds.ingestion.job_backoff')),
+        ), fn (int $s): bool => $s > 0));
+
+        return $configured !== [] ? $configured : [60, 300, 900, 1800];
+    }
+
+    /** Retry budget for provider-calling jobs, env-tunable (rec 9). */
+    protected function configuredTries(): int
+    {
+        return max(1, (int) config('qds.ingestion.job_tries'));
+    }
+
+    /**
+     * Replay guard (cost plan rec 9): TRUE when this (correlation, account,
+     * source, operation) already produced a usable response — a retry that
+     * only needed to replay a SIBLING provider must not re-bill this one.
+     */
+    protected function alreadySucceeded(int $platformAccountId, string $source, string $operation): bool
+    {
+        return ProviderCall::query()
+            ->where('correlation_id', $this->correlationId)
+            ->where('platform_account_id', $platformAccountId)
+            ->where('source', $source)
+            ->where('operation', $operation)
+            ->whereIn('outcome', [CallOutcome::Success->value, CallOutcome::Partial->value])
+            ->exists();
     }
 
     protected function attachLogContext(): void

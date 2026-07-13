@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Modules\Monitoring\Models\EmvConfiguration;
 use App\Platform\Enrichment\Emv\EmvConfigurationValidator;
 use App\Platform\Enrichment\Support\EmvConfigurationStatus;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -16,6 +17,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class EmvConfigurationFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = EmvConfiguration::class;
 
     /**
@@ -26,6 +29,7 @@ class EmvConfigurationFactory extends Factory
         $version = fake()->unique()->numberBetween(1, 100000);
 
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'name' => 'Test EMV model v'.$version,
             'formula_version' => 'formula-v'.$version,
             'rate_card_version' => 'rates-v'.$version,

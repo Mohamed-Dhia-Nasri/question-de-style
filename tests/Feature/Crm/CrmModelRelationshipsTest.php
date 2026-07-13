@@ -100,6 +100,20 @@ class CrmModelRelationshipsTest extends TestCase
         $this->assertTrue($campaign->tasks()->whereKey($task->id)->exists());
     }
 
+    public function test_document_attachment_resolves_a_seeding_run_anchor(): void
+    {
+        // Documents attach to seeding runs too (AC-M3-016; spec D6).
+        $seeding = SeedingCampaign::factory()->create();
+
+        $document = DocumentAttachment::factory()->create([
+            'creator_id' => null,
+            'seeding_campaign_id' => $seeding->id,
+        ]);
+
+        $this->assertInstanceOf(SeedingCampaign::class, $document->seedingCampaign);
+        $this->assertTrue($seeding->documentAttachments()->whereKey($document->id)->exists());
+    }
+
     public function test_task_assignee_resolves_to_a_user(): void
     {
         $this->seedRoles();

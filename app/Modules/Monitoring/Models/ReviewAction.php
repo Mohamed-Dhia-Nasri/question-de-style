@@ -4,6 +4,7 @@ namespace App\Modules\Monitoring\Models;
 
 use App\Models\User;
 use App\Platform\Enrichment\Support\ReviewDecision;
+use App\Shared\Tenancy\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
@@ -22,7 +23,10 @@ use LogicException;
  * FLAGGED DEVIATION: not a canonical ENT-* — awaiting a data-model doc
  * amendment (see the create_enrichment_tables migration).
  *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property string $reviewable_type
  * @property int $reviewable_id
  * @property ReviewDecision $action
@@ -34,6 +38,8 @@ use LogicException;
  */
 class ReviewAction extends Model
 {
+    use BelongsToTenant;
+
     public const UPDATED_AT = null;
 
     protected $fillable = [

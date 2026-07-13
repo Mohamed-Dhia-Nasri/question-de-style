@@ -9,6 +9,7 @@ use App\Modules\CRM\Models\Shipment;
 use App\Shared\Enums\MetricTier;
 use App\Shared\Enums\ShipmentStatus;
 use App\Shared\ValueObjects\MetricValue;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -19,6 +20,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class ShipmentFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = Shipment::class;
 
     /**
@@ -27,6 +30,7 @@ class ShipmentFactory extends Factory
     public function definition(): array
     {
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'seeding_campaign_id' => SeedingCampaign::factory(),
             'creator_id' => Creator::factory(),
             'status' => ShipmentStatus::Pending,

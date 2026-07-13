@@ -1,0 +1,256 @@
+<?php
+
+namespace App\Modules\CRM\Livewire\Campaigns;
+
+use App\Modules\CRM\Models\Brand;
+use App\Modules\CRM\Models\Campaign;
+use App\Shared\Audit\AuditLogger;
+use App\Shared\Enums\CampaignStatus;
+use App\Shared\Enums\MetricTier;
+use App\Shared\Livewire\Concerns\WithDataTable;
+use App\Shared\Tenancy\TenantRule;
+use App\Shared\ValueObjects\MetricValue;
+use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
+use Livewire\Attributes\Url;
+use Livewire\Component;
+
+/**
+ * Campaigns index (REQ-M3-005) — ENT-Campaign CRUD on the UsersIndex
+ * reference pattern (ADR-0012). AC-M3-009: the status is always exactly one
+ * ENUM-CampaignStatus value (closed-set validated) and every status
+ * transition is recorded (campaign.status_changed, from → to). `spend` is
+ * the agency-entered CONFIRMED MetricValue feeding CPE/CPM (AC-M3-015,
+ * spec §2.1/D1); its changes ride the campaign.updated audit event.
+ */
+class CampaignsIndex extends Component
+{
+    use WithDataTable;
+
+    #[Url(except: '')]
+    public string $statusFilter = '';
+
+    // --- create/edit form state ---
+    public bool $showForm = false;
+
+    public ?int $editingCampaignId = null;
+
+    public string $campaign_name = '';
+
+    public string $campaign_brand_id = '';
+
+    public string $campaign_status = '';
+
+    public string $campaign_start_at = '';
+
+    public string $campaign_end_at = '';
+
+    public string $campaign_spend = '';
+
+    // --- delete confirmation state ---
+    public ?int $confirmingDeleteId = null;
+
+    public function mount(): void
+    {
+        $this->authorize('viewAny', Campaign::class);
+
+        if ($this->sortField === '') {
+            $this->sortField = 'name';
+        }
+    }
+
+    protected function sortableColumns(): array
+    {
+        return ['name', 'status', 'start_at', 'created_at'];
+    }
+
+    protected function currentPageIds(): array
+    {
+        return $this->campaignsQuery()->paginate($this->perPage())->pluck('id')->all();
+    }
+
+    /** @return Builder<Campaign> */
+    protected function campaignsQuery(): Builder
+    {
+        return $this->applySort(
+            Campaign::query()
+                ->with('brand')
+                ->withCount('creators')
+                ->when($this->search !== '', function (Builder $query) {
+                    $query->where('name', 'ilike', '%'.$this->search.'%');
+                })
+                ->when($this->statusFilter !== '', function (Builder $query) {
+                    if (CampaignStatus::tryFrom($this->statusFilter) !== null) {
+                        $query->where('status', $this->statusFilter);
+                    }
+                })
+        );
+    }
+
+    public function updatingStatusFilter(): void
+    {
+        $this->resetPage();
+        $this->clearSelection();
+    }
+
+    // --- create / edit -----------------------------------------------------
+
+    public function create(): void
+    {
+        $this->authorize('create', Campaign::class);
+
+        $this->resetForm();
+        $this->campaign_status = CampaignStatus::Draft->value;
+        $this->showForm = true;
+    }
+
+    public function edit(int $campaignId): void
+    {
+        $campaign = Campaign::findOrFail($campaignId);
+
+        $this->authorize('update', $campaign);
+
+        $this->resetForm();
+        $this->editingCampaignId = $campaign->id;
+        $this->campaign_name = $campaign->name;
+        $this->campaign_brand_id = (string) $campaign->brand_id;
+        $this->campaign_status = $campaign->status->value;
+        $this->campaign_start_at = $campaign->start_at?->format('Y-m-d\TH:i') ?? '';
+        $this->campaign_end_at = $campaign->end_at?->format('Y-m-d\TH:i') ?? '';
+        $this->campaign_spend = $campaign->spend !== null ? (string) $campaign->spend->amount : '';
+        $this->showForm = true;
+    }
+
+    public function save(AuditLogger $audit): void
+    {
+        $editing = $this->editingCampaignId !== null;
+        $campaign = $editing ? Campaign::findOrFail($this->editingCampaignId) : null;
+
+        $this->authorize($editing ? 'update' : 'create', $campaign ?? Campaign::class);
+
+        $validated = $this->validate([
+            'campaign_name' => ['required', 'string', 'max:255'],
+            'campaign_brand_id' => ['required', 'integer', TenantRule::exists('brands', 'id')],
+            'campaign_status' => ['required', Rule::in(array_column(CampaignStatus::cases(), 'value'))],
+            'campaign_start_at' => ['nullable', 'date'],
+            'campaign_end_at' => ['nullable', 'date', 'after_or_equal:campaign_start_at'],
+            'campaign_spend' => ['nullable', 'numeric', 'min:0'],
+        ]);
+
+        $previousStatus = $campaign?->status;
+
+        $attributes = [
+            'name' => $validated['campaign_name'],
+            'brand_id' => (int) $validated['campaign_brand_id'],
+            'status' => CampaignStatus::from($validated['campaign_status']),
+            'start_at' => ($validated['campaign_start_at'] ?? '') !== '' ? $validated['campaign_start_at'] : null,
+            'end_at' => ($validated['campaign_end_at'] ?? '') !== '' ? $validated['campaign_end_at'] : null,
+            // Manual agency input → tier CONFIRMED (glossary ENUM-MetricTier); spec D1.
+            'spend' => ($validated['campaign_spend'] ?? '') !== ''
+                ? new MetricValue((float) $validated['campaign_spend'], MetricTier::Confirmed, 'spend')
+                : null,
+        ];
+
+        if ($editing) {
+            $campaign->update($attributes);
+        } else {
+            $campaign = Campaign::create($attributes);
+        }
+
+        $audit->record($editing ? 'campaign.updated' : 'campaign.created', $campaign, ['name' => $campaign->name]);
+
+        // AC-M3-009: lifecycle transitions are recorded.
+        if ($editing && $previousStatus !== $campaign->status) {
+            $audit->record('campaign.status_changed', $campaign, [
+                'from' => $previousStatus->value,
+                'to' => $campaign->status->value,
+            ]);
+        }
+
+        $this->showForm = false;
+        $this->resetForm();
+        $this->dispatch('notify', type: 'success', message: $editing ? 'Campaign updated.' : 'Campaign created.');
+    }
+
+    public function cancelForm(): void
+    {
+        $this->showForm = false;
+        $this->resetForm();
+    }
+
+    // --- delete ------------------------------------------------------------
+
+    public function confirmDelete(int $campaignId): void
+    {
+        $this->authorize('delete', Campaign::findOrFail($campaignId));
+
+        $this->confirmingDeleteId = $campaignId;
+    }
+
+    public function delete(AuditLogger $audit): void
+    {
+        if ($this->confirmingDeleteId === null) {
+            return;
+        }
+
+        $campaign = Campaign::findOrFail($this->confirmingDeleteId);
+
+        $this->authorize('delete', $campaign);
+
+        try {
+            // Savepoint so a restrict-FK refusal leaves the connection usable.
+            DB::transaction(fn () => $campaign->delete());
+        } catch (QueryException) {
+            $this->confirmingDeleteId = null;
+            $this->dispatch('notify', type: 'error', message: 'Cannot delete: this campaign is still referenced by seeding runs, mentions, or other records.');
+
+            return;
+        }
+
+        $audit->record('campaign.deleted', $campaign, ['name' => $campaign->name]);
+
+        $this->confirmingDeleteId = null;
+        $this->clearSelection();
+        $this->clampPage();
+        $this->dispatch('notify', type: 'success', message: 'Campaign deleted.');
+    }
+
+    public function cancelDelete(): void
+    {
+        $this->confirmingDeleteId = null;
+    }
+
+    /** After deletes/filter-affecting mutations, leave no out-of-range page. */
+    protected function clampPage(): void
+    {
+        if ($this->getPage() > 1 && $this->campaignsQuery()->paginate($this->perPage())->isEmpty()) {
+            $this->resetPage();
+        }
+    }
+
+    // -------------------------------------------------------------------------
+
+    protected function resetForm(): void
+    {
+        $this->resetValidation();
+        $this->editingCampaignId = null;
+        $this->campaign_name = '';
+        $this->campaign_brand_id = '';
+        $this->campaign_status = '';
+        $this->campaign_start_at = '';
+        $this->campaign_end_at = '';
+        $this->campaign_spend = '';
+    }
+
+    public function render(): View
+    {
+        return view('livewire.crm.campaigns-index', [
+            'campaigns' => $this->campaignsQuery()->paginate($this->perPage()),
+            'brands' => Brand::orderBy('name')->get(),
+            'statuses' => CampaignStatus::cases(),
+        ]);
+    }
+}

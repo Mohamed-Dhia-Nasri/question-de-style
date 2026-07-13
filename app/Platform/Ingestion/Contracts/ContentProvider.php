@@ -18,6 +18,13 @@ interface ContentProvider
 
     public function platform(): Platform;
 
-    /** @return NormalizedBatch whose items are ContentData */
-    public function fetchContent(string $handle): NormalizedBatch;
+    /**
+     * Fetch recent content. Adapters apply the qds.ingestion refresh-window
+     * date filter provider-side (cost plan rec 1) unless $fullDepth is set —
+     * the periodic sweep that catches late-blooming engagement on posts
+     * older than the window.
+     *
+     * @return NormalizedBatch whose items are ContentData
+     */
+    public function fetchContent(string $handle, bool $fullDepth = false): NormalizedBatch;
 }

@@ -9,6 +9,7 @@ use App\Platform\Ingestion\Http\ApifyClient;
 use App\Platform\Ingestion\Normalization\Extract;
 use App\Platform\Ingestion\Normalization\NormalizesItems;
 use App\Platform\Ingestion\SourceRegistry;
+use App\Platform\Ingestion\Support\RefreshWindow;
 use App\Shared\Enums\ContentType;
 use App\Shared\Enums\Platform;
 use App\Shared\ValueObjects\Provenance;
@@ -36,15 +37,24 @@ class InstagramReelAdapter implements ContentProvider
         return Platform::Instagram;
     }
 
-    public function fetchContent(string $handle): NormalizedBatch
+    public function fetchContent(string $handle, bool $fullDepth = false): NormalizedBatch
     {
+        $input = [
+            'username' => [$handle],
+            'resultsLimit' => (int) config('qds.ingestion.content_results_limit'),
+            // Pinned posts leak items older than the date window (documented
+            // actor behavior) — they are re-seen posts anyway, skip them.
+            'skipPinnedPosts' => true,
+        ];
+
+        if (($window = RefreshWindow::relative($fullDepth)) !== null) {
+            $input['onlyPostsNewerThan'] = $window;
+        }
+
         $response = $this->client->runActor(
             $this->source(),
             (string) config('services.apify.actors.instagram_reel'),
-            [
-                'username' => [$handle],
-                'resultsLimit' => (int) config('qds.ingestion.content_results_limit'),
-            ],
+            $input,
         );
 
         return $this->normalizeBatch($response, function (array $item) use ($response): ContentData {
@@ -70,6 +80,7 @@ class InstagramReelAdapter implements ContentProvider
                     Extract::publicMetric('shares', Extract::int($item, 'sharesCount')),
                 ])),
                 provenance: new Provenance($this->source(), CarbonImmutable::now(), $response->sourceVersion),
+                permalink: Extract::string($item, 'url'),
             );
         });
     }

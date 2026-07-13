@@ -7,6 +7,7 @@ use App\Platform\Ingestion\Contracts\IngestionService;
 use App\Platform\Ingestion\Jobs\IngestContentJob;
 use App\Platform\Ingestion\Jobs\IngestProfileJob;
 use App\Platform\Ingestion\Jobs\IngestStoriesJob;
+use App\Platform\Ingestion\Jobs\RunCreatorCycleJob;
 use App\Platform\Ingestion\Jobs\RunMonitoringCycleJob;
 use App\Shared\Enums\Platform;
 use Illuminate\Support\Str;
@@ -41,5 +42,10 @@ class DefaultIngestionService implements IngestionService
     public function startMonitoringCycle(bool $storiesOnly = false): void
     {
         RunMonitoringCycleJob::dispatch($storiesOnly);
+    }
+
+    public function startCreatorCycle(int $creatorId): void
+    {
+        RunCreatorCycleJob::dispatch($creatorId);
     }
 }

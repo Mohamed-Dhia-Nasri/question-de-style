@@ -4,6 +4,7 @@ namespace App\Modules\CRM\Models;
 
 use App\Shared\Casts\AsValueObject;
 use App\Shared\Enums\SectorLabel;
+use App\Shared\Tenancy\BelongsToTenant;
 use App\Shared\ValueObjects\MetricValue;
 use Database\Factories\ProductFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -20,7 +21,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * Manual/internal entity — no Provenance envelope. `unit_value` carries
  * tier CONFIRMED (agency-known price).
  *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property int $brand_id
  * @property string $name
  * @property string|null $sku
@@ -30,6 +34,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class Product extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<ProductFactory> */
     use HasFactory;
 

@@ -2,7 +2,17 @@
     {{-- Creator + platform-account summary --}}
     <div class="grid gap-4 lg:grid-cols-3">
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-            <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">{{ $creator->display_name }}</h3>
+            <div class="flex flex-wrap items-start justify-between gap-2">
+                <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">{{ $creator->display_name }}</h3>
+                @can('create', \App\Modules\Monitoring\Models\MonitoredSubject::class)
+                    <x-ui.button variant="outline" type="button" wire:click="runMonitoringNow"
+                        wire:loading.attr="disabled" wire:target="runMonitoringNow"
+                        title="Poll this creator's accounts now instead of waiting for the scheduled monitoring cycle.">
+                        <span wire:loading.remove wire:target="runMonitoringNow">Run monitoring now</span>
+                        <span wire:loading wire:target="runMonitoringNow">Starting…</span>
+                    </x-ui.button>
+                @endcan
+            </div>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
                 Relationship: {{ $creator->relationship_status?->value ?? 'NONE' }}
                 @if ($creator->primary_language) · Language: {{ $creator->primary_language }} @endif

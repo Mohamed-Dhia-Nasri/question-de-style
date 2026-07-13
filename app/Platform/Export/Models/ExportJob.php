@@ -5,6 +5,7 @@ namespace App\Platform\Export\Models;
 use App\Models\User;
 use App\Platform\Export\Support\ExportJobStatus;
 use App\Shared\Enums\ExportFormat;
+use App\Shared\Tenancy\BelongsToTenant;
 use Carbon\CarbonImmutable;
 use Database\Factories\ExportJobFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -18,7 +19,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * FLAGGED DEVIATION: operational table, not a canonical ENT-* (see the
  * create_export_jobs migration).
  *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property int $user_id
  * @property string $report
  * @property ExportFormat $format
@@ -36,6 +40,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class ExportJob extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<ExportJobFactory> */
     use HasFactory;
 

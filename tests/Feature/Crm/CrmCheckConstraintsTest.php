@@ -4,8 +4,10 @@ namespace Tests\Feature\Crm;
 
 use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Creator;
+use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\CRM\Models\Product;
 use App\Modules\CRM\Models\SeedingCampaign;
+use App\Shared\Enums\Platform;
 use App\Shared\Enums\SeedingType;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -22,6 +24,31 @@ class CrmCheckConstraintsTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_one_account_per_platform_per_creator_is_db_enforced(): void
+    {
+        // Deep-review L1: the app-layer check-then-insert race needs a DB
+        // backstop — the partial unique index rejects a second same-platform
+        // account for one creator even with a DIFFERENT handle (which the
+        // (platform, handle) key cannot catch).
+        $creator = Creator::factory()->create();
+        PlatformAccount::factory()->create([
+            'creator_id' => $creator->id,
+            'platform' => Platform::Instagram,
+            'handle' => 'alpha',
+        ]);
+
+        try {
+            PlatformAccount::factory()->create([
+                'creator_id' => $creator->id,
+                'platform' => Platform::Instagram,
+                'handle' => 'beta',
+            ]);
+            $this->fail('A second INSTAGRAM account for the same creator must violate the L1 backstop index.');
+        } catch (QueryException $e) {
+            $this->assertStringContainsString('platform_accounts_creator_platform_unique', $e->getMessage());
+        }
+    }
+
     public function test_product_category_check_rejects_unknown_sector(): void
     {
         $brand = Brand::factory()->create();
@@ -29,6 +56,7 @@ class CrmCheckConstraintsTest extends TestCase
         $this->expectException(QueryException::class);
 
         DB::table('products')->insert([
+            'tenant_id' => $this->defaultTenant->id,
             'brand_id' => $brand->id,
             'name' => 'Serum',
             'category' => 'CRYPTO',
@@ -44,6 +72,7 @@ class CrmCheckConstraintsTest extends TestCase
         $this->expectException(QueryException::class);
 
         DB::table('seeding_campaigns')->insert([
+            'tenant_id' => $this->defaultTenant->id,
             'name' => 'Bad variant',
             'seeding_type' => 'LOAN',
             'brand_id' => $brand->id,
@@ -76,6 +105,7 @@ class CrmCheckConstraintsTest extends TestCase
         $this->expectException(QueryException::class);
 
         DB::table('seeding_campaigns')->insert([
+            'tenant_id' => $this->defaultTenant->id,
             'name' => 'Bad status',
             'seeding_type' => 'GIFTING',
             'brand_id' => $brand->id,
@@ -94,6 +124,7 @@ class CrmCheckConstraintsTest extends TestCase
         $this->expectException(QueryException::class);
 
         DB::table('shipments')->insert([
+            'tenant_id' => $this->defaultTenant->id,
             'seeding_campaign_id' => $seedingCampaign->id,
             'creator_id' => $creator->id,
             'status' => 'LOST',
@@ -108,6 +139,7 @@ class CrmCheckConstraintsTest extends TestCase
         $this->expectException(QueryException::class);
 
         DB::table('tasks')->insert([
+            'tenant_id' => $this->defaultTenant->id,
             'title' => 'Follow up',
             'status' => 'SNOOZED',
             'created_at' => now(),

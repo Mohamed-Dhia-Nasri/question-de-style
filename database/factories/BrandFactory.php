@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Client;
 use App\Shared\Enums\SectorLabel;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -14,6 +15,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class BrandFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = Brand::class;
 
     /**
@@ -24,6 +27,7 @@ class BrandFactory extends Factory
         $name = fake()->unique()->company();
 
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'client_id' => Client::factory(),
             'name' => $name,
             'sector' => fake()->randomElement(SectorLabel::cases()),

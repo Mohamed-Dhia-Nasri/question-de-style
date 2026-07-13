@@ -2,6 +2,7 @@
 
 namespace App\Shared\Audit;
 
+use App\Shared\Tenancy\TenantContext;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 
@@ -20,7 +21,16 @@ class AuditLogger
     /** @param array<string, mixed> $context */
     public function record(string $action, ?Model $subject = null, array $context = []): AuditLog
     {
-        return AuditLog::create([
+        $log = new AuditLog;
+
+        // tenant_id and user_id are force-filled (not mass assigned) so the
+        // audit trail's ownership/actor attribution comes ONLY from trusted
+        // server state and can never be forged through a caller array.
+        $log->forceFill([
+            // ADR-0019: nullable ownership stamp — the active tenant when one
+            // is set (HTTP, runAs pipeline units), null for platform-level
+            // events (scheduler, global telemetry).
+            'tenant_id' => app(TenantContext::class)->id(),
             'user_id' => Auth::id(),
             'action' => $action,
             'subject_type' => $subject?->getMorphClass(),
@@ -33,5 +43,9 @@ class AuditLogger
             'request_id' => request()->attributes->get('request_id'),
             'created_at' => now(),
         ]);
+
+        $log->save();
+
+        return $log;
     }
 }

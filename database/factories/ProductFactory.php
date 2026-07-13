@@ -7,6 +7,7 @@ use App\Modules\CRM\Models\Product;
 use App\Shared\Enums\MetricTier;
 use App\Shared\Enums\SectorLabel;
 use App\Shared\ValueObjects\MetricValue;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -17,6 +18,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class ProductFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = Product::class;
 
     /**
@@ -25,6 +28,7 @@ class ProductFactory extends Factory
     public function definition(): array
     {
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'brand_id' => Brand::factory(),
             // High-cardinality unique name (same rationale as CampaignFactory).
             'name' => 'Product '.fake()->unique()->numerify('####-####'),

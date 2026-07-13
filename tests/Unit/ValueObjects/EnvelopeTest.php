@@ -56,10 +56,13 @@ class EnvelopeTest extends TestCase
         );
     }
 
-    public function test_source_registry_contains_exactly_the_eleven_canonical_sources(): void
+    public function test_source_registry_contains_exactly_the_canonical_sources(): void
     {
-        $this->assertCount(11, SourceRegistry::all());
+        // 11 external providers (ADR-0001, frozen) + the internal
+        // manual-entry marker (ADR-0015) — nothing else.
+        $this->assertCount(12, SourceRegistry::all());
         $this->assertTrue(SourceRegistry::isRegistered('SRC-clockworks-tiktok-scraper'));
+        $this->assertTrue(SourceRegistry::isRegistered('SRC-agency-manual-entry'));
         $this->assertFalse(SourceRegistry::isRegistered('SRC-modash'));
     }
 

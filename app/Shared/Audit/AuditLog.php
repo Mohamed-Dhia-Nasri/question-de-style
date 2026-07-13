@@ -13,8 +13,13 @@ class AuditLog extends Model
 {
     public const UPDATED_AT = null;
 
+    /**
+     * tenant_id and user_id are the trust-critical ownership/actor stamps and
+     * are deliberately NOT mass assignable — AuditLogger force-fills them from
+     * server state (TenantContext / Auth), so the audit trail's attribution
+     * can never be forged through a request-derived array (ADR-0019).
+     */
     protected $fillable = [
-        'user_id',
         'action',
         'subject_type',
         'subject_id',

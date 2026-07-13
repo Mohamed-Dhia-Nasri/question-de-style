@@ -38,6 +38,15 @@ final class SourceRegistry
     /** Optional deep-analysis pass over full video content. */
     public const GOOGLE_VIDEO_INTELLIGENCE = 'SRC-google-video-intelligence';
 
+    /**
+     * Internal marker, NOT an external provider (ADR-0015): the record's
+     * values were entered by hand by agency staff in the CRM (operator-
+     * curated platform accounts under ADR-0014). Performs no collection;
+     * the frozen external stack (ADR-0001) is unchanged. Never stamp it on
+     * a record that did come from an external provider.
+     */
+    public const AGENCY_MANUAL_ENTRY = 'SRC-agency-manual-entry';
+
     /** @return list<string> every registered SRC-* id */
     public static function all(): array
     {
@@ -53,6 +62,7 @@ final class SourceRegistry
             self::GOOGLE_CLOUD_VISION,
             self::GOOGLE_SPEECH_TO_TEXT,
             self::GOOGLE_VIDEO_INTELLIGENCE,
+            self::AGENCY_MANUAL_ENTRY,
         ];
     }
 

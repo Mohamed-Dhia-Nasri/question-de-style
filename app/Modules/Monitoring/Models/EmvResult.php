@@ -3,6 +3,7 @@
 namespace App\Modules\Monitoring\Models;
 
 use App\Shared\Casts\AsValueObject;
+use App\Shared\Tenancy\BelongsToTenant;
 use App\Shared\ValueObjects\MetricValue;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
@@ -20,7 +21,10 @@ use LogicException;
  * FLAGGED DEVIATION: not a canonical ENT-* — awaiting a data-model doc
  * amendment (see the create_emv_tables migration).
  *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property int $content_item_id
  * @property int $emv_configuration_id
  * @property string $formula_version
@@ -33,6 +37,8 @@ use LogicException;
  */
 class EmvResult extends Model
 {
+    use BelongsToTenant;
+
     public const UPDATED_AT = null;
 
     protected $fillable = [

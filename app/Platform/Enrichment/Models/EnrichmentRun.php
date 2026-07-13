@@ -5,6 +5,7 @@ namespace App\Platform\Enrichment\Models;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\Story;
 use App\Platform\Enrichment\Support\EnrichmentRunStatus;
+use App\Shared\Tenancy\BelongsToTenant;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -15,7 +16,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * (hashtags / recognition / sentiment / attribution) with sanitized values
  * only; failures never carry raw provider payloads.
  *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property int|null $content_item_id
  * @property int|null $story_id
  * @property string $correlation_id
@@ -27,6 +31,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class EnrichmentRun extends Model
 {
+    use BelongsToTenant;
+
     protected $fillable = [
         'content_item_id',
         'story_id',

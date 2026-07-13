@@ -14,4 +14,17 @@ enum CampaignStatus: string
     case Paused = 'PAUSED';
     case Completed = 'COMPLETED';
     case Cancelled = 'CANCELLED';
+
+    /** Human-facing label (presentation only — same convention as RoleName). */
+    public function label(): string
+    {
+        return match ($this) {
+            self::Draft => 'Draft',
+            self::Planned => 'Planned',
+            self::Active => 'Active',
+            self::Paused => 'Paused',
+            self::Completed => 'Completed',
+            self::Cancelled => 'Cancelled',
+        };
+    }
 }

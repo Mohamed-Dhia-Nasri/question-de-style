@@ -3,7 +3,32 @@
 namespace App\Modules\CRM;
 
 use App\Models\User;
+use App\Modules\CRM\Console\GdprEnforceRetentionCommand;
+use App\Modules\CRM\Console\GdprEraseCreatorCommand;
+use App\Modules\CRM\Console\GdprExportCreatorCommand;
+use App\Modules\CRM\Console\SendTaskRemindersCommand;
 use App\Modules\CRM\Contracts\CreatorProposals;
+use App\Modules\CRM\Livewire\Brands\BrandsIndex;
+use App\Modules\CRM\Livewire\Campaigns\CampaignCreatorsPanel;
+use App\Modules\CRM\Livewire\Campaigns\CampaignsIndex;
+use App\Modules\CRM\Livewire\Clients\ClientsIndex;
+use App\Modules\CRM\Livewire\Creators\BrandPreferencesPanel;
+use App\Modules\CRM\Livewire\Creators\CommunicationLogPanel;
+use App\Modules\CRM\Livewire\Creators\ContactsPanel;
+use App\Modules\CRM\Livewire\Creators\CreatorProfile;
+use App\Modules\CRM\Livewire\Creators\CreatorsIndex;
+use App\Modules\CRM\Livewire\Creators\GeographyPanel;
+use App\Modules\CRM\Livewire\Creators\PlatformAccountsPanel;
+use App\Modules\CRM\Livewire\Documents\DocumentsPanel;
+use App\Modules\CRM\Livewire\Products\ProductsIndex;
+use App\Modules\CRM\Livewire\Results\CampaignResultsPanel;
+use App\Modules\CRM\Livewire\Results\SeedingResultsDashboard;
+use App\Modules\CRM\Livewire\Results\SeedingResultsPanel;
+use App\Modules\CRM\Livewire\Seeding\SeedingCampaignsIndex;
+use App\Modules\CRM\Livewire\Seeding\SeedingCreatorsPanel;
+use App\Modules\CRM\Livewire\Seeding\ShipmentsPanel;
+use App\Modules\CRM\Livewire\Tasks\TasksIndex;
+use App\Modules\CRM\Livewire\Tasks\TasksPanel;
 use App\Modules\CRM\Livewire\Users\UsersIndex;
 use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\BrandPreference;
@@ -32,7 +57,7 @@ use App\Modules\CRM\Policies\SeedingCampaignPolicy;
 use App\Modules\CRM\Policies\ShipmentPolicy;
 use App\Modules\CRM\Policies\TaskPolicy;
 use App\Modules\CRM\Policies\UserPolicy;
-use App\Modules\CRM\Services\PendingCreatorProposals;
+use App\Modules\CRM\Services\CreatorProposalIntake;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Livewire\Livewire;
@@ -56,8 +81,9 @@ class CrmServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        // XMC-001 seam: implementation is M3 Step-2 work.
-        $this->app->bind(CreatorProposals::class, PendingCreatorProposals::class);
+        // XMC-001: M1/M2 proposals create fresh creators via SVC-CRM
+        // (AC-M3-002); no dedup — identity is operator-managed (ADR-0014).
+        $this->app->bind(CreatorProposals::class, CreatorProposalIntake::class);
     }
 
     public function boot(): void
@@ -83,5 +109,50 @@ class CrmServiceProvider extends ServiceProvider
         Gate::policy(Task::class, TaskPolicy::class);
 
         Livewire::component('crm.users-index', UsersIndex::class);
+
+        // Step 2 — the first real Module 3 screens (ADR-0012 hand-built
+        // Livewire; UsersIndex is the reference CRUD pattern).
+        Livewire::component('crm.creators-index', CreatorsIndex::class);
+        Livewire::component('crm.creator-profile', CreatorProfile::class);
+        Livewire::component('crm.creator-platform-accounts', PlatformAccountsPanel::class);
+        Livewire::component('crm.creator-contacts', ContactsPanel::class);
+        Livewire::component('crm.creator-brand-preferences', BrandPreferencesPanel::class);
+        Livewire::component('crm.creator-communication-log', CommunicationLogPanel::class);
+        Livewire::component('crm.creator-geography', GeographyPanel::class);
+
+        // Step 3 — master data, campaigns, seeding, shipments
+        // (REQ-M3-005/006/007 + the operator half of REQ-M3-008).
+        Livewire::component('crm.clients-index', ClientsIndex::class);
+        Livewire::component('crm.brands-index', BrandsIndex::class);
+        Livewire::component('crm.products-index', ProductsIndex::class);
+        Livewire::component('crm.campaigns-index', CampaignsIndex::class);
+        Livewire::component('crm.campaign-creators', CampaignCreatorsPanel::class);
+        Livewire::component('crm.seeding-campaigns-index', SeedingCampaignsIndex::class);
+        Livewire::component('crm.seeding-creators', SeedingCreatorsPanel::class);
+        Livewire::component('crm.seeding-shipments', ShipmentsPanel::class);
+
+        // Step 4 — results & reporting (REQ-M3-009/013): rollup-backed
+        // read panels on the detail pages plus the cross-influencer
+        // product dashboard. All aggregates flow through RollupReader
+        // (ADR-0010) — never FACT-* tables, never OLTP sums.
+        Livewire::component('crm.campaign-results', CampaignResultsPanel::class);
+        Livewire::component('crm.seeding-results', SeedingResultsPanel::class);
+        Livewire::component('crm.seeding-results-dashboard', SeedingResultsDashboard::class);
+
+        // Step 4 — documents & tasks (REQ-M3-010/011): one reusable
+        // documents panel per parent record, the tasks CRUD surface, and
+        // the compact anchored tasks panel.
+        Livewire::component('crm.documents-panel', DocumentsPanel::class);
+        Livewire::component('crm.tasks-index', TasksIndex::class);
+        Livewire::component('crm.tasks-panel', TasksPanel::class);
+
+        if ($this->app->runningInConsole()) {
+            $this->commands([
+                SendTaskRemindersCommand::class,
+                GdprExportCreatorCommand::class,
+                GdprEraseCreatorCommand::class,
+                GdprEnforceRetentionCommand::class,
+            ]);
+        }
     }
 }

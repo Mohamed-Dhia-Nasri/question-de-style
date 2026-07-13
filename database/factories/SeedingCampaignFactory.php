@@ -8,6 +8,7 @@ use App\Modules\CRM\Models\Product;
 use App\Modules\CRM\Models\SeedingCampaign;
 use App\Shared\Enums\SeedingCampaignStatus;
 use App\Shared\Enums\SeedingType;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -17,6 +18,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class SeedingCampaignFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = SeedingCampaign::class;
 
     /**
@@ -25,6 +28,7 @@ class SeedingCampaignFactory extends Factory
     public function definition(): array
     {
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'campaign_id' => null,
             // High-cardinality unique name (same rationale as CampaignFactory).
             'name' => 'Seeding '.fake()->unique()->numerify('####-####'),
@@ -32,6 +36,7 @@ class SeedingCampaignFactory extends Factory
             'brand_id' => Brand::factory(),
             'product_id' => null,
             'status' => SeedingCampaignStatus::Draft,
+            'spend' => null,
         ];
     }
 

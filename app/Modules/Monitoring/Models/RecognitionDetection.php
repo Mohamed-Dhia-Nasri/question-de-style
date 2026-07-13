@@ -4,6 +4,7 @@ namespace App\Modules\Monitoring\Models;
 
 use App\Shared\Casts\AsValueObject;
 use App\Shared\Enums\RecognitionType;
+use App\Shared\Tenancy\BelongsToTenant;
 use App\Shared\ValueObjects\ConfidenceAssessment;
 use App\Shared\ValueObjects\Provenance;
 use Database\Factories\RecognitionDetectionFactory;
@@ -21,7 +22,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * mandatory Provenance (DP-002). Low-confidence detections route to the
  * human review queue (DP-004, AC-M1-009).
  *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property int|null $content_item_id
  * @property int|null $story_id
  * @property RecognitionType $recognition_type
@@ -33,6 +37,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class RecognitionDetection extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<RecognitionDetectionFactory> */
     use HasFactory;
 

@@ -5,6 +5,7 @@ namespace App\Platform\Enrichment\Jobs;
 use App\Modules\Monitoring\Models\Story;
 use App\Platform\Enrichment\EnrichmentPipeline;
 use App\Platform\Ingestion\Jobs\Concerns\IngestionJobBehaviour;
+use App\Shared\Tenancy\TenantContext;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -58,7 +59,14 @@ class EnrichStoryJob implements ShouldBeUnique, ShouldQueue
         }
 
         try {
-            $pipeline->run($story, $this->correlationId, max(0, $this->attempts() - 1));
+            // ADR-0019: enrichment sweeps run tenant-less — the story row is
+            // the aggregate root; running the pipeline under its tenant makes
+            // every enrichment write (mentions, recognition detections,
+            // enrichment runs) stamp the right owner.
+            app(TenantContext::class)->runAs(
+                $story->tenant_id,
+                fn () => $pipeline->run($story, $this->correlationId, max(0, $this->attempts() - 1)),
+            );
         } catch (Throwable $e) {
             $this->handleProviderFailure($e);
         }

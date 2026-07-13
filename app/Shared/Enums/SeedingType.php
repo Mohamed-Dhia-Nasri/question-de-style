@@ -18,4 +18,15 @@ enum SeedingType: string
     case GiftingWithPost = 'GIFTING_WITH_POST';
     case PaidPlusProduct = 'PAID_PLUS_PRODUCT';
     case Organic = 'ORGANIC';
+
+    /** Human-facing label (presentation only — same convention as RoleName). */
+    public function label(): string
+    {
+        return match ($this) {
+            self::Gifting => 'Gifting',
+            self::GiftingWithPost => 'Gifting with post',
+            self::PaidPlusProduct => 'Paid + product',
+            self::Organic => 'Organic',
+        };
+    }
 }

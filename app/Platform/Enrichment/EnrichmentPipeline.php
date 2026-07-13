@@ -85,11 +85,24 @@ class EnrichmentPipeline
                 $stages['emv'] = 'skipped:content-items-only';
             }
 
-            $run->update([
-                'status' => EnrichmentRunStatus::Completed,
-                'stages' => $stages,
-                'finished_at' => CarbonImmutable::now(),
-            ]);
+            // Compare-and-swap on RUNNING: if the data-quality reaper already
+            // marked this row FAILED (a genuine over-run past the stale
+            // window), do NOT silently un-fail it back to COMPLETED — that
+            // would erase the reap evidence and hide both the hang and the
+            // duplicate sweep the reaper triggered.
+            EnrichmentRun::query()
+                ->whereKey($run->getKey())
+                ->where('status', EnrichmentRunStatus::Running->value)
+                ->update([
+                    'status' => EnrichmentRunStatus::Completed,
+                    'stages' => $stages,
+                    'finished_at' => CarbonImmutable::now(),
+                ]);
+
+            // Reflect the DB truth in the returned model — the completed
+            // stages when we won the swap, or the reaper's FAILED verdict if
+            // it beat us (0 rows updated).
+            $run->refresh();
         } catch (Throwable $e) {
             $run->update([
                 'status' => EnrichmentRunStatus::Failed,

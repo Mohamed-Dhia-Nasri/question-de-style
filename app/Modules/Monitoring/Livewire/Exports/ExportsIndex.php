@@ -20,6 +20,8 @@ use Livewire\WithPagination;
  * Report exports (REQ-M1-012, AC-M1-012): request a rollup-backed report
  * in PDF / EXCEL / CSV with the same validated server-side filters the
  * dashboards use, then download it through a short-lived signed link.
+ * The report-kind list derives from ReportBuilder::reports() — Step-4
+ * adds the Module 3 seeding-results kind (spec §2.5).
  *
  * Server-side authorization on every action (exports.create via
  * ExportJobPolicy); duplicate requests collapse onto the live job; the
@@ -28,6 +30,8 @@ use Livewire\WithPagination;
 class ExportsIndex extends Component
 {
     use WithPagination;
+
+    public string $report = ReportBuilder::MONITORING_SUMMARY;
 
     public string $format = 'CSV';
 
@@ -62,7 +66,8 @@ class ExportsIndex extends Component
         $user = Auth::user();
 
         try {
-            $exports->request($user, ReportBuilder::MONITORING_SUMMARY, $format, [
+            // ExportManager re-validates the kind against ReportBuilder::reports().
+            $exports->request($user, $this->report, $format, [
                 'grain' => $this->grain,
                 'from' => $this->from !== '' ? $this->from : null,
                 'to' => $this->to !== '' ? $this->to : null,
@@ -104,6 +109,7 @@ class ExportsIndex extends Component
                 ->where('user_id', Auth::id())
                 ->orderByDesc('id')
                 ->paginate(10),
+            'reports' => ReportBuilder::reports(),
             'formats' => ExportFormat::cases(),
             'grains' => RollupReader::GRAINS,
             'brands' => Brand::query()->orderBy('name')->get(['id', 'name']),

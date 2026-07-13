@@ -40,7 +40,10 @@ class CreatorsIndex extends Component
     /** @return list<string> */
     protected function sortableColumns(): array
     {
-        return ['display_name', 'relationship_status'];
+        return array_merge(
+            ['display_name', 'relationship_status', 'platform_accounts_count'],
+            RollupReader::CREATOR_SORT_METRICS,
+        );
     }
 
     /** @return list<int|string> */
@@ -65,9 +68,28 @@ class CreatorsIndex extends Component
             ->when(trim($this->search) !== '', fn (Builder $q) => $q->where(
                 'display_name', 'ilike', '%'.trim($this->search).'%',
             ))
+            ->withCount('platformAccounts')
             ->with('platformAccounts');
 
-        if ($this->sortField === '') {
+        $direction = $this->sortDirection === 'desc' ? 'desc' : 'asc';
+
+        if (in_array($this->sortField, RollupReader::CREATOR_SORT_METRICS, true)) {
+            // Rollup-metric sort: the ordering value is the SAME latest-
+            // bucket number the row displays, embedded via the reader's
+            // sanctioned subquery (ADR-0010). Creators without a rollup
+            // bucket sort last in either direction — "unavailable" never
+            // masquerades as the biggest or smallest value. The field is
+            // whitelist-validated above, never raw user input.
+            $query->select('creators.*')
+                ->selectSub(
+                    app(RollupReader::class)->latestCreatorMetricSubquery($this->sortField, 'month'),
+                    $this->sortField,
+                )
+                ->orderByRaw(sprintf('%s %s nulls last', $this->sortField, $direction))
+                ->orderBy('display_name');
+        } elseif ($this->sortField === 'platform_accounts_count') {
+            $query->orderBy('platform_accounts_count', $direction)->orderBy('display_name');
+        } elseif ($this->sortField === '') {
             $query->orderBy('display_name');
         } else {
             $query = $this->applySort($query);

@@ -82,6 +82,10 @@ class ObservabilityTest extends TestCase
     public function test_health_state_flips_to_failing_after_consecutive_failures_and_recovers(): void
     {
         config(['qds.ingestion.observability.failing_after_consecutive_failures' => 3]);
+        // This test exercises the recorder's health-state semantics; the
+        // circuit breaker would otherwise skip the recovery call (its own
+        // canary behavior is covered by ProviderCircuitBreakerTest).
+        config(['qds.ingestion.circuit_breaker.enabled' => false]);
 
         $account = $this->instagramAccount();
         $source = SourceRegistry::APIFY_INSTAGRAM_PROFILE_SCRAPER;

@@ -41,13 +41,18 @@ class StoryPersister
                 continue;
             }
 
+            // ADR-0019: the natural key is (tenant_id, platform, external_id)
+            // — the lookup is EXPLICITLY scoped to the account's tenant
+            // (explicit beats ambient in pipeline code), never relying on the
+            // TenantScope alone.
             $existing = Story::query()
+                ->where('tenant_id', $account->tenant_id)
                 ->where('platform', $item->platform->value)
                 ->where('external_id', $item->externalId)
                 ->first();
 
             if ($existing === null) {
-                $story = Story::query()->create([
+                $story = new Story([
                     'platform_account_id' => $account->id,
                     'platform' => $item->platform,
                     'external_id' => $item->externalId,
@@ -57,6 +62,9 @@ class StoryPersister
                     'public_metrics' => $item->publicMetrics,
                     'provenance' => $item->provenance,
                 ]);
+                // Explicit ownership from the parent account row (ADR-0019).
+                $story->tenant_id = $account->tenant_id;
+                $story->save();
 
                 $created++;
 
@@ -82,8 +90,9 @@ class StoryPersister
             $duplicates++;
 
             // Re-attempt archival if it never succeeded and the media is
-            // still retrievable (story not yet expired).
-            if ($existing->media_url === null && $item->mediaSourceUrl !== null) {
+            // still retrievable (story not yet expired) — but never after
+            // retention pruning removed it deliberately (DP-005).
+            if ($existing->media_url === null && $existing->media_pruned_at === null && $item->mediaSourceUrl !== null) {
                 $toArchive[] = ['story' => $existing, 'mediaSourceUrl' => $item->mediaSourceUrl];
             }
         }

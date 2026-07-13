@@ -11,13 +11,22 @@
 
             <div class="mt-4 space-y-3">
                 <div>
+                    <x-form.label for="export-report">Report</x-form.label>
+                    <x-form.select id="export-report" wire:model="report">
+                        @foreach ($reports as $r)
+                            <option value="{{ $r }}">{{ $r }}</option>
+                        @endforeach
+                    </x-form.select>
+                    <x-form.error for="report" />
+                </div>
+                <div>
                     <x-form.label for="export-format">Format</x-form.label>
                     <x-form.select id="export-format" wire:model="format">
                         @foreach ($formats as $f)
                             <option value="{{ $f->value }}">{{ $f->value }}</option>
                         @endforeach
                     </x-form.select>
-                    <x-form.error name="format" />
+                    <x-form.error for="format" />
                 </div>
                 <div>
                     <x-form.label for="export-grain">Grain</x-form.label>
@@ -26,18 +35,18 @@
                             <option value="{{ $g }}">{{ ucfirst($g) }}</option>
                         @endforeach
                     </x-form.select>
-                    <x-form.error name="grain" />
+                    <x-form.error for="grain" />
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                     <div>
                         <x-form.label for="export-from">From</x-form.label>
                         <x-form.input id="export-from" type="date" wire:model="from" />
-                        <x-form.error name="from" />
+                        <x-form.error for="from" />
                     </div>
                     <div>
                         <x-form.label for="export-to">To</x-form.label>
                         <x-form.input id="export-to" type="date" wire:model="to" />
-                        <x-form.error name="to" />
+                        <x-form.error for="to" />
                     </div>
                 </div>
                 <div>
@@ -48,7 +57,7 @@
                             <option value="{{ $brand->id }}">{{ $brand->name }}</option>
                         @endforeach
                     </x-form.select>
-                    <x-form.error name="brand_id" />
+                    <x-form.error for="brand_id" />
                 </div>
                 <div>
                     <x-form.label for="export-creator">Creator</x-form.label>
@@ -58,7 +67,7 @@
                             <option value="{{ $creator->id }}">{{ $creator->display_name }}</option>
                         @endforeach
                     </x-form.select>
-                    <x-form.error name="creator_id" />
+                    <x-form.error for="creator_id" />
                 </div>
 
                 <x-ui.button wire:click="requestExport" wire:loading.attr="disabled">

@@ -8,6 +8,7 @@ use App\Platform\Export\Models\ExportJob;
 use App\Platform\Export\Support\ExportJobStatus;
 use App\Shared\Audit\AuditLogger;
 use App\Shared\Enums\ExportFormat;
+use App\Shared\Tenancy\TenantContext;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
@@ -46,6 +47,9 @@ class ExportManager
         }
 
         try {
+            // ADR-0019: requests arrive over HTTP with the tenant context set
+            // by middleware; ExportJob's BelongsToTenant stamps tenant_id on
+            // create (NOT NULL backstop if no context — never guessed).
             $job = ExportJob::query()->create([
                 'user_id' => $user->id,
                 'report' => $report,
@@ -103,13 +107,17 @@ class ExportManager
             ->get();
 
         foreach ($expired as $job) {
-            if ($job->disk !== null && $job->file_path !== null) {
-                Storage::disk($job->disk)->delete($job->file_path);
-            }
+            // Runs from the scheduler in platform (null) context — attribute
+            // each pruned job's audit event to its owning tenant (ADR-0019).
+            app(TenantContext::class)->runAs($job->tenant_id, function () use ($job): void {
+                if ($job->disk !== null && $job->file_path !== null) {
+                    Storage::disk($job->disk)->delete($job->file_path);
+                }
 
-            $job->update(['status' => ExportJobStatus::Expired, 'file_path' => null]);
+                $job->update(['status' => ExportJobStatus::Expired, 'file_path' => null]);
 
-            $this->audit->record('export.pruned', $job);
+                $this->audit->record('export.pruned', $job);
+            });
         }
 
         return $expired->count();

@@ -10,6 +10,7 @@ use App\Shared\Enums\Platform;
 use App\Shared\ValueObjects\MetricValue;
 use App\Shared\ValueObjects\Provenance;
 use Carbon\CarbonImmutable;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -20,6 +21,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class PlatformAccountFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = PlatformAccount::class;
 
     /**
@@ -28,6 +31,7 @@ class PlatformAccountFactory extends Factory
     public function definition(): array
     {
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'creator_id' => null,
             'platform' => Platform::Instagram,
             'handle' => fake()->unique()->userName(),

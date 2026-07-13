@@ -7,6 +7,7 @@ use App\Platform\Enrichment\Models\EnrichmentRun;
 use App\Shared\Casts\AsValueObject;
 use App\Shared\Casts\AsValueObjectCollection;
 use App\Shared\Enums\Platform;
+use App\Shared\Tenancy\BelongsToTenant;
 use App\Shared\ValueObjects\MetricValue;
 use App\Shared\ValueObjects\Provenance;
 use Carbon\CarbonImmutable;
@@ -24,11 +25,15 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * mandatory Provenance envelope (DP-002). A story is always this entity and
  * never a ContentItem (STORY is not an ENUM-ContentType value).
  *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property int $platform_account_id
  * @property Platform $platform
  * @property string|null $external_id
  * @property string|null $media_url
+ * @property CarbonImmutable|null $media_pruned_at
  * @property CarbonImmutable $captured_at
  * @property CarbonImmutable|null $expires_at
  * @property list<MetricValue>|null $public_metrics
@@ -37,6 +42,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class Story extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<StoryFactory> */
     use HasFactory;
 
@@ -45,6 +52,7 @@ class Story extends Model
         'platform',
         'external_id',
         'media_url',
+        'media_pruned_at',
         'captured_at',
         'expires_at',
         'public_metrics',
@@ -57,6 +65,7 @@ class Story extends Model
     {
         return [
             'platform' => Platform::class,
+            'media_pruned_at' => 'immutable_datetime',
             'captured_at' => 'immutable_datetime',
             'expires_at' => 'immutable_datetime',
             'public_metrics' => AsValueObjectCollection::class.':'.MetricValue::class,

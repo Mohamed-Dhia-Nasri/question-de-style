@@ -10,7 +10,7 @@ depends_on:
   - docs/50-modules/module-2-discovery.md
   - docs/50-modules/module-3-crm-seeding.md
   - docs/60-architecture/00-system-architecture.md
-last_reviewed: 2026-07-02
+last_reviewed: 2026-07-12
 ---
 
 # Ownership Matrix — Entity Write-Authority
@@ -33,13 +33,21 @@ Module short names used below:
 | Module 1 — Monitoring & Reporting | M1 | [module-1-monitoring.md](../50-modules/module-1-monitoring.md) |
 | Module 2 — Discovery | M2 | [module-2-discovery.md](../50-modules/module-2-discovery.md) |
 | Module 3 — CRM & Seeding | M3 | [module-3-crm-seeding.md](../50-modules/module-3-crm-seeding.md) |
+| Billing — commercial infrastructure, **not** a fourth product module | Billing | [ADR-0021](../05-decisions/decision-log.md#adr-0021) |
 
 ## Entity ownership table
 
 Each entity links to its shape in the data model. **Write-owner** is the sole module permitted to persist the entity. **Readers** may only read.
 
+> **Tenancy (amended 2026-07-11, [ADR-0019](../05-decisions/decision-log.md#adr-0019)).** Every entity in this table is **tenant-owned** (carries the `tenantId` ownership key of [ENT-Tenant](../30-data-model/00-data-model.md#ent-tenant)) — the write-authority assignments below apply *within* a tenant, and no module may ever write across the tenant boundary (the database rejects cross-tenant links structurally). The ingestion-observability operational registers are global platform telemetry with no entity owner (see the [data model's operational-registers section](../30-data-model/00-data-model.md#operational-registers)). *Amended 2026-07-12 ([ADR-0021](../05-decisions/decision-log.md#adr-0021)):* two billing rows are deliberately **GLOBAL** — the plan catalog [ENT-SubscriptionPlan](../30-data-model/00-data-model.md#ent-subscriptionplan) (platform vocabulary, the same class as the role/permission definitions) and the `stripe_events` webhook ledger (platform infrastructure); every other row remains tenant-owned.
+
 | Entity | Write-owner | Readers | Write path / notes |
 | --- | --- | --- | --- |
+| [ENT-Tenant](../30-data-model/00-data-model.md#ent-tenant) | M3 | M1, M2 | The customer account ([ADR-0019](../05-decisions/decision-log.md#adr-0019)). Provisioned/administered through M3's admin surface (same authority as ENT-User); all modules resolve the ambient tenant context rather than writing the entity. *Amended 2026-07-12 ([ADR-0021](../05-decisions/decision-log.md#adr-0021)):* the entity gains `stripeCustomerId`, and Billing holds the **one sanctioned column-level exception** to M3's ownership — it force-fills that column once, under a row lock; no other Tenant field is ever written by Billing. |
+| [ENT-SubscriptionPlan](../30-data-model/00-data-model.md#ent-subscriptionplan) | Billing | M1, M2, M3 | **GLOBAL** plan catalog ([ADR-0021](../05-decisions/decision-log.md#adr-0021)) — written **only** by the idempotent config sync (`qds:billing-sync-plans` from `config/billing.php`); no UI write path. Plan gating reads the catalog, never plan-code literals. |
+| [ENT-TenantSubscription](../30-data-model/00-data-model.md#ent-tenantsubscription) | Billing | — | Tenant-owned subscription state ([ADR-0021](../05-decisions/decision-log.md#adr-0021)), written **only** by the verified-webhook `SubscriptionSynchronizer` — no QDS surface mutates it. The `subscribed` middleware reads it to gate product routes. |
+| [ENT-TeamInvitation](../30-data-model/00-data-model.md#ent-teaminvitation) | Billing | — | Tenant-owned hashed-token invitations ([ADR-0021](../05-decisions/decision-log.md#adr-0021)), issued/revoked/accepted through Billing's invitation service (issuance requires `users.manage`); acceptance creates the `ENT-User` through the user write path inside the seat lock. |
+| `stripe_events` *(infrastructure, not an entity — see the [operational registers](../30-data-model/00-data-model.md#operational-registers))* | Billing | — | **GLOBAL** webhook idempotency ledger ([ADR-0021](../05-decisions/decision-log.md#adr-0021)) — append-only and payload-free, written only by Billing's webhook controller. |
 | [ENT-Creator](../30-data-model/00-data-model.md#ent-creator) | M3 | M1, M2 | M3 CRM is the system of record for creator identity and merge. **All** Creator writes route through the CRM / ingestion service. M1 and M2 propose new creators via XMC-\*; they never write Creator directly. |
 | [ENT-PlatformAccount](../30-data-model/00-data-model.md#ent-platformaccount) | M3 | M1, M2 | M3 owns cross-platform account records tied to a Creator. |
 | [ENT-ContentItem](../30-data-model/00-data-model.md#ent-contentitem) | M1 | M2, M3 | Ingested public posts/reels are written by M1's ingestion pipeline. |
@@ -110,6 +118,12 @@ flowchart LR
     M3j[Task]
     M3k[User]
     M3l[Role]
+  end
+  subgraph BIL[Billing — commercial infrastructure]
+    direction TB
+    BILa[SubscriptionPlan]
+    BILb[TenantSubscription]
+    BILc[TeamInvitation]
   end
 
   M1 -. proposes new Creator via XMC-* .-> M3

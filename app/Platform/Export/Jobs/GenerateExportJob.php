@@ -9,6 +9,7 @@ use App\Platform\Export\ReportBuilder;
 use App\Platform\Export\ReportFilters;
 use App\Platform\Export\Support\ExportJobStatus;
 use App\Shared\Audit\AuditLog;
+use App\Shared\Tenancy\TenantContext;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Foundation\Queue\Queueable;
@@ -38,6 +39,24 @@ class GenerateExportJob implements ShouldQueue
             return; // already handled (duplicate-safe)
         }
 
+        // ADR-0019: the dispatcher's tenant travels in the queue payload and
+        // is restored automatically before handle() runs. Fallback for jobs
+        // enqueued without a context (e.g. re-dispatched from console): run
+        // under the ExportJob row's own tenant so the ReportBuilder's rollup
+        // reads and the artifact path are tenant-scoped.
+        $context = app(TenantContext::class);
+
+        if ($context->id() === null) {
+            $context->runAs($job->tenant_id, fn () => $this->generate($job, $builder, $exporter));
+
+            return;
+        }
+
+        $this->generate($job, $builder, $exporter);
+    }
+
+    private function generate(ExportJob $job, ReportBuilder $builder, ExportService $exporter): void
+    {
         $job->update(['status' => ExportJobStatus::Running]);
 
         try {
@@ -57,7 +76,12 @@ class GenerateExportJob implements ShouldQueue
 
             // System-side audit trail (job runs without an authenticated
             // user, so this is recorded directly with actor = requester).
-            AuditLog::create([
+            // tenant_id/user_id are force-filled from the job row, never mass
+            // assigned — the audit trail's ownership stamp is trust-critical
+            // and non-fillable by design (ADR-0019).
+            $log = new AuditLog;
+            $log->forceFill([
+                'tenant_id' => $job->tenant_id,
                 'user_id' => $job->user_id,
                 'action' => 'export.completed',
                 'subject_type' => $job->getMorphClass(),
@@ -66,6 +90,7 @@ class GenerateExportJob implements ShouldQueue
                 'request_id' => $job->correlation_id,
                 'created_at' => now(),
             ]);
+            $log->save();
         } catch (Throwable $e) {
             $job->update([
                 'status' => ExportJobStatus::Failed,

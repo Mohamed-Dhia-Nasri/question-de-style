@@ -3,16 +3,19 @@
 namespace App\Platform;
 
 use App\Modules\CRM\Services\IngestedProfileSync;
+use App\Modules\CRM\Services\ShipmentContentWriter;
+use App\Modules\CRM\Services\ShipmentEvidenceSource;
 use App\Platform\Analytics\Console\RefreshRollupsCommand;
 use App\Platform\Analytics\Contracts\AnalyticsService;
 use App\Platform\Analytics\NeonAnalyticsService;
-use App\Platform\Enrichment\Attribution\NullSeedingEvidenceSource;
 use App\Platform\Enrichment\Console\RunEnrichmentCommand;
 use App\Platform\Enrichment\Contracts\EnrichmentService;
 use App\Platform\Enrichment\Contracts\ReachEstimator;
 use App\Platform\Enrichment\Contracts\SeedingEvidenceSource;
 use App\Platform\Enrichment\Contracts\SentimentClassifier;
+use App\Platform\Enrichment\Contracts\ShipmentContentLinker;
 use App\Platform\Enrichment\DefaultEnrichmentService;
+use App\Platform\Enrichment\Matching\Console\LinkSeededContentCommand;
 use App\Platform\Enrichment\Reach\UnavailableReachEstimator;
 use App\Platform\Enrichment\Sentiment\UnavailableSentimentClassifier;
 use App\Platform\Export\Console\PruneExpiredExportsCommand;
@@ -20,8 +23,11 @@ use App\Platform\Export\Contracts\ExportService;
 use App\Platform\Export\DefaultExportService;
 use App\Platform\Export\Models\ExportJob;
 use App\Platform\Export\Policies\ExportJobPolicy;
+use App\Platform\Ingestion\Console\CheckDataQualityCommand;
 use App\Platform\Ingestion\Console\ProviderHealthCommand;
 use App\Platform\Ingestion\Console\PruneIngestionDataCommand;
+use App\Platform\Ingestion\Console\PruneStoryMediaCommand;
+use App\Platform\Ingestion\Console\RefreshCampaignContentCommand;
 use App\Platform\Ingestion\Console\RefreshIngestionStatusCommand;
 use App\Platform\Ingestion\Console\RunMonitoringCycleCommand;
 use App\Platform\Ingestion\Contracts\IngestionService;
@@ -58,13 +64,17 @@ class PlatformServiceProvider extends ServiceProvider
         // canonical model/provider decision stay bound to honest
         // "unavailable" implementations (never fabricate):
         //  - sentiment: no NLP model/provider is canonically decided;
-        //  - reach: no estimation method is canonically documented;
-        //  - seeding evidence: ENT-Shipment/ENT-SeedingCampaign are P3
-        //    (Module 3) — until then no documented seeding records exist.
+        //  - reach: no estimation method is canonically documented.
         $this->app->bind(EnrichmentService::class, DefaultEnrichmentService::class);
         $this->app->bind(SentimentClassifier::class, UnavailableSentimentClassifier::class);
         $this->app->bind(ReachEstimator::class, UnavailableReachEstimator::class);
-        $this->app->bind(SeedingEvidenceSource::class, NullSeedingEvidenceSource::class);
+
+        // Cross-module contracts with Module 3 (P3, live since M3 Step 3):
+        // seeding evidence is read from — and resulting-content links are
+        // written by — the CRM-owned implementations (ownership matrix;
+        // same pattern as PlatformAccountProfileSync above).
+        $this->app->bind(SeedingEvidenceSource::class, ShipmentEvidenceSource::class);
+        $this->app->bind(ShipmentContentLinker::class, ShipmentContentWriter::class);
 
         // SVC-Analytics is live (P0 analytics foundation + P1 fact loaders):
         // star schema on Neon Postgres, scheduled matview rollups (ADR-0013).
@@ -90,10 +100,14 @@ class PlatformServiceProvider extends ServiceProvider
                 CaptureSnapshotsCommand::class,
                 RefreshRollupsCommand::class,
                 RunMonitoringCycleCommand::class,
+                RefreshCampaignContentCommand::class,
                 RefreshIngestionStatusCommand::class,
                 PruneIngestionDataCommand::class,
+                PruneStoryMediaCommand::class,
+                CheckDataQualityCommand::class,
                 ProviderHealthCommand::class,
                 RunEnrichmentCommand::class,
+                LinkSeededContentCommand::class,
                 PruneExpiredExportsCommand::class,
             ]);
         }

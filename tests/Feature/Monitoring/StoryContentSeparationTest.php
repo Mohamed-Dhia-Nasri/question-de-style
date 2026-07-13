@@ -28,6 +28,7 @@ class StoryContentSeparationTest extends TestCase
         $this->expectException(QueryException::class);
 
         DB::table('content_items')->insert([
+            'tenant_id' => $this->defaultTenant->id,
             'platform_account_id' => Story::factory()->create()->platform_account_id,
             'platform' => 'INSTAGRAM',
             'content_type' => 'STORY',

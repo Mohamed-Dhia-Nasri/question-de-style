@@ -2,6 +2,7 @@
 
 namespace App\Modules\CRM\Models;
 
+use App\Shared\Tenancy\BelongsToTenant;
 use Carbon\CarbonImmutable;
 use Database\Factories\CommunicationLogFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -17,7 +18,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * `direction` are canonical string fields (no glossary enum → no closed
  * set is invented here).
  *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property int $creator_id
  * @property int|null $campaign_id
  * @property string $channel
@@ -27,6 +31,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class CommunicationLog extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<CommunicationLogFactory> */
     use HasFactory;
 

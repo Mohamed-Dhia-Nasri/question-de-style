@@ -8,6 +8,7 @@ use App\Shared\Enums\ConfidenceLevel;
 use App\Shared\Enums\SentimentLabel;
 use App\Shared\Enums\VerificationStatus;
 use App\Shared\ValueObjects\ConfidenceAssessment;
+use Database\Factories\Concerns\ResolvesTenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -19,6 +20,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class SentimentAnalysisFactory extends Factory
 {
+    use ResolvesTenant;
+
     protected $model = SentimentAnalysis::class;
 
     /**
@@ -29,6 +32,7 @@ class SentimentAnalysisFactory extends Factory
         $label = fake()->randomElement([SentimentLabel::Positive, SentimentLabel::Neutral, SentimentLabel::Negative]);
 
         return [
+            'tenant_id' => fn () => $this->defaultTenantId(),
             'content_item_id' => ContentItem::factory(),
             'comment_id' => null,
             'label' => $label,

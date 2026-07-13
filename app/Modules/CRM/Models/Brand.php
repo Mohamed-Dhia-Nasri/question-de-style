@@ -3,6 +3,7 @@
 namespace App\Modules\CRM\Models;
 
 use App\Shared\Enums\SectorLabel;
+use App\Shared\Tenancy\BelongsToTenant;
 use Database\Factories\BrandFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -15,7 +16,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  *
  * Write-owner: Module 3 CRM (ownership matrix). Module 1 and Module 2 read only.
  *
+ * Tenant-owned (ADR-0019): NOT NULL tenant_id, scoped and stamped via BelongsToTenant.
+ *
  * @property int $id
+ * @property int|null $tenant_id
  * @property int $client_id
  * @property string $name
  * @property SectorLabel|null $sector
@@ -23,6 +27,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class Brand extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<BrandFactory> */
     use HasFactory;
 

@@ -19,6 +19,7 @@ class ForeignKeyConstraintsTest extends TestCase
         $this->expectException(QueryException::class);
 
         DB::table('content_items')->insert([
+            'tenant_id' => $this->defaultTenant->id,
             'platform_account_id' => 999_999,
             'platform' => 'INSTAGRAM',
             'content_type' => 'REEL',
@@ -39,6 +40,7 @@ class ForeignKeyConstraintsTest extends TestCase
         $this->expectException(QueryException::class);
 
         DB::table('mentions')->insert([
+            'tenant_id' => $this->defaultTenant->id,
             'monitored_subject_id' => 999_999,
             'content_item_id' => $contentItem->id,
             'mention_type' => 'UNKNOWN',

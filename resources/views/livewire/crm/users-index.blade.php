@@ -203,6 +203,8 @@
                 </div>
 
                 <x-form.toggle wire:model="active" label="Active — user may sign in" />
+                {{-- Seat-limit violations (ADR-0021): active users consume seats. --}}
+                <x-form.error for="seats" />
             </form>
 
             <x-slot:footer>

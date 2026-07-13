@@ -353,8 +353,11 @@ creator email/phone are not auto-extracted and render "unavailable"
 [`ENUM-ExportFormat`](../00-meta/03-glossary.md#enum-exportformat); exports carry
 the same tier labels, confidence indicators, and provenance references as the
 on-screen view. White-label client reports are a **P4** hardening item — see the
-[roadmap](../80-delivery/00-roadmap.md).
+[roadmap](../80-delivery/00-roadmap.md) *(void — no external clients,
+[ADR-0016](../05-decisions/decision-log.md#adr-0016) — unless that ADR is
+superseded)*.
 
 **Access:** report visibility follows the roles/permissions defined in Module 3
 ([`ENUM-RoleName`](../00-meta/03-glossary.md#enum-rolename)); `CLIENT_VIEWER`
-sees only approved reports for their brands.
+sees only approved reports for their brands *(dropped from v1 — no external
+clients, [ADR-0016](../05-decisions/decision-log.md#adr-0016))*.

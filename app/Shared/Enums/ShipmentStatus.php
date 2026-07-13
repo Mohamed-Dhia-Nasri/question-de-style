@@ -15,4 +15,18 @@ enum ShipmentStatus: string
     case Delivered = 'DELIVERED';
     case Returned = 'RETURNED';
     case Failed = 'FAILED';
+
+    /** Human-facing label (presentation only — same convention as RoleName). */
+    public function label(): string
+    {
+        return match ($this) {
+            self::Pending => 'Pending',
+            self::Preparing => 'Preparing',
+            self::Shipped => 'Shipped',
+            self::InTransit => 'In transit',
+            self::Delivered => 'Delivered',
+            self::Returned => 'Returned',
+            self::Failed => 'Failed',
+        };
+    }
 }

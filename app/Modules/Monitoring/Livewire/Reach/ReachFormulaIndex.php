@@ -6,7 +6,9 @@ use App\Models\User;
 use App\Modules\Monitoring\Models\ReachConfiguration;
 use App\Platform\Enrichment\Reach\ReachConfigurationService;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use JsonException;
 use Livewire\Component;
@@ -83,16 +85,22 @@ class ReachFormulaIndex extends Component
         }
 
         try {
-            $service->create([
+            // Savepoint so a duplicate formula_version's unique-constraint
+            // violation leaves the connection usable (mirrors ClientsIndex).
+            DB::transaction(fn () => $service->create([
                 'name' => $this->name,
                 'method' => trim($this->method),
                 'formula_version' => $this->formulaVersion,
                 'params' => $params,
                 'effective_from' => $this->effectiveFrom,
                 'notes' => trim($this->notes) !== '' ? trim($this->notes) : null,
-            ], $this->user());
+            ], $this->user()));
         } catch (InvalidArgumentException $e) {
             $this->formError = $e->getMessage();
+
+            return;
+        } catch (QueryException $e) {
+            $this->formError = 'Could not save — a configuration with this formula version already exists for your account, or the values were rejected.';
 
             return;
         }

@@ -23,11 +23,14 @@ use App\Modules\Monitoring\Models\EmvConfiguration;
 use App\Modules\Monitoring\Models\HashtagList;
 use App\Modules\Monitoring\Models\Mention;
 use App\Modules\Monitoring\Models\MonitoredSubject;
+use App\Modules\Monitoring\Models\ReachConfiguration;
 use App\Modules\Monitoring\Models\RecognitionDetection;
 use App\Modules\Monitoring\Models\SentimentAnalysis;
 use App\Modules\Monitoring\Models\Story;
 use App\Platform\Enrichment\Hashtags\HashtagNormalizer;
+use App\Platform\Enrichment\Reach\ReachCalculator;
 use App\Platform\Enrichment\Support\EmvConfigurationStatus;
+use App\Platform\Enrichment\Support\ReachConfigurationStatus;
 use App\Platform\Export\Models\ExportJob;
 use App\Platform\Export\ReportFilters;
 use App\Platform\Export\Support\ExportJobStatus;
@@ -177,6 +180,7 @@ class DemoDataSeeder extends Seeder
             $this->seedRecognition();
             $this->seedComments();
             $this->seedEmv();
+            $this->seedReach();
             $this->seedCampaigns();
             $this->seedCommunicationLogs();
             $this->seedSeedingAndShipments();
@@ -669,6 +673,39 @@ class DemoDataSeeder extends Seeder
         }
 
         $this->command->info('EMV configurations: 4, EMV results: '.count($rows));
+    }
+
+    /** Mirrors seedEmv(): an ACTIVE reach configuration + DRAFT/ARCHIVED samples, then real ReachResult rows via ReachCalculator (REQ-M1-006, ADR-0022). */
+    private function seedReach(): void
+    {
+        $admin = $this->staff->firstWhere('email', 'admin@qds.test') ?? $this->staff->first();
+
+        $active = ReachConfiguration::factory()->active()->create([
+            'name' => 'QDS Estimated Reach 2026',
+            'method' => 'qds-estimated-reach',
+            'formula_version' => 'reach-2026.1',
+            'params' => ['view_weight' => 0.7, 'follower_weight' => 0.1],
+            'effective_from' => $this->now->subMonths(3)->toDateString(),
+            'created_by' => $admin->id,
+            'activated_by' => $admin->id,
+        ]);
+        ReachConfiguration::factory()->create(['name' => 'Draft: Q4 reach proposal', 'status' => ReachConfigurationStatus::Draft, 'created_by' => $admin->id]);
+        ReachConfiguration::factory()->create(['name' => 'Legacy 2025 reach model', 'status' => ReachConfigurationStatus::Archived, 'created_by' => $admin->id]);
+
+        // Eager-load platformAccount (Model::shouldBeStrict forbids lazy
+        // loading outside production) before handing content to the real
+        // calculator, so seeded reach_results use the disclosed formula.
+        $calculator = app(ReachCalculator::class);
+        $content = ContentItem::query()->with('platformAccount')->whereIn('id', array_keys($this->contentIndex))->get();
+
+        $resultCount = 0;
+        foreach ($content as $item) {
+            if ($calculator->calculate($item) !== null) {
+                $resultCount++;
+            }
+        }
+
+        $this->command->info("Reach configurations: 3 (1 active: {$active->formula_version}), reach results: {$resultCount}");
     }
 
     private function seedCampaigns(): void

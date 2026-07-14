@@ -12,7 +12,11 @@ use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\Mention;
 use App\Modules\Monitoring\Models\MetricSnapshot;
 use App\Modules\Monitoring\Models\MonitoredSubject;
+use App\Modules\Monitoring\Models\ReachConfiguration;
+use App\Modules\Monitoring\Models\ReachResult;
 use App\Modules\Monitoring\Models\Story;
+use App\Shared\Enums\MetricTier;
+use App\Shared\ValueObjects\ReachEstimate;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -36,7 +40,7 @@ class GdprTest extends TestCase
         Storage::fake('exports');
     }
 
-    /** @return array{creator: Creator, account: PlatformAccount, content: ContentItem, story: Story} */
+    /** @return array{creator: Creator, account: PlatformAccount, content: ContentItem, story: Story, reachResult: ReachResult} */
     private function seedCreatorWithFullFootprint(): array
     {
         $creator = Creator::factory()->create(['display_name' => 'Erika Musterfrau']);
@@ -70,6 +74,18 @@ class GdprTest extends TestCase
         MetricSnapshot::factory()->create(['platform_account_id' => $account->id]);
         MetricSnapshot::factory()->contentLevel()->create(['content_item_id' => $content->id]);
 
+        // Estimated reach (REQ-M1-006, ADR-0022) — append-only like emv_results
+        // and FK-restricted to content_items; the eraser must purge it too.
+        $reachConfig = ReachConfiguration::factory()->active()->create();
+        $reachResult = ReachResult::query()->create([
+            'content_item_id' => $content->id,
+            'reach_configuration_id' => $reachConfig->id,
+            'formula_version' => $reachConfig->formula_version,
+            'value' => new ReachEstimate(1000.0, MetricTier::Estimated, 'qds-estimated-reach v1'),
+            'inputs' => ['views' => 800, 'followers' => 400],
+            'calculated_at' => now(),
+        ]);
+
         // Analytics star-schema rows keyed by the creator (no FKs — loaders
         // stamp ids; minimal columns satisfy the NOT NULLs).
         DB::table('dim_creator')->insert([
@@ -88,7 +104,7 @@ class GdprTest extends TestCase
             'captured_at' => now(),
         ]);
 
-        return ['creator' => $creator, 'account' => $account, 'content' => $content, 'story' => $story];
+        return ['creator' => $creator, 'account' => $account, 'content' => $content, 'story' => $story, 'reachResult' => $reachResult];
     }
 
     public function test_export_contains_all_personal_data_categories(): void
@@ -141,7 +157,7 @@ class GdprTest extends TestCase
 
     public function test_erasure_removes_all_rows_history_and_files(): void
     {
-        ['creator' => $creator, 'account' => $account, 'content' => $content, 'story' => $story]
+        ['creator' => $creator, 'account' => $account, 'content' => $content, 'story' => $story, 'reachResult' => $reachResult]
             = $this->seedCreatorWithFullFootprint();
 
         // An unrelated creator must be untouched.
@@ -160,6 +176,7 @@ class GdprTest extends TestCase
         $this->assertDatabaseMissing('mentions', ['content_item_id' => $content->id]);
         $this->assertDatabaseMissing('metric_snapshots', ['platform_account_id' => $account->id]);
         $this->assertDatabaseMissing('metric_snapshots', ['content_item_id' => $content->id]);
+        $this->assertDatabaseMissing('reach_results', ['id' => $reachResult->id]);
         $this->assertSame(0, DB::table('dim_creator')->where('creator_id', $creator->id)->count());
         $this->assertSame(0, DB::table('fact_creator_account')->where('creator_id', $creator->id)->count());
 

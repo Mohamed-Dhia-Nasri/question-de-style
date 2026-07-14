@@ -3,6 +3,7 @@
 namespace Tests\Feature\Reach;
 
 use App\Modules\Monitoring\Livewire\Reach\ReachFormulaIndex;
+use App\Modules\Monitoring\Models\ReachConfiguration;
 use App\Shared\Enums\RoleName;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -45,6 +46,31 @@ class ReachFormulaIndexTest extends TestCase
             ->call('save')
             ->assertSet('formError', fn ($v) => $v !== null);
         $this->assertDatabaseMissing('reach_configurations', ['name' => 'Bad']);
+    }
+
+    public function test_duplicate_formula_version_surfaces_a_friendly_form_error_instead_of_a_500(): void
+    {
+        $admin = $this->makeUser(RoleName::Admin);
+
+        Livewire::actingAs($admin)->test(ReachFormulaIndex::class)
+            ->call('create')
+            ->set('name', 'First reach model')
+            ->set('formulaVersion', 'reach-dup')
+            ->set('viewWeight', '0.7')
+            ->set('followerWeight', '0.1')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        Livewire::actingAs($admin)->test(ReachFormulaIndex::class)
+            ->call('create')
+            ->set('name', 'Second reach model, same version')
+            ->set('formulaVersion', 'reach-dup')
+            ->set('viewWeight', '0.7')
+            ->set('followerWeight', '0.1')
+            ->call('save')
+            ->assertSet('formError', fn ($v) => $v !== null);
+
+        $this->assertSame(1, ReachConfiguration::query()->where('formula_version', 'reach-dup')->count());
     }
 
     public function test_non_admin_cannot_create(): void

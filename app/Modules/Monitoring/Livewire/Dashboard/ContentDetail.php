@@ -130,6 +130,7 @@ class ContentDetail extends Component
             'sentimentAnalyses',
             'emvResults' => fn ($q) => $q->orderByDesc('calculated_at')->limit(1),
             'emvResults.configuration',
+            'reachResults' => fn ($q) => $q->orderByDesc('calculated_at')->limit(1),
         ]);
 
         $latestSnapshot = $content->metricSnapshots()
@@ -160,6 +161,7 @@ class ContentDetail extends Component
             'commentRate' => $derived->commentRate($content, $followerCount),
             'engagementBase' => (string) config('qds.enrichment.metrics.engagement_base'),
             'latestEmv' => $content->emvResults->first(),
+            'latestReach' => $content->reachResults->first(),
             'reviewHistory' => $reviewHistory,
             'mentionTypes' => MentionType::cases(),
             'sentimentLabels' => SentimentLabel::cases(),

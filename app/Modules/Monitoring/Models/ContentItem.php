@@ -127,6 +127,12 @@ class ContentItem extends Model
         return $this->hasMany(EmvResult::class);
     }
 
+    /** @return HasMany<ReachResult, $this> */
+    public function reachResults(): HasMany
+    {
+        return $this->hasMany(ReachResult::class);
+    }
+
     /** @return HasMany<EnrichmentRun, $this> */
     public function enrichmentRuns(): HasMany
     {

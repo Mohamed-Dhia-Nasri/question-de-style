@@ -95,6 +95,7 @@ class CreatorEraser
             $counts['recognition_detections'] = $this->deleteByIds('recognition_detections', $recognitionIds);
             $counts['content_hashtags'] = $this->deleteWhereIn('content_hashtags', 'content_item_id', $contentIds);
             $counts['emv_results'] = $this->deleteWhereIn('emv_results', 'content_item_id', $contentIds);
+            $counts['reach_results'] = $this->deleteWhereIn('reach_results', 'content_item_id', $contentIds);
             $counts['enrichment_runs'] = ($contentIds === [] && $storyIds === []) ? 0 : DB::table('enrichment_runs')
                 ->where(fn ($q) => $q->whereIn('content_item_id', $contentIds)->orWhereIn('story_id', $storyIds))
                 ->delete();

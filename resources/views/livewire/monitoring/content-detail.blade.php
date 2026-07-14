@@ -97,7 +97,13 @@
                 <div class="rounded-xl border border-gray-100 p-3 dark:border-gray-800">
                     <p class="text-theme-xs uppercase text-gray-400">Estimated reach</p>
                     <div class="mt-1">
-                        <x-states.unavailable reason="No reach-estimation method is canonically documented (flagged decision gap) — reach is never derived ad hoc." />
+                        @if ($latestReach)
+                            <span class="text-lg font-semibold text-gray-800 dark:text-white/90">{{ number_format($latestReach->value->amount) }}</span>
+                            <x-metric.tier-badge tier="ESTIMATED" />
+                            <p class="mt-0.5 text-theme-xs text-gray-400">method: {{ $latestReach->value->method }}</p>
+                        @else
+                            <x-states.unavailable reason="Estimated reach is unavailable until a reach configuration is active and this content has been enriched (REQ-M1-006)." />
+                        @endif
                     </div>
                 </div>
                 <div class="rounded-xl border border-gray-100 p-3 dark:border-gray-800">

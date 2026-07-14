@@ -3,7 +3,7 @@
         <p class="text-sm text-gray-500 dark:text-gray-400">
             Reach formula: <span class="font-mono">round(view_weight × views + follower_weight × followers)</span>,
             versioned per tenant. Estimated reach stays <span class="font-medium">unavailable</span> until a
-            configuration is activated; it is always an ESTIMATED figure and never a raw view count (DEF-003).
+            configuration is activated; it is always an ESTIMATED figure and never a raw view count (GL-PublicViews).
         </p>
 
         @can('create', App\Modules\Monitoring\Models\ReachConfiguration::class)

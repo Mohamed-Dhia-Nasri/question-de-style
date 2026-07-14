@@ -93,7 +93,7 @@
             <p class="mt-1 text-theme-xs text-gray-400">Engagement base: {{ $engagementBase }} (configured, disclosed with every rate).</p>
 
             <h4 class="mt-5 text-sm font-semibold text-gray-700 dark:text-gray-200">Reach (REQ-M1-006)</h4>
-            <div class="mt-2 grid gap-3 sm:grid-cols-2">
+            <div class="mt-2 grid gap-3">
                 <div class="rounded-xl border border-gray-100 p-3 dark:border-gray-800">
                     <p class="text-theme-xs uppercase text-gray-400">Estimated reach</p>
                     <div class="mt-1">

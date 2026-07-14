@@ -100,7 +100,11 @@ class ReachFormulaIndex extends Component
 
             return;
         } catch (QueryException $e) {
-            $this->formError = 'Could not save — a configuration with this formula version already exists for your account, or the values were rejected.';
+            if (! str_contains($e->getMessage(), 'reach_configurations_tenant_version_unique')) {
+                throw $e;
+            }
+
+            $this->formError = 'Could not save — a configuration with this formula version already exists for your account.';
 
             return;
         }

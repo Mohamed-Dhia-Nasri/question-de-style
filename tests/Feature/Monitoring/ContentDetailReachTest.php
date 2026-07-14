@@ -18,8 +18,7 @@ use Tests\TestCase;
 /**
  * Content-detail "Estimated reach" tile (Task B5, REQ-M1-006, ADR-0022):
  * shows the latest stored reach_results value (amount, ESTIMATED tier,
- * disclosed method) once one exists; "unavailable" otherwise. The separate
- * "Confirmed unique reach" tile is untouched — Phase C owns it.
+ * disclosed method) once one exists; "unavailable" otherwise.
  */
 class ContentDetailReachTest extends TestCase
 {

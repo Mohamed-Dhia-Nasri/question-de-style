@@ -67,7 +67,12 @@ class DashboardScreensTest extends TestCase
             ->assertSee('Monitored creators (roster)')
             ->assertSee('Pending reviews')
             ->assertSee('unavailable')          // deferred/unmeasured values
-            ->assertSee('DEF-003', false)       // confirmed-reach deferral cited
+            // Estimated reach now has a documented method (ADR-0022); no
+            // rollups yet means an honest "not yet", never DEF-003 (that's
+            // CONFIRMED-reach only, no longer surfaced on this page).
+            ->assertSee('No estimated reach in the rollups for this period yet', false)
+            ->assertSee('REQ-M1-006', false)
+            ->assertDontSee('DEF-003')
             ->assertSee('DEF-005', false)       // comment analysis deferred
             ->assertSee('DEF-006', false);      // open-web listening deferred
     }
@@ -211,8 +216,13 @@ class DashboardScreensTest extends TestCase
         $this->get("/monitoring/content/{$content->id}")
             ->assertOk()
             ->assertSee('Derived rates')
-            ->assertSee('DEF-003', false)
-            ->assertSee('unavailable');
+            // No active reach configuration/enrichment for this content:
+            // estimated reach is honest about "not yet" (REQ-M1-006). The
+            // retired "Confirmed unique reach / impressions" DEF-003
+            // placeholder tile is gone from this page.
+            ->assertSee('unavailable')
+            ->assertDontSee('DEF-003')
+            ->assertDontSee('Confirmed unique reach');
 
         Livewire::test(ContentDetail::class, ['contentItem' => $content])
             ->set('correctionSentiment', SentimentLabel::Positive->value)

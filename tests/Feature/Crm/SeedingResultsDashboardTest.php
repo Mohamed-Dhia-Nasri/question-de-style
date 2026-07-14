@@ -150,7 +150,12 @@ class SeedingResultsDashboardTest extends TestCase
             ->assertSee('500')     // views [PUBLIC]
             ->assertSee('PUBLIC')
             ->assertSee('DERIVED')
-            ->assertSee('DEF-003'); // reach honesty — never a fabricated number
+            // reach honesty — no estimated reach computed for this slice
+            // yet, never a fabricated number, and never DEF-003 (that's
+            // CONFIRMED-reach only, retired from this ESTIMATED surface).
+            ->assertSee('No estimated reach for this slice yet')
+            ->assertSee('REQ-M1-006')
+            ->assertDontSee('DEF-003');
     }
 
     public function test_an_unknown_grain_falls_back_to_month(): void

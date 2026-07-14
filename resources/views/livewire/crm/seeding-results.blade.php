@@ -54,14 +54,8 @@
                         <span class="text-lg font-semibold text-gray-800 dark:text-white/90">{{ number_format((float) $totals->total_estimated_reach) }}</span>
                         <x-metric.tier-badge tier="ESTIMATED" />
                     @else
-                        <x-states.unavailable reason="No canonically documented reach-estimation method; CONFIRMED unique reach is deferred (DEF-003)." />
+                        <x-states.unavailable reason="No estimated reach for this run yet — reach is computed from observed metrics once an active reach configuration exists (REQ-M1-006); never fabricated." />
                     @endif
-                </div>
-            </div>
-            <div class="rounded-xl border border-gray-100 p-3 dark:border-gray-800">
-                <p class="text-theme-xs uppercase text-gray-400">True unique reach</p>
-                <div class="mt-1">
-                    <x-states.unavailable reason="CONFIRMED unique reach requires authorized private analytics — deferred (DEF-003, ADR-0006)." />
                 </div>
             </div>
             <div class="rounded-xl border border-gray-100 p-3 dark:border-gray-800">

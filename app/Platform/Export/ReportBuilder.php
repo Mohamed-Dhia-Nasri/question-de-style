@@ -20,9 +20,9 @@ use InvalidArgumentException;
  *  - the EMV disclosure block carries the active model + rate card, or the
  *    literal Unavailable state when no configuration is active;
  *  - deferred / unmeasured values render the literal "Unavailable" —
- *    estimated reach (no canonical method yet; CONFIRMED reach is
- *    DEF-003), posting frequency (no canonical formula), comment analysis
- *    (DEF-005), open-web listening (DEF-006);
+ *    estimated reach (ESTIMATED per ADR-0022; CONFIRMED unique reach
+ *    remains DEF-003), posting frequency (no canonical formula), comment
+ *    analysis (DEF-005), open-web listening (DEF-006);
  *  - no personal data beyond the public persona display name (DP-005);
  *    contact/audience fields never enter a default export.
  */
@@ -122,7 +122,7 @@ class ReportBuilder
         $lines = [
             'Metric tiers: PUBLIC = directly observed; DERIVED = deterministically computed from PUBLIC values; ESTIMATED = modelled, never a fact; CONFIRMED = authorized/manual input (DP-001).',
             'Engagement rate model: (likes + comments + shares + saves) / '.config('qds.enrichment.metrics.engagement_base').' — MET-EngagementRate, base disclosed per configuration.',
-            'Estimated reach: Unavailable — no estimation method is canonically documented; CONFIRMED unique reach is deferred (DEF-003).',
+            'True unique reach: Unavailable — CONFIRMED unique reach/impressions requires authorized private analytics (DEF-003, ADR-0006). Estimated reach is shown where computed (ESTIMATED).',
             'Comment & audience-reaction analysis: Unavailable — deferred (DEF-005). Open-web listening beyond the roster: Unavailable — deferred (DEF-006).',
             'Share of voice: brand mentions / all brand-attributed mentions in the same period bucket (GL-ShareOfVoice, DERIVED).',
             $this->emvDisclosure(),
@@ -289,7 +289,7 @@ class ReportBuilder
             'Metric tiers: PUBLIC = directly observed; DERIVED = deterministically computed from PUBLIC values; ESTIMATED = modelled, never a fact; CONFIRMED = authorized/manual input (DP-001).',
             'Engagement sum: likes + comments + shares + saves over the latest snapshot per shipment × content item; unobserved components never count as zero.',
             'CPE = agency-entered spend (CONFIRMED) / total engagement; CPM = spend / (total views ÷ 1000) — DERIVED at display time (AC-M3-015), never stored or summed; Unavailable without spend or with a NULL/zero divisor — never zero, never infinity.',
-            'Estimated reach: Unavailable — no estimation method is canonically documented; CONFIRMED unique reach is deferred (DEF-003).',
+            'True unique reach: Unavailable — CONFIRMED unique reach/impressions requires authorized private analytics (DEF-003, ADR-0006). Estimated reach is shown where computed (ESTIMATED).',
             'Geography (country/city) is a CREATOR attribute — the posting creator\'s operator-assigned location (ADR-0018), never a property of a brand or product; creators without an assignment render Unavailable.',
             $this->emvDisclosure(),
         ];

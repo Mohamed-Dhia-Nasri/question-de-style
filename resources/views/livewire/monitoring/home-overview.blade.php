@@ -34,7 +34,7 @@
                     <x-metric.tier-badge tier="ESTIMATED" />
                 @else
                     <x-states.unavailable
-                        reason="No estimated-reach figures in the rollups for this period; CONFIRMED unique reach is deferred in v1 (DEF-003) and never fabricated." />
+                        reason="No estimated-reach figures in the rollups for this period yet (REQ-M1-006); never fabricated." />
                 @endif
             </div>
             <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">

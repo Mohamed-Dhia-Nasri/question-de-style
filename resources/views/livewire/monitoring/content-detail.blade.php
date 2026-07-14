@@ -106,12 +106,6 @@
                         @endif
                     </div>
                 </div>
-                <div class="rounded-xl border border-gray-100 p-3 dark:border-gray-800">
-                    <p class="text-theme-xs uppercase text-gray-400">Confirmed unique reach / impressions</p>
-                    <div class="mt-1">
-                        <x-states.unavailable reason="CONFIRMED reach requires authorized private analytics — deferred (DEF-003, ADR-0006)." />
-                    </div>
-                </div>
             </div>
 
             <h4 class="mt-5 text-sm font-semibold text-gray-700 dark:text-gray-200">EMV (REQ-M1-011)</h4>

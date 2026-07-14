@@ -188,7 +188,7 @@
                                     @if ($row->total_estimated_reach !== null)
                                         {{ number_format((float) $row->total_estimated_reach) }} <x-metric.tier-badge tier="ESTIMATED" />
                                     @else
-                                        <x-states.unavailable reason="No canonically documented reach-estimation method (DEF-003)." />
+                                        <x-states.unavailable reason="No estimated reach for this slice yet (REQ-M1-006)." />
                                     @endif
                                 </td>
                                 <td class="px-5 py-3 text-sm text-gray-600 dark:text-gray-300">
@@ -257,7 +257,7 @@
                                     @if ($row->total_estimated_reach !== null)
                                         {{ number_format((float) $row->total_estimated_reach) }} <x-metric.tier-badge tier="ESTIMATED" />
                                     @else
-                                        <x-states.unavailable reason="No canonically documented reach-estimation method (DEF-003)." />
+                                        <x-states.unavailable reason="No estimated reach for this slice yet (REQ-M1-006)." />
                                     @endif
                                 </td>
                                 <td class="px-5 py-3 text-sm text-gray-600 dark:text-gray-300">

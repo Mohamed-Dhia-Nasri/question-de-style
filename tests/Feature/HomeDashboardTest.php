@@ -72,8 +72,12 @@ class HomeDashboardTest extends TestCase
             ->assertSee('Herbstlooks mit neuer Tasche')
             ->assertSee('Style Ikone')
             // No rollup rows exist — estimated reach must be an honest
-            // unavailable state citing the deferral, never a fabricated 0.
-            ->assertSee('DEF-003', false)
+            // "not yet computed" state, never a fabricated 0, and never
+            // DEF-003 (that's CONFIRMED-reach only, retired from this
+            // ESTIMATED surface now that ADR-0022 documents the method).
+            ->assertSee('No estimated-reach figures in the rollups for this period yet', false)
+            ->assertSee('REQ-M1-006', false)
+            ->assertDontSee('DEF-003')
             // The static P0 placeholder copy must be gone.
             ->assertDontSee('Available when Monitoring ships');
     }

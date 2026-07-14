@@ -33,9 +33,9 @@ use Tests\TestCase;
 /**
  * Seeding-run results panel (REQ-M3-009, AC-M3-014/015/018): run totals,
  * per-creator and per-shipment rollup rows with correct tier labels,
- * display-time CPE/CPM (D4), the EMV model disclosure, and DEF-003 reach
- * honesty. Results are reads — crm.view suffices, CLIENT_VIEWER holds
- * nothing.
+ * display-time CPE/CPM (D4), the EMV model disclosure, and estimated-reach
+ * honesty (REQ-M1-006; never fabricated). Results are reads — crm.view
+ * suffices, CLIENT_VIEWER holds nothing.
  */
 class SeedingResultsPanelTest extends TestCase
 {
@@ -193,13 +193,19 @@ class SeedingResultsPanelTest extends TestCase
             ->assertSee('200.00'); // CPM still computes from the observed views
     }
 
-    public function test_reach_renders_unavailable_citing_def_003(): void
+    public function test_reach_renders_unavailable_when_not_yet_computed(): void
     {
         $this->actingAsCrmStaff();
         $this->seedResults();
 
+        // No active reach configuration/computed reach for this run: the
+        // tile is honest about "not yet" (REQ-M1-006) — never DEF-003, and
+        // the retired "True unique reach" placeholder tile is gone.
         Livewire::test(SeedingResultsPanel::class, ['seedingCampaign' => $this->run])
-            ->assertSee('DEF-003');
+            ->assertSee('No estimated reach for this run yet')
+            ->assertSee('REQ-M1-006')
+            ->assertDontSee('DEF-003')
+            ->assertDontSee('True unique reach');
     }
 
     public function test_emv_disclosure_cites_the_producing_model(): void

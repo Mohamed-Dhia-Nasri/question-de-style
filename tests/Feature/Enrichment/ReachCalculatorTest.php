@@ -80,4 +80,16 @@ class ReachCalculatorTest extends TestCase
     {
         $this->assertInstanceOf(DefaultReachEstimator::class, app(ReachEstimator::class));
     }
+
+    public function test_a_future_dated_active_configuration_is_not_used(): void
+    {
+        ReachConfiguration::factory()->active()->create([
+            'params' => ['view_weight' => 0.7, 'follower_weight' => 0.1],
+            'effective_from' => now()->addMonth()->toDateString(),
+        ]);
+        $content = $this->content(5000, [new MetricValue(1000, MetricTier::Public, 'views')]);
+
+        $this->assertNull(app(ReachCalculator::class)->calculate($content));
+        $this->assertDatabaseCount('reach_results', 0);
+    }
 }

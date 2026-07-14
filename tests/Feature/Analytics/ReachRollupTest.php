@@ -125,5 +125,6 @@ class ReachRollupTest extends TestCase
 
         // fact_seeding_content -> rollup_seeding_by_creator_campaign
         $this->assertSame(1234.0, (float) $reader->seedingCampaignTotals($this->run->id)->total_estimated_reach);
+        $this->assertSame('ESTIMATED', $reader->seedingCampaignTotals($this->run->id)->total_estimated_reach_tier);
     }
 }

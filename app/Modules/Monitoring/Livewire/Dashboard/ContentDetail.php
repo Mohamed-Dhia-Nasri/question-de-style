@@ -21,8 +21,9 @@ use Livewire\Component;
  * Content Detail (REQ-M1-003/005/006/012): authorized media preview,
  * caption/platform/publication data, latest PUBLIC metrics with tier
  * badges, DERIVED rates (never PUBLIC — DP-001), estimated reach
- * (Unavailable until a canonical method exists; CONFIRMED reach is
- * DEF-003), EMV with model disclosure (AC-M1-011), and the content's
+ * (ESTIMATED per ADR-0022 when an active reach configuration exists,
+ * else unavailable; CONFIRMED reach stays deferred per DEF-003), EMV
+ * with model disclosure (AC-M1-011), and the content's
  * mention / recognition / sentiment assessments with confidence,
  * verification, provenance, and authorized review actions (DP-004).
  *

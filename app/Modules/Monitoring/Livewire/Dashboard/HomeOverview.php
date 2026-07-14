@@ -19,8 +19,10 @@ use Livewire\Component;
  * Home dashboard tiles — replaces the static P0 placeholder page now that
  * Monitoring (P1) and CRM & Seeding (P3) are live. Entity counts come from
  * the owning models; the KPI aggregate (estimated reach) comes from the
- * approved rollups only (ADR-0010) and is tier-labelled ESTIMATED (DP-001).
- * CONFIRMED unique reach stays deferred (DEF-003) and is never fabricated.
+ * approved rollups only (ADR-0010) and is tier-labelled ESTIMATED per
+ * ADR-0022 when an active reach configuration exists (else unavailable,
+ * DP-001). CONFIRMED unique reach stays deferred (DEF-003) and is never
+ * fabricated.
  *
  * Reached via /dashboard, which is gated on INTERNAL_ACCESS — every staff
  * role also holds monitoring.view and crm.view (PermissionsCatalog), so

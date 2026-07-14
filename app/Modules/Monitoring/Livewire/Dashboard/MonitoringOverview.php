@@ -21,8 +21,9 @@ use Livewire\Component;
  * Monitoring Overview (REQ-M1-012): roster size, ingestion/provider
  * health, new content and active stories, mentions by ENUM-MentionType,
  * pending reviews, and the rollup-backed KPI totals (views, engagement,
- * EMV — all tier-labelled; estimated reach renders Unavailable until a
- * canonical estimation method exists, and CONFIRMED reach is DEF-003).
+ * EMV — all tier-labelled; estimated reach renders ESTIMATED per
+ * ADR-0022 when an active reach configuration exists, else unavailable;
+ * CONFIRMED reach stays deferred per DEF-003).
  *
  * All filters validate and execute server-side; KPI aggregates come from
  * approved rollups only (ADR-0010). Deferred capabilities (open-web

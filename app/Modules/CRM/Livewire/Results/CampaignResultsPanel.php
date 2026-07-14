@@ -18,9 +18,11 @@ use Livewire\Component;
  * ROLLUP-SeedingByCreatorCampaign. CPE/CPM are DERIVED at display time
  * from the agency-entered CONFIRMED spend (D1/D4) — never stored, never
  * summed, and "unavailable" (never zero, never infinity) on a missing
- * spend or a NULL/zero divisor. Estimated reach and CONFIRMED unique
- * reach render "unavailable" citing DEF-003; the EMV figure is always
- * ESTIMATED with the active model disclosed (AC-M1-011 convention).
+ * spend or a NULL/zero divisor. Estimated reach renders ESTIMATED per
+ * ADR-0022 when an active reach configuration exists (else
+ * "unavailable"); CONFIRMED unique reach still renders "unavailable"
+ * citing DEF-003; the EMV figure is always ESTIMATED with the active
+ * model disclosed (AC-M1-011 convention).
  */
 class CampaignResultsPanel extends Component
 {

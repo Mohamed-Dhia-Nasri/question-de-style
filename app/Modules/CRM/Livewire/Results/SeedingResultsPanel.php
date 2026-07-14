@@ -25,9 +25,10 @@ use Livewire\Component;
  *
  * CPE/CPM are DERIVED at display time from the run's agency-entered
  * CONFIRMED spend (D1/D4) — "unavailable" on a missing spend or NULL/zero
- * divisor, never zero, never infinity. Estimated reach and CONFIRMED
- * unique reach render "unavailable" citing DEF-003; EMV is always
- * ESTIMATED with the active model disclosed.
+ * divisor, never zero, never infinity. Estimated reach renders ESTIMATED
+ * per ADR-0022 when an active reach configuration exists (else
+ * "unavailable"); CONFIRMED unique reach still renders "unavailable"
+ * citing DEF-003; EMV is always ESTIMATED with the active model disclosed.
  */
 class SeedingResultsPanel extends Component
 {

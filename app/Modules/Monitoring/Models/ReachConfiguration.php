@@ -10,6 +10,7 @@ use Database\Factories\ReachConfigurationFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * One versioned reach-estimation configuration (REQ-M1-006,
@@ -72,5 +73,11 @@ class ReachConfiguration extends Model
     public function isActive(): bool
     {
         return $this->status === ReachConfigurationStatus::Active;
+    }
+
+    /** @return HasMany<ReachResult, $this> */
+    public function results(): HasMany
+    {
+        return $this->hasMany(ReachResult::class);
     }
 }

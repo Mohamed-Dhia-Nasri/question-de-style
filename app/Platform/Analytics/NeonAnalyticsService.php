@@ -389,7 +389,7 @@ class NeonAnalyticsService implements AnalyticsService
                    snap.comments,
                    snap.shares,
                    snap.saves,
-                   NULL, NULL,
+                   reach.amount, reach.tier,
                    emv.amount,
                    emv.tier,
                    emv.currency,
@@ -421,6 +421,14 @@ class NeonAnalyticsService implements AnalyticsService
                 ORDER BY er.calculated_at DESC, er.id DESC
                 LIMIT 1
             ) emv ON true
+            LEFT JOIN LATERAL (
+                SELECT (rr.value->>'amount')::numeric AS amount,
+                       rr.value->>'tier' AS tier
+                FROM reach_results rr
+                WHERE rr.content_item_id = mn.content_item_id
+                ORDER BY rr.calculated_at DESC, rr.id DESC
+                LIMIT 1
+            ) reach ON true
             WHERE mn.id > ?
                OR (mn.id <= ?
                    AND (extract(epoch FROM mn.updated_at) * 1000000)::bigint >= ?)
@@ -532,9 +540,11 @@ class NeonAnalyticsService implements AnalyticsService
         // content carries no publish time. Two high-water marks: new
         // snapshots for already-linked content, and new shipment↔content
         // links whose content already has snapshots (REQ-M3-008 matching
-        // can link late). estimated_reach stays NULL with a NULL tier —
-        // reach is DEF-003 unavailable (UnavailableReachEstimator), never
-        // zero. A re-link after an unlink re-scans old snapshots; ON
+        // can link late). estimated_reach stamps the content's latest
+        // reach_results value (ESTIMATED tier, ADR-0022) via a LATERAL join
+        // mirroring EMV; it is NULL with a NULL tier only when no reach
+        // result exists yet (DEF-003 unavailable), never zero. A re-link
+        // after an unlink re-scans old snapshots; ON
         // CONFLICT DO NOTHING skips the fact rows that already exist
         // (conflict-skip — facts never mutate, spec D2).
         $snapshotWatermark = $this->watermark('fact_seeding_content');
@@ -566,7 +576,7 @@ class NeonAnalyticsService implements AnalyticsService
                    qds_public_metric(ms.metrics, 'comments'),
                    qds_public_metric(ms.metrics, 'shares'),
                    qds_public_metric(ms.metrics, 'saves'),
-                   NULL, NULL,
+                   reach.amount, reach.tier,
                    emv.amount,
                    emv.tier,
                    sh.tenant_id
@@ -585,6 +595,14 @@ class NeonAnalyticsService implements AnalyticsService
                 ORDER BY er.calculated_at DESC, er.id DESC
                 LIMIT 1
             ) emv ON true
+            LEFT JOIN LATERAL (
+                SELECT (rr.value->>'amount')::numeric AS amount,
+                       rr.value->>'tier' AS tier
+                FROM reach_results rr
+                WHERE rr.content_item_id = ci.id
+                ORDER BY rr.calculated_at DESC, rr.id DESC
+                LIMIT 1
+            ) reach ON true
             WHERE ms.id > ? OR src.id > ?
             ORDER BY ms.id, src.id
             ON CONFLICT DO NOTHING

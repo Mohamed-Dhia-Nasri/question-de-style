@@ -94,6 +94,7 @@ class EnrichmentPipelineTest extends TestCase
         $this->assertSame('unavailable', $run->stages['sentiment']);
         $this->assertSame('completed:1 mention(s)', $run->stages['attribution']);
         $this->assertStringStartsWith('unavailable:', $run->stages['emv']);
+        $this->assertStringStartsWith('unavailable:', $run->stages['reach']);
 
         // Unavailable is absent, never a fabricated (or zero) row.
         $this->assertSame(0, SentimentAnalysis::query()->count());
@@ -135,6 +136,7 @@ class EnrichmentPipelineTest extends TestCase
         $this->assertSame('skipped:stories-have-no-caption', $run->stages['hashtags']);
         $this->assertSame('skipped:stories-have-no-caption', $run->stages['sentiment']);
         $this->assertSame('skipped:content-items-only', $run->stages['emv']);
+        $this->assertSame('skipped:content-items-only', $run->stages['reach']);
         // No recognition provider is configured, so the pipeline skips
         // before ever touching the story's archived media (cost control).
         $this->assertStringContainsString('vision:not-configured', $run->stages['recognition']);

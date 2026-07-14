@@ -8,6 +8,7 @@ use App\Platform\Enrichment\Attribution\AttributionService;
 use App\Platform\Enrichment\Emv\EmvCalculator;
 use App\Platform\Enrichment\Hashtags\HashtagEnricher;
 use App\Platform\Enrichment\Models\EnrichmentRun;
+use App\Platform\Enrichment\Reach\ReachCalculator;
 use App\Platform\Enrichment\Recognition\RecognitionService;
 use App\Platform\Enrichment\Sentiment\SentimentEnricher;
 use App\Platform\Enrichment\Support\EnrichmentRunStatus;
@@ -18,14 +19,14 @@ use Throwable;
 /**
  * The SVC-EnrichmentAI pipeline over one ContentItem or Story:
  *
- *   hashtags → recognition → sentiment → seeded attribution → EMV
+ *   hashtags → recognition → sentiment → seeded attribution → EMV → reach
  *
  * Stage outcomes are recorded on an EnrichmentRun row (operational
  * telemetry, sanitized values only). Unavailable boundaries (sentiment
- * model, reach method, no active EMV configuration, unconfigured
- * providers) are normal outcomes, not failures — the run still completes
- * and the affected surfaces stay "unavailable". A thrown provider error
- * marks the run FAILED and propagates so the queue's retry policy applies.
+ * model, no active EMV/reach configuration, unconfigured providers) are
+ * normal outcomes, not failures — the run still completes and the
+ * affected surfaces stay "unavailable". A thrown provider error marks the
+ * run FAILED and propagates so the queue's retry policy applies.
  */
 class EnrichmentPipeline
 {
@@ -35,6 +36,7 @@ class EnrichmentPipeline
         private readonly SentimentEnricher $sentiment,
         private readonly AttributionService $attribution,
         private readonly EmvCalculator $emv,
+        private readonly ReachCalculator $reach,
     ) {}
 
     public function run(ContentItem|Story $target, string $correlationId, int $retryCount = 0): EnrichmentRun
@@ -83,6 +85,17 @@ class EnrichmentPipeline
                 // MET-EMV is defined "over content"; stories carry no
                 // PUBLIC metric inputs for the rate card in v1.
                 $stages['emv'] = 'skipped:content-items-only';
+            }
+
+            if ($target instanceof ContentItem) {
+                $reachResult = $this->reach->calculate($target);
+                $stages['reach'] = $reachResult !== null
+                    ? 'calculated:'.$reachResult->formula_version
+                    : 'unavailable:no-active-configuration-or-no-inputs';
+            } else {
+                // Reach is modeled over content metrics + follower signals;
+                // stories carry neither in v1.
+                $stages['reach'] = 'skipped:content-items-only';
             }
 
             // Compare-and-swap on RUNNING: if the data-quality reaper already

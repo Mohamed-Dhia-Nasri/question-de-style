@@ -10,7 +10,7 @@ use App\Modules\Monitoring\Models\Mention;
 use App\Modules\Monitoring\Models\MetricSnapshot;
 use App\Platform\Enrichment\Contracts\ReachEstimator;
 use App\Platform\Enrichment\Metrics\DerivedMetricsService;
-use App\Platform\Enrichment\Reach\UnavailableReachEstimator;
+use App\Platform\Enrichment\Reach\DefaultReachEstimator;
 use App\Shared\Enums\MetricTier;
 use App\Shared\ValueObjects\MetricValue;
 use App\Shared\ValueObjects\ReachEstimate;
@@ -306,11 +306,14 @@ class MetricsAndReachTest extends TestCase
 
     // ── Reach boundary (views are NEVER reach) ──────────────────────────
 
-    public function test_reach_estimator_binding_is_unavailable_and_never_derives_reach_from_views(): void
+    public function test_reach_estimator_binding_is_unavailable_without_configuration_and_never_derives_reach_from_views(): void
     {
+        // ADR-0022: the binding is the real, documented estimator — but
+        // with no active reach configuration in this test, its only honest
+        // answer is still UNAVAILABLE (never zero, never a raw view count).
         $estimator = app(ReachEstimator::class);
 
-        $this->assertInstanceOf(UnavailableReachEstimator::class, $estimator);
+        $this->assertInstanceOf(DefaultReachEstimator::class, $estimator);
 
         // Even a huge PUBLIC view count must not be laundered into reach
         // (GL-PublicViews: views are not unique reach).

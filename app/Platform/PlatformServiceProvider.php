@@ -16,7 +16,7 @@ use App\Platform\Enrichment\Contracts\SentimentClassifier;
 use App\Platform\Enrichment\Contracts\ShipmentContentLinker;
 use App\Platform\Enrichment\DefaultEnrichmentService;
 use App\Platform\Enrichment\Matching\Console\LinkSeededContentCommand;
-use App\Platform\Enrichment\Reach\UnavailableReachEstimator;
+use App\Platform\Enrichment\Reach\DefaultReachEstimator;
 use App\Platform\Enrichment\Sentiment\UnavailableSentimentClassifier;
 use App\Platform\Export\Console\PruneExpiredExportsCommand;
 use App\Platform\Export\Contracts\ExportService;
@@ -64,10 +64,12 @@ class PlatformServiceProvider extends ServiceProvider
         // canonical model/provider decision stay bound to honest
         // "unavailable" implementations (never fabricate):
         //  - sentiment: no NLP model/provider is canonically decided;
-        //  - reach: no estimation method is canonically documented.
+        //  - reach: DefaultReachEstimator (ADR-0022) now computes a
+        //    documented, operator-configured estimate — still unavailable
+        //    (null) whenever no configuration is active or no input exists.
         $this->app->bind(EnrichmentService::class, DefaultEnrichmentService::class);
         $this->app->bind(SentimentClassifier::class, UnavailableSentimentClassifier::class);
-        $this->app->bind(ReachEstimator::class, UnavailableReachEstimator::class);
+        $this->app->bind(ReachEstimator::class, DefaultReachEstimator::class);
 
         // Cross-module contracts with Module 3 (P3, live since M3 Step 3):
         // seeding evidence is read from — and resulting-content links are

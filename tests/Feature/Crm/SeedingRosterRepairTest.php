@@ -121,6 +121,22 @@ class SeedingRosterRepairTest extends TestCase
         $this->assertTrue($this->seeding->creators()->whereKey($this->creator->id)->exists());
     }
 
+    public function test_failed_save_leaves_no_phantom_roster_attach(): void
+    {
+        $this->actingAsCrmStaff();
+        $shipment = $this->makeRunWithOrphanShipment();
+
+        $foreignProduct = Product::factory()->create(); // different brand
+
+        Livewire::test(ShipmentsPanel::class, ['seedingCampaign' => $this->seeding])
+            ->call('edit', $shipment->id)
+            ->set('shipment_product_id', (string) $foreignProduct->id)
+            ->call('save')
+            ->assertHasErrors(['shipment_product_id']);
+
+        $this->assertFalse($this->seeding->creators()->whereKey($this->creator->id)->exists());
+    }
+
     public function test_backfill_migration_attaches_orphan_shipment_creators_and_is_idempotent(): void
     {
         $this->actingAsCrmStaff();

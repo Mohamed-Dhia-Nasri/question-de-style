@@ -58,6 +58,15 @@ class TasksPanel extends Component
 
     // --- quick add -----------------------------------------------------------
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'quick_title' => 'title',
+            'quick_due_at' => 'due date',
+        ];
+    }
+
     public function quickAdd(AuditLogger $audit): void
     {
         $this->authorize('create', Task::class);
@@ -99,7 +108,7 @@ class TasksPanel extends Component
 
         if ($to === null) {
             throw ValidationException::withMessages([
-                'status' => 'The task status must be one of the ENUM-TaskStatus values.',
+                'status' => 'Pick a valid task status.',
             ]);
         }
 

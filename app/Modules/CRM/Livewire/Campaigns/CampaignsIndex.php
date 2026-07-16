@@ -124,6 +124,19 @@ class CampaignsIndex extends Component
         $this->showForm = true;
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'campaign_name' => 'name',
+            'campaign_brand_id' => 'brand',
+            'campaign_status' => 'status',
+            'campaign_start_at' => 'start date',
+            'campaign_end_at' => 'end date',
+            'campaign_spend' => 'spend',
+        ];
+    }
+
     public function save(AuditLogger $audit): void
     {
         $editing = $this->editingCampaignId !== null;

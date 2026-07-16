@@ -146,6 +146,20 @@ class SeedingCampaignsIndex extends Component
         $this->showForm = true;
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'seeding_name' => 'name',
+            'seeding_type' => 'type',
+            'seeding_brand_id' => 'brand',
+            'seeding_product_id' => 'product',
+            'seeding_campaign_id' => 'parent campaign',
+            'seeding_status' => 'status',
+            'seeding_spend' => 'spend',
+        ];
+    }
+
     public function save(AuditLogger $audit): void
     {
         $editing = $this->editingSeedingId !== null;

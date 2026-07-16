@@ -140,6 +140,16 @@ class CreatorsIndex extends Component
         $this->showForm = true;
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'display_name' => 'display name',
+            'primary_language' => 'primary language',
+            'relationship_status' => 'relationship status',
+        ];
+    }
+
     public function save(CreatorWriter $writer, AuditLogger $audit): void
     {
         $this->authorize('create', Creator::class);

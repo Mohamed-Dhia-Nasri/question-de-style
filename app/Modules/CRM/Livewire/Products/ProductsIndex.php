@@ -108,6 +108,19 @@ class ProductsIndex extends Component
         $this->showForm = true;
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'product_brand_id' => 'brand',
+            'product_name' => 'name',
+            'product_sku' => 'SKU',
+            'product_variant' => 'product variant',
+            'product_unit_value' => 'unit value',
+            'product_category' => 'sector',
+        ];
+    }
+
     public function save(AuditLogger $audit): void
     {
         $editing = $this->editingProductId !== null;

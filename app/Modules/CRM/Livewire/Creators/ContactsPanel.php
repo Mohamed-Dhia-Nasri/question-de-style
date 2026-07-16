@@ -67,6 +67,17 @@ class ContactsPanel extends Component
         $this->showForm = true;
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'contact_email' => 'email',
+            'contact_phone' => 'phone',
+            'contact_postal_address' => 'postal address',
+            'contact_preferred_channel' => 'preferred channel',
+        ];
+    }
+
     public function save(): void
     {
         $editing = $this->editingContactId !== null;

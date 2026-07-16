@@ -115,6 +115,22 @@ class ShipmentsPanel extends Component
         $this->showForm = true;
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'shipment_creator_id' => 'recipient',
+            'shipment_product_id' => 'product',
+            'shipment_status' => 'status',
+            'shipment_tracking_number' => 'tracking number',
+            'shipment_shipped_at' => 'shipped date',
+            'shipment_delivered_at' => 'delivered date',
+            'shipment_quantity' => 'quantity',
+            'shipment_value' => 'product value',
+            'link_content_id' => 'content',
+        ];
+    }
+
     public function save(AuditLogger $audit): void
     {
         $editing = $this->editingShipmentId !== null;

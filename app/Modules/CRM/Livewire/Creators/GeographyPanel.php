@@ -38,6 +38,16 @@ class GeographyPanel extends Component
         $this->fillFromCurrent();
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'geo_country' => 'country',
+            'geo_region' => 'region',
+            'geo_city' => 'city',
+        ];
+    }
+
     public function save(CreatorGeography $geography): void
     {
         $this->authorize('update', $this->creator);

@@ -98,6 +98,17 @@ class BrandsIndex extends Component
         $this->showForm = true;
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'brand_client_id' => 'client',
+            'brand_name' => 'name',
+            'brand_sector' => 'sector',
+            'brand_aliases' => 'aliases',
+        ];
+    }
+
     public function save(AuditLogger $audit): void
     {
         $editing = $this->editingBrandId !== null;

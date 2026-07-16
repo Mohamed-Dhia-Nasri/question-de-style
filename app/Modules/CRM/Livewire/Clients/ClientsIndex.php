@@ -89,6 +89,15 @@ class ClientsIndex extends Component
         $this->showForm = true;
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'client_name' => 'name',
+            'client_country' => 'country',
+        ];
+    }
+
     public function save(AuditLogger $audit): void
     {
         $editing = $this->editingClientId !== null;

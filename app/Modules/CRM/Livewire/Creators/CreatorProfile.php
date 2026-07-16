@@ -41,6 +41,16 @@ class CreatorProfile extends Component
         $this->fillForm();
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'display_name' => 'display name',
+            'primary_language' => 'primary language',
+            'relationship_status' => 'relationship status',
+        ];
+    }
+
     public function save(CreatorWriter $writer): void
     {
         $this->authorize('update', $this->creator);

@@ -98,7 +98,7 @@
                                 @else
                                     <div class="flex flex-wrap gap-1.5">
                                         @foreach ($creator->platformAccounts as $account)
-                                            <x-ui.badge color="light">{{ $account->platform->value }} · {{ $account->handle }}</x-ui.badge>
+                                            <x-ui.badge color="light">{{ $account->platform->label() }} · {{ $account->handle }}</x-ui.badge>
                                         @endforeach
                                     </div>
                                 @endif

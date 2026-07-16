@@ -36,7 +36,7 @@
                     @foreach ($accounts as $account)
                         <tr wire:key="account-{{ $account->id }}">
                             <td class="px-5 py-4">
-                                <x-ui.badge color="light">{{ $account->platform->value }}</x-ui.badge>
+                                <x-ui.badge color="light">{{ $account->platform->label() }}</x-ui.badge>
                             </td>
                             <td class="px-5 py-4 text-sm font-medium text-gray-800 dark:text-white/90">
                                 {{ $account->handle }}
@@ -65,7 +65,7 @@
                                         {{ number_format($account->follower_count->amount, 0, ',', '.') }}
                                     </span>
                                     {{-- DP-001: the tier travels with the number. --}}
-                                    <x-ui.badge color="light" size="sm">{{ $account->follower_count->tier->value }}</x-ui.badge>
+                                    <x-metric.tier-badge :tier="$account->follower_count->tier" />
                                 @else
                                     <span class="text-sm text-gray-400">&mdash;</span>
                                 @endif
@@ -113,7 +113,7 @@
                         :error="$errors->has('account_platform')">
                         <option value="">Select a platform…</option>
                         @foreach ($platforms as $platformOption)
-                            <option value="{{ $platformOption->value }}">{{ $platformOption->value }}</option>
+                            <option value="{{ $platformOption->value }}">{{ $platformOption->label() }}</option>
                         @endforeach
                     </x-form.select>
                     <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">

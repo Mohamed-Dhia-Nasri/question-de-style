@@ -47,7 +47,7 @@
                             <td class="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{{ $brand->client->name }}</td>
                             <td class="px-5 py-4">
                                 @if ($brand->sector)
-                                    <x-ui.badge color="light">{{ $brand->sector->value }}</x-ui.badge>
+                                    <x-ui.badge color="light">{{ $brand->sector->label() }}</x-ui.badge>
                                 @else
                                     <span class="text-sm text-gray-400">&mdash;</span>
                                 @endif
@@ -110,7 +110,7 @@
                     <x-form.select id="brand_sector" wire:model="brand_sector" :error="$errors->has('brand_sector')">
                         <option value="">No sector</option>
                         @foreach ($sectors as $sectorOption)
-                            <option value="{{ $sectorOption->value }}">{{ $sectorOption->value }}</option>
+                            <option value="{{ $sectorOption->value }}">{{ $sectorOption->label() }}</option>
                         @endforeach
                     </x-form.select>
                     <x-form.error for="brand_sector" />

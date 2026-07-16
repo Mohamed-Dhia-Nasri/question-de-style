@@ -166,8 +166,8 @@ class CampaignResultsPanelTest extends TestCase
             // assertSee('50') would also match the '500' views value
             // (deep-review L5).
             ->assertSeeHtml('>50</span>')
-            ->assertSee('PUBLIC')
-            ->assertSee('DERIVED')
+            ->assertSee('From platform')
+            ->assertSee('Calculated')
             ->assertSee($this->run->name); // per-run totals row
     }
 
@@ -181,7 +181,7 @@ class CampaignResultsPanelTest extends TestCase
         Livewire::test(CampaignResultsPanel::class, ['campaign' => $this->campaign])
             ->assertSee('10.00')
             ->assertSee('1,000.00')
-            ->assertSee('DERIVED');
+            ->assertSee('Calculated');
     }
 
     public function test_cpe_and_cpm_are_unavailable_without_spend(): void
@@ -230,7 +230,7 @@ class CampaignResultsPanelTest extends TestCase
 
         // Nothing computed anywhere: the disclosure says so explicitly.
         Livewire::test(CampaignResultsPanel::class, ['campaign' => $this->campaign])
-            ->assertSee('no EMV has been computed');
+            ->assertSee('No EMV yet');
 
         // A figure produced under "Benchmark 2026"...
         $producing = EmvConfiguration::factory()->create(['name' => 'Benchmark 2026']);
@@ -242,7 +242,7 @@ class CampaignResultsPanelTest extends TestCase
 
         Livewire::test(CampaignResultsPanel::class, ['campaign' => $this->campaign])
             ->assertSee('Benchmark 2026')
-            ->assertSee($producing->rate_card_version)
+            ->assertSee($producing->currency)
             ->assertDontSee('Benchmark 2027');
 
         // Once a figure IS produced under the newer model, both producing
@@ -252,7 +252,7 @@ class CampaignResultsPanelTest extends TestCase
         Livewire::test(CampaignResultsPanel::class, ['campaign' => $this->campaign])
             ->assertSee('Benchmark 2026')
             ->assertSee('Benchmark 2027')
-            ->assertSee('span 2 rate cards');
+            ->assertSee('use 2 different rate cards');
     }
 
     private function makeEmvResult(ContentItem $content, EmvConfiguration $configuration): EmvResult

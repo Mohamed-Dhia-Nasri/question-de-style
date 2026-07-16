@@ -40,7 +40,7 @@
             <x-form.select id="results-platform" wire:model.live="platform">
                 <option value="">All platforms</option>
                 @foreach ($platforms as $p)
-                    <option value="{{ $p->value }}">{{ $p->value }}</option>
+                    <option value="{{ $p->value }}">{{ $p->label() }}</option>
                 @endforeach
             </x-form.select>
         </div>
@@ -49,7 +49,7 @@
             <x-form.select id="results-content-type" wire:model.live="contentType">
                 <option value="">All content types</option>
                 @foreach ($contentTypes as $type)
-                    <option value="{{ $type->value }}">{{ $type->value }}</option>
+                    <option value="{{ $type->value }}">{{ $type->label() }}</option>
                 @endforeach
             </x-form.select>
         </div>
@@ -142,7 +142,7 @@
                             <x-table.th>Views</x-table.th>
                             <x-table.th>Engagement</x-table.th>
                             <x-table.th>Est. reach</x-table.th>
-                            <x-table.th>EMV</x-table.th>
+                            <x-table.th>EMV ({{ \App\Shared\Support\TenantCurrency::code() }})</x-table.th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
@@ -218,7 +218,7 @@
                             <x-table.th>Views</x-table.th>
                             <x-table.th>Engagement</x-table.th>
                             <x-table.th>Est. reach</x-table.th>
-                            <x-table.th>EMV</x-table.th>
+                            <x-table.th>EMV ({{ \App\Shared\Support\TenantCurrency::code() }})</x-table.th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100 dark:divide-gray-800">

@@ -155,8 +155,8 @@ class SeedingResultsPanelTest extends TestCase
             ->assertSee('Posted')
             ->assertSee('10.0')        // days to post, DERIVED at the loader
             ->assertSee('500')
-            ->assertSee('PUBLIC')
-            ->assertSee('DERIVED')
+            ->assertSee('From platform')
+            ->assertSee('Calculated')
             ->assertSee($this->product->name);
     }
 
@@ -217,7 +217,7 @@ class SeedingResultsPanelTest extends TestCase
         EmvConfiguration::factory()->active()->create(['name' => 'Benchmark 2027']);
 
         Livewire::test(SeedingResultsPanel::class, ['seedingCampaign' => $this->run])
-            ->assertSee('no EMV has been computed')
+            ->assertSee('No EMV yet')
             ->assertDontSee('Benchmark 2027');
 
         $producing = EmvConfiguration::factory()->create(['name' => 'Benchmark 2026']);

@@ -66,7 +66,7 @@
                 </div>
             </div>
             <div class="rounded-xl border border-gray-100 p-3 dark:border-gray-800">
-                <p class="text-theme-xs uppercase text-gray-400">Spend</p>
+                <p class="text-theme-xs uppercase text-gray-400">Spend ({{ \App\Shared\Support\TenantCurrency::code() }})</p>
                 <div class="mt-1">
                     <x-metric.value :metric="$campaign->spend" :decimals="2"
                         reason="Requires agency-entered spend (AC-M3-015) — no spend is recorded for this campaign." />
@@ -77,7 +77,7 @@
         {{-- AC-M3-015: EMV (ESTIMATED, model disclosed) + display-time CPE/CPM (DERIVED, D4) --}}
         <div class="mt-4 grid gap-3 sm:grid-cols-3">
             <div class="rounded-xl border border-gray-100 p-3 dark:border-gray-800">
-                <p class="text-theme-xs uppercase text-gray-400">EMV</p>
+                <p class="text-theme-xs uppercase text-gray-400">EMV ({{ \App\Shared\Support\TenantCurrency::code() }})</p>
                 <div class="mt-1">
                     @if ($totals->total_emv !== null)
                         <span class="text-lg font-semibold text-gray-800 dark:text-white/90">{{ number_format((float) $totals->total_emv, 2) }}</span>

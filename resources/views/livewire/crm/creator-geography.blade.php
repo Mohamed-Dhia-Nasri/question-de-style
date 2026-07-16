@@ -3,7 +3,7 @@
         <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Geography</h3>
         @if ($current !== null)
             {{-- Operator assertion, never an observed fact (DP-003). --}}
-            <x-ui.badge color="info" size="sm">Operator-assigned · {{ $current->assessment->verificationStatus->value }}</x-ui.badge>
+            <x-ui.badge color="info" size="sm">Set by your team · {{ $current->assessment->verificationStatus->label() }}</x-ui.badge>
         @endif
     </div>
 

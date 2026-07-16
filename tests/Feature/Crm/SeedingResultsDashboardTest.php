@@ -148,8 +148,8 @@ class SeedingResultsDashboardTest extends TestCase
             ->assertSee('Silk Serum')
             ->assertSee('100.0%')  // post_rate 1/1, DERIVED at the rollup grain
             ->assertSee('500')     // views [PUBLIC]
-            ->assertSee('PUBLIC')
-            ->assertSee('DERIVED')
+            ->assertSee('From platform')
+            ->assertSee('Calculated')
             // reach honesty — no estimated reach computed for this slice
             // yet, never a fabricated number, and never DEF-003 (that's
             // CONFIRMED-reach only, retired from this ESTIMATED surface).
@@ -245,7 +245,7 @@ class SeedingResultsDashboardTest extends TestCase
         $this->seedResults();
 
         Livewire::test(SeedingResultsDashboard::class)
-            ->assertSee('no EMV has been computed');
+            ->assertSee('No EMV yet');
 
         $producing = EmvConfiguration::factory()->create(['name' => 'Benchmark 2026']);
         EmvResult::create([

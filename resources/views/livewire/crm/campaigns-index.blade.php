@@ -143,7 +143,7 @@
                 </div>
 
                 <div>
-                    <x-form.label for="campaign_spend">Spend (agency input, CONFIRMED)</x-form.label>
+                    <x-form.label for="campaign_spend">Spend ({{ \App\Shared\Support\TenantCurrency::code() }})</x-form.label>
                     <x-form.input id="campaign_spend" wire:model="campaign_spend" type="number" step="0.01" min="0"
                         :error="$errors->has('campaign_spend')" />
                     <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">

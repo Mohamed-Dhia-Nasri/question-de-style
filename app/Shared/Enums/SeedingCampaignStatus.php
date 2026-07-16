@@ -27,4 +27,17 @@ enum SeedingCampaignStatus: string
             self::Cancelled => 'Cancelled',
         };
     }
+
+    /** One-line plain-language description (presentation only). */
+    public function description(): string
+    {
+        return match ($this) {
+            self::Draft => 'Being set up — add creators and a product first.',
+            self::Planned => 'Ready — creators picked, nothing sent yet.',
+            self::Active => 'Running — outreach and preparation in progress.',
+            self::Shipping => 'Products are on their way to creators.',
+            self::Completed => 'Finished — results are final.',
+            self::Cancelled => 'Called off — kept for the records.',
+        };
+    }
 }

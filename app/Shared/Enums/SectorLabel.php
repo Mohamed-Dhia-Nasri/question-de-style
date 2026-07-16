@@ -28,4 +28,31 @@ enum SectorLabel: string
     case ArtDesign = 'ART_DESIGN';
     case Music = 'MUSIC';
     case Other = 'OTHER';
+
+    /** Human-facing label (presentation only — same convention as RoleName). */
+    public function label(): string
+    {
+        return match ($this) {
+            self::Fashion => 'Fashion',
+            self::Beauty => 'Beauty',
+            self::Fitness => 'Fitness',
+            self::FoodBeverage => 'Food & beverage',
+            self::Travel => 'Travel',
+            self::Lifestyle => 'Lifestyle',
+            self::Tech => 'Tech',
+            self::Gaming => 'Gaming',
+            self::ParentingFamily => 'Parenting & family',
+            self::HomeInterior => 'Home & interior',
+            self::HealthWellness => 'Health & wellness',
+            self::Finance => 'Finance',
+            self::Automotive => 'Automotive',
+            self::Entertainment => 'Entertainment',
+            self::Sports => 'Sports',
+            self::Education => 'Education',
+            self::Business => 'Business',
+            self::ArtDesign => 'Art & design',
+            self::Music => 'Music',
+            self::Other => 'Other',
+        };
+    }
 }

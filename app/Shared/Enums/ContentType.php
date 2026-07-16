@@ -16,4 +16,20 @@ enum ContentType: string
     case Video = 'VIDEO';
     case Short = 'SHORT';
     case Live = 'LIVE';
+
+    /**
+     * Human-facing label (presentation only — same convention as RoleName).
+     * Mirrors EmvSettings::FORMAT_LABELS.
+     */
+    public function label(): string
+    {
+        return match ($this) {
+            self::ImagePost => 'Image post',
+            self::Carousel => 'Carousel',
+            self::Reel => 'Reel',
+            self::Video => 'Video',
+            self::Short => 'Short',
+            self::Live => 'Live',
+        };
+    }
 }

@@ -43,7 +43,7 @@
                                 {{ $shipment->product->name }}
                                 @if ($shipment->product_value_at_ship)
                                     <span class="text-theme-xs text-gray-400">
-                                        ({{ number_format($shipment->product_value_at_ship->amount, 2, ',', '.') }} {{ \App\Shared\Support\TenantCurrency::code() }}
+                                        ({{ number_format($shipment->product_value_at_ship->amount, 2, ',', '.') }} {{ app(\App\Shared\Support\TenantCurrency::class)->code() }}
                                         <x-metric.tier-badge :tier="$shipment->product_value_at_ship->tier" />)
                                     </span>
                                 @endif
@@ -188,7 +188,7 @@
                     </div>
 
                     <div>
-                        <x-form.label for="shipment_value">Value of goods ({{ \App\Shared\Support\TenantCurrency::code() }})</x-form.label>
+                        <x-form.label for="shipment_value">Value of goods ({{ app(\App\Shared\Support\TenantCurrency::class)->code() }})</x-form.label>
                         <x-form.input id="shipment_value" wire:model="shipment_value" type="number" step="0.01" min="0"
                             :error="$errors->has('shipment_value')" />
                         <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">

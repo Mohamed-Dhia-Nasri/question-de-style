@@ -174,7 +174,7 @@
                 </div>
 
                 <div>
-                    <x-form.label for="seeding_spend">Spend ({{ \App\Shared\Support\TenantCurrency::code() }})</x-form.label>
+                    <x-form.label for="seeding_spend">Spend ({{ app(\App\Shared\Support\TenantCurrency::class)->code() }})</x-form.label>
                     <x-form.input id="seeding_spend" wire:model="seeding_spend" type="number" step="0.01" min="0"
                         :error="$errors->has('seeding_spend')" />
                     <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">

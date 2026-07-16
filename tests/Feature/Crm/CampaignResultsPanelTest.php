@@ -232,17 +232,22 @@ class CampaignResultsPanelTest extends TestCase
         Livewire::test(CampaignResultsPanel::class, ['campaign' => $this->campaign])
             ->assertSee('No EMV yet');
 
-        // A figure produced under "Benchmark 2026"...
-        $producing = EmvConfiguration::factory()->create(['name' => 'Benchmark 2026']);
+        // A figure produced under "Benchmark 2026"... Distinct currencies
+        // (not the factory's default 'EUR' for both) so the disclosure's
+        // currency assertion actually discriminates producing vs. active
+        // (deep-review follow-up: a $producing->currency assertion is
+        // inert when both configurations share the same hardcoded value).
+        $producing = EmvConfiguration::factory()->create(['name' => 'Benchmark 2026', 'currency' => 'USD']);
         $this->makeEmvResult(ContentItem::factory()->create(), $producing);
 
         // ...stays disclosed as such even after a NEWER model becomes the
         // active one without any recalculation.
-        $active = EmvConfiguration::factory()->active()->create(['name' => 'Benchmark 2027']);
+        $active = EmvConfiguration::factory()->active()->create(['name' => 'Benchmark 2027', 'currency' => 'GBP']);
 
         Livewire::test(CampaignResultsPanel::class, ['campaign' => $this->campaign])
             ->assertSee('Benchmark 2026')
-            ->assertSee($producing->currency)
+            ->assertSee('USD')
+            ->assertDontSee('GBP')
             ->assertDontSee('Benchmark 2027');
 
         // Once a figure IS produced under the newer model, both producing

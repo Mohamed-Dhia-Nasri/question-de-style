@@ -4,23 +4,22 @@ namespace App\Shared\Support;
 
 use App\Modules\Monitoring\Models\EmvConfiguration;
 use App\Platform\Enrichment\Support\EmvConfigurationStatus;
-use App\Shared\Tenancy\TenantContext;
 
 /**
  * The tenant's display currency — the active EMV rate card's ISO code
- * (the only currency the system stores), falling back to EUR. Cached
- * per request per tenant.
+ * (the only currency the system stores), falling back to EUR.
+ *
+ * Request/job-scoped via the container (flushed between Octane requests
+ * and queue jobs): one instance per lifecycle, so the memo below can
+ * never leak a resolved currency across tenants or requests.
  */
 class TenantCurrency
 {
-    /** @var array<int|string, string> */
-    private static array $cache = [];
+    private ?string $cached = null;
 
-    public static function code(): string
+    public function code(): string
     {
-        $tenantId = app(TenantContext::class)->id() ?? auth()->user()?->tenant_id ?? 0;
-
-        return self::$cache[$tenantId] ??= (string) (EmvConfiguration::query()
+        return $this->cached ??= (string) (EmvConfiguration::query()
             ->where('status', EmvConfigurationStatus::Active)
             ->value('currency') ?? 'EUR');
     }

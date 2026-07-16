@@ -142,7 +142,7 @@
                             <x-table.th>Views</x-table.th>
                             <x-table.th>Engagement</x-table.th>
                             <x-table.th>Est. reach</x-table.th>
-                            <x-table.th>EMV ({{ \App\Shared\Support\TenantCurrency::code() }})</x-table.th>
+                            <x-table.th>EMV ({{ app(\App\Shared\Support\TenantCurrency::class)->code() }})</x-table.th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
@@ -218,7 +218,7 @@
                             <x-table.th>Views</x-table.th>
                             <x-table.th>Engagement</x-table.th>
                             <x-table.th>Est. reach</x-table.th>
-                            <x-table.th>EMV ({{ \App\Shared\Support\TenantCurrency::code() }})</x-table.th>
+                            <x-table.th>EMV ({{ app(\App\Shared\Support\TenantCurrency::class)->code() }})</x-table.th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100 dark:divide-gray-800">

@@ -1,6 +1,6 @@
-<x-layouts.app title="EMV configurations">
-    <x-page-header title="EMV configurations"
+<x-layouts.app title="EMV settings">
+    <x-page-header title="EMV settings"
         :breadcrumbs="['Dashboard' => route('dashboard'), 'Settings' => route('settings.emv'), 'EMV' => null]" />
 
-    @livewire('monitoring.emv-configurations-index')
+    @livewire('monitoring.emv-settings')
 </x-layouts.app>

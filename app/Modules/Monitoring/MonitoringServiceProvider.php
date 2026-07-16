@@ -9,12 +9,12 @@ use App\Modules\Monitoring\Livewire\Dashboard\CreatorDetail;
 use App\Modules\Monitoring\Livewire\Dashboard\CreatorsIndex;
 use App\Modules\Monitoring\Livewire\Dashboard\HomeOverview;
 use App\Modules\Monitoring\Livewire\Dashboard\MonitoringOverview;
-use App\Modules\Monitoring\Livewire\Emv\EmvConfigurationsIndex;
+use App\Modules\Monitoring\Livewire\Emv\EmvSettings;
 use App\Modules\Monitoring\Livewire\Exports\ExportsIndex;
 use App\Modules\Monitoring\Livewire\Hashtags\HashtagListsIndex;
 use App\Modules\Monitoring\Livewire\Operations\MonitoringPlanSettings;
 use App\Modules\Monitoring\Livewire\Operations\OperationsDashboard;
-use App\Modules\Monitoring\Livewire\Reach\ReachFormulaIndex;
+use App\Modules\Monitoring\Livewire\Reach\ReachSettings;
 use App\Modules\Monitoring\Livewire\Review\ReviewQueueIndex;
 use App\Modules\Monitoring\Models\Comment;
 use App\Modules\Monitoring\Models\ContentHashtag;
@@ -98,8 +98,8 @@ class MonitoringServiceProvider extends ServiceProvider
         Gate::policy(ReachConfiguration::class, ReachConfigurationPolicy::class);
 
         Livewire::component('monitoring.review-queue-index', ReviewQueueIndex::class);
-        Livewire::component('monitoring.emv-configurations-index', EmvConfigurationsIndex::class);
-        Livewire::component('monitoring.reach-formula-index', ReachFormulaIndex::class);
+        Livewire::component('monitoring.emv-settings', EmvSettings::class);
+        Livewire::component('monitoring.reach-settings', ReachSettings::class);
         Livewire::component('monitoring.hashtag-lists-index', HashtagListsIndex::class);
         Livewire::component('monitoring.monitoring-overview', MonitoringOverview::class);
         Livewire::component('monitoring.home-overview', HomeOverview::class);

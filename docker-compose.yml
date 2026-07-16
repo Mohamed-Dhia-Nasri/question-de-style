@@ -15,6 +15,7 @@ services:
   postgres:
     image: postgres:17
     container_name: qds-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: qds
       POSTGRES_USER: qds

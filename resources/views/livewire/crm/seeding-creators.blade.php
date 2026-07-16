@@ -47,6 +47,8 @@
         </ul>
     @endif
 
+    <x-form.error for="detach" class="px-6 pb-4" />
+
     @if ($confirmingDetachId !== null)
         <x-ui.confirm-modal title="Remove creator from seeding run?" confirm-action="detach" cancel-action="cancelDetach"
             confirm-label="Remove creator">

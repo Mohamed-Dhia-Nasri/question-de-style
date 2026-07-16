@@ -97,18 +97,25 @@ class ShipmentsPanelTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'shipment.created', 'subject_id' => $shipment->id]);
     }
 
-    public function test_unattached_recipients_and_foreign_brand_products_are_refused(): void
+    public function test_unattached_recipients_are_auto_attached_and_foreign_brand_products_are_refused(): void
     {
         $this->actingAsCrmStaff();
         $this->makeSeedingRun();
 
+        // F03 self-heal: an off-roster recipient is no longer a dead end —
+        // ShipmentsPanel::save() auto-attaches instead (never past a brand
+        // restriction; see SeedingRosterRepairTest for that boundary).
+        $offRosterCreator = Creator::factory()->create();
+
         Livewire::test(ShipmentsPanel::class, ['seedingCampaign' => $this->seeding])
             ->call('create')
-            ->set('shipment_creator_id', (string) Creator::factory()->create()->id)
+            ->set('shipment_creator_id', (string) $offRosterCreator->id)
             ->set('shipment_product_id', (string) $this->product->id)
             ->set('shipment_status', ShipmentStatus::Pending->value)
             ->call('save')
-            ->assertHasErrors(['shipment_creator_id']);
+            ->assertHasNoErrors();
+
+        $this->assertTrue($this->seeding->creators()->whereKey($offRosterCreator->id)->exists());
 
         Livewire::test(ShipmentsPanel::class, ['seedingCampaign' => $this->seeding])
             ->call('create')
@@ -118,7 +125,7 @@ class ShipmentsPanelTest extends TestCase
             ->call('save')
             ->assertHasErrors(['shipment_product_id']);
 
-        $this->assertDatabaseCount('shipments', 0);
+        $this->assertDatabaseCount('shipments', 1);
     }
 
     public function test_status_transitions_are_recorded(): void

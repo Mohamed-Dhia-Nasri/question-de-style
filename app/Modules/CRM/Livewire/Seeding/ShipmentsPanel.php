@@ -2,9 +2,12 @@
 
 namespace App\Modules\CRM\Livewire\Seeding;
 
+use App\Modules\CRM\Exceptions\BrandRestrictionViolation;
+use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\Product;
 use App\Modules\CRM\Models\SeedingCampaign;
 use App\Modules\CRM\Models\Shipment;
+use App\Modules\CRM\Services\BrandRestrictionGuard;
 use App\Modules\CRM\Services\ShipmentContentWriter;
 use App\Modules\Monitoring\Contracts\ContentMatchFeedback;
 use App\Modules\Monitoring\Models\ContentItem;
@@ -133,9 +136,26 @@ class ShipmentsPanel extends Component
         $creatorId = (int) $validated['shipment_creator_id'];
 
         if (! $this->seedingCampaign->creators()->whereKey($creatorId)->exists()) {
-            throw ValidationException::withMessages([
-                'shipment_creator_id' => 'The recipient must be a creator attached to this seeding run.',
-            ]);
+            // F03 self-heal: a shipment recipient belongs on the roster. For
+            // new shipments the dropdown only offers roster creators, so this
+            // path is legacy rows (pre-backfill) and non-UI writes — attach
+            // instead of dead-ending, but never past a brand restriction.
+            $creator = Creator::query()->whereKey($creatorId)->first();
+
+            if ($creator === null) {
+                throw ValidationException::withMessages([
+                    'shipment_creator_id' => 'Pick a creator from this seeding run.',
+                ]);
+            }
+
+            try {
+                app(BrandRestrictionGuard::class)->assertNotRestricted($creator, $this->seedingCampaign->brand);
+            } catch (BrandRestrictionViolation $violation) {
+                throw ValidationException::withMessages(['shipment_creator_id' => $violation->getMessage()]);
+            }
+
+            $this->seedingCampaign->creators()->syncWithoutDetaching([$creator->id]);
+            $audit->record('seeding_campaign_creator.attached', $this->seedingCampaign, ['creator_id' => $creator->id]);
         }
 
         $productId = (int) $validated['shipment_product_id'];

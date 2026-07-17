@@ -7,6 +7,7 @@ use App\Modules\CRM\Models\SeedingCampaign;
 use App\Modules\CRM\Services\ActiveSeedingCreatorIds;
 use App\Shared\Enums\SeedingCampaignStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
@@ -70,5 +71,16 @@ class ActiveSeedingCreatorIdsTest extends TestCase
         $this->runWithCreators(SeedingCampaignStatus::Completed, Creator::factory()->create());
 
         $this->assertSame([], app(ActiveSeedingCreatorIds::class)->forCurrentTenant());
+    }
+
+    public function test_resolver_driving_predicate_is_indexed(): void
+    {
+        $this->assertTrue(
+            DB::table('pg_indexes')
+                ->where('tablename', 'seeding_campaigns')
+                ->where('indexname', 'seeding_campaigns_tenant_id_status_index')
+                ->exists(),
+            'Expected composite index (tenant_id, status) on seeding_campaigns.',
+        );
     }
 }

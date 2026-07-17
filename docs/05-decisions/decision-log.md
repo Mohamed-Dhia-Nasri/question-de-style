@@ -16,7 +16,7 @@ last_reviewed: 2026-07-12
 
 This file is the **sole home** of every Architecture Decision Record (`ADR-*`) for Question de Style (QDS). No other file defines, restates, or re-decides an ADR; other files reference an ADR by its ID and link here. If a decision changes, it is amended **here** (with a new status such as `SUPERSEDED`) and a superseding ADR is added to the ledger.
 
-Each ADR below uses the fixed four-part body format: **Context / Decision / Status / Consequences**. The `Status` line carries one [`ENUM-DocStatus`](../00-meta/03-glossary.md#enum-docstatus) value. All twenty-two ADRs (`ADR-0001` .. `ADR-0022`) are `APPROVED`.
+Each ADR below uses the fixed four-part body format: **Context / Decision / Status / Consequences**. The `Status` line carries one [`ENUM-DocStatus`](../00-meta/03-glossary.md#enum-docstatus) value. All twenty-six ADRs (`ADR-0001` .. `ADR-0026`) are `APPROVED`.
 
 Related canonical files (do not restate their facts here — link):
 
@@ -54,6 +54,10 @@ Related canonical files (do not restate their facts here — link):
 | [ADR-0020](#adr-0020) | Hard tenant isolation: fail-closed authorization backstop, scoped analytics reads, tenant-aware validation | APPROVED | Closes the read-path/authorization deferrals of ADR-0019: a `Gate::before` backstop denies any ability against a foreign-tenant model ahead of every permission-only policy; `RollupReader` and every raw analytics read filter by the active tenant; a `TenantRule::exists` factory scopes foreign-key validators; the story-media stream route is `auth`-gated + policy-checked; per-tenant data-quality alerts vs global provider alerts are separated; audit ownership stamps are non-mass-assignable; scheduled/queued tenant work runs under explicit `runAs`. Proven with an adversarial cross-tenant test suite. |
 | [ADR-0021](#adr-0021) | Stripe SaaS billing: tenant-as-customer, plan catalog, seat limits, invitations | APPROVED | Closes the billing/invitation deferrals of ADR-0019/0020: each tenant is one Stripe customer (`tenants.stripeCustomerId`, the only trusted webhook→tenant mapping); a config-synced global `ENT-SubscriptionPlan` catalog with per-plan seat allowances; `ENT-TenantSubscription` mirrors Stripe's canonical lifecycle states, written only by the verified-webhook synchronizer; seats = active members (incl. owner), enforced server-side under a per-tenant row lock; secure hashed-token `ENT-TeamInvitation` acceptance; owner-only billing via a `billing.manage` owner-attribute gate; product access gated by the `subscribed` middleware behind `QDS_BILLING_ENFORCED`. Stripe is integrated as a thin hand-rolled HTTP client (Cashier rejected), with Checkout/Billing-Portal hosting all card interactions. |
 | [ADR-0022](#adr-0022) | Estimated-reach method: per-tenant configurable linear model | APPROVED | Documents the long-missing MET-EstimatedReach method (REQ-M1-006): `estimated_reach = round(view_weight × views + follower_weight × followers)` per ContentItem, computed in enrichment and stored append-only as `ENT-ReachResult`, from an operator-configured, versioned, tenant-owned `ENT-ReachConfiguration` (Settings → Reach, `reach.manage`, DRAFT→ACTIVE, one active per tenant). Always tier ESTIMATED with a disclosed method; never a raw view count (the follower signal must contribute). The `ReachEstimator` DI binding moves off `UnavailableReachEstimator`. CONFIRMED unique reach stays deferred (DEF-003); its UI tiles are removed rather than shown as a perpetual placeholder. |
+| [ADR-0023](#adr-0023) | Enrichment triggers per data pull; sweep demoted to backstop | APPROVED | The AI-enrichment pass for a new ContentItem is dispatched by ingestion at persist time (created rows only, inside the eligibility window, behind the kill switch); a story's pass is dispatched after its media archive lands. The recurring sweep stays scheduled as the recovery backstop for crashed/reaped runs. Closes the flagged "enrichment sweep cadence" gap left open by ADR-0017. |
+| [ADR-0024](#adr-0024) | Engagement-trend formula; posting frequency stays undecided | APPROVED | MET-EngagementTrend is canonical: mean observed likes+comments per post over the last N days vs the N days before, as a whole signed percent, tier DERIVED; NULL (unavailable) without both windows or with a zero base. N is per-tenant (default 30, ADR-0025). Rolling windows cannot be served by calendar-grain rollups, so the creator page computes this live over ContentItem.public_metrics — a recorded exception to ADR-0010. Posting frequency remains explicitly undecided and hidden. |
+| [ADR-0025](#adr-0025) | Per-tenant monitoring settings & retention policy | APPROVED | New append-only `monitoring_settings` table (latest row per tenant wins) + Settings → Monitoring page (`monitoring-settings.manage`, ADMIN): gift-link/shipment attribution window (default 60d), engagement-trend window (default 30d), story-media keep-time (default 180d, 0 = keep forever), communication-log keep-time (default 0 = keep forever). Reads go through a context-safe resolver (config fallback; tenant-less reads NEVER see another tenant's row); retention prune commands iterate tenants with explicit ownership predicates. Closes the flagged shipment-window gap and the two P4-review retention ADR candidates. |
+| [ADR-0026](#adr-0026) | Operational confirmations: confidence cut-points, PAID, sentiment | APPROVED | Product-owner confirmations (2026-07-17): the enrichment confidence cut-points 0.85/0.60 are canonical (env-tunable); `PAID` stays in ENUM-MentionType as an inert compatibility value — only ever asserted from a platform paid-partnership label, never inferred (resolves roadmap post-P1 TODO #1); sentiment (REQ-M1-009) deliberately remains Unavailable — no NLP model is chosen; choosing one is a future ADR. |
 
 ---
 
@@ -568,3 +572,91 @@ The metrics catalog ([MET-EstimatedReach](../30-data-model/00-data-model.md), RE
 - The deferred register is amended in spirit: CONFIRMED unique reach stays deferred, but ESTIMATED reach is no longer perpetually unavailable. The two CRM "True unique reach" tiles and the Monitoring "Confirmed unique reach" tile are removed, and export disclosure lines are reworded to keep the DEF-003 clause only for CONFIRMED reach.
 - Downstream tier propagation (e.g. REQ-M3-009 CPM) inherits ESTIMATED from a reach input via the weakest-input rule — a reach-based ratio is ESTIMATED, never laundered into a fact.
 - **Still deferred (do not build ahead):** CONFIRMED unique reach / impressions ([DEF-003](../20-cross-cutting/01-deferred-register.md)/DEF-004), per-user or per-content nonlinear reach models, and an EMV-style "producing configurations" reach-disclosure panel in the CRM results surfaces beyond the stored method string.
+
+<a id="adr-0023"></a>
+## ADR-0023 — Enrichment triggers per data pull; sweep demoted to backstop
+
+**Context.**
+
+Since P1, the ONLY enrichment trigger was the recurring sweep (`qds:run-enrichment`), and its cadence was explicitly flagged "NOT canonically decided" — [ADR-0017](#adr-0017) closed the ingestion-polling cadence gap but left enrichment cadence open. Product-owner decision (2026-07-17): the AI check follows the data pull — there is no separate timer to tune.
+
+**Decision.**
+
+1. **Content:** when an ingestion pull persists a batch, the persister reports the rows it CREATED and ingestion dispatches one enrichment job per created row — gated on `qds.enrichment.enabled` and on the sweep's `content_window_days` eligibility window (deep backfills of old posts never trigger recognition cost). Metric refreshes of existing rows NEVER re-trigger enrichment: EMV/reach results are append-only and recognition calls re-bill.
+2. **Stories:** the enrichment job is dispatched after the story's media archive succeeds (recognition needs the stored file); stories without media are left to the backstop sweep.
+3. **The sweep stays scheduled as recovery backstop.** Its RUNNING/COMPLETED eligibility predicate makes it a no-op for per-pull-enriched targets; it re-collects targets whose run crashed or was reaped (stale-run reaper). Its cron is an operational knob of the backstop, not a product cadence.
+4. The `qds.enrichment.enabled` kill switch gates every dispatch site (per-pull and sweep alike).
+
+**Status.** APPROVED ([`ENUM-DocStatus`](../00-meta/03-glossary.md#enum-docstatus)).
+
+**Consequences.**
+
+- Closes the flagged "enrichment sweep cadence" missing decision (config/qds.php and routes/console.php comments are reconciled).
+- Enrichment latency now tracks ingestion cadence; recognition cost per pull is bounded by created-rows × window eligibility.
+- Failure recovery is unchanged: failed/reaped runs re-enter through the backstop sweep.
+
+<a id="adr-0024"></a>
+## ADR-0024 — Engagement-trend formula; posting frequency stays undecided
+
+**Context.**
+
+`DerivedMetricsService::engagementTrend()` and `postingFrequency()` were honest NULL boundaries — "NO canonical formula exists … do not invent one here." Product-owner decision (2026-07-17): show the engagement trend with a defined formula and a configurable window; keep posting frequency hidden.
+
+**Decision.**
+
+1. **MET-EngagementTrend (DERIVED):** for a creator across their platform accounts, mean observed `likes + comments` per ContentItem published in the last N days vs the N days before, reported as a whole signed percent change. An item with NEITHER metric observed is excluded (missing is never zero); a single observed component counts as-is.
+2. **Unavailable, never fabricated:** NULL when either window has no included content or the previous average is zero.
+3. **N is per-tenant** — Settings → Monitoring, default 30 ([ADR-0025](#adr-0025)).
+4. **Read-path exception to [ADR-0010](#adr-0010):** rolling last-N-day windows cannot be served by the calendar-grain rollup matviews; the creator page computes the trend live over `ContentItem.public_metrics`, following the pre-existing sanctioned precedent of the page's average/median views.
+5. **Posting frequency remains undecided** — the NULL boundary and its Unavailable surfaces stay.
+
+**Status.** APPROVED ([`ENUM-DocStatus`](../00-meta/03-glossary.md#enum-docstatus)).
+
+**Consequences.**
+
+- Creator detail gains an "Engagement trend" DERIVED tile; exports/lists/analytics schema are unchanged in this iteration.
+- The metrics catalog measure named without a formula (engagement trend) now has one; `posting_frequency` stays NULL end-to-end.
+
+<a id="adr-0025"></a>
+## ADR-0025 — Per-tenant monitoring settings & retention policy
+
+**Context.**
+
+Four operational values were global env-config flagged "NOT canonically decided": the shipment attribution window (60d), story-media retention (180d), communication-log retention (0), and (new with [ADR-0024](#adr-0024)) the trend window. The P4 review listed the two retention periods as ADR candidates. Product-owner decision (2026-07-17): make all four per-tenant, user-editable settings with the current values as defaults; message history keeps forever by default.
+
+**Decision.**
+
+1. **Storage:** append-only `monitoring_settings` (NOT NULL `tenant_id`, latest row per tenant wins, `updated_by` audit, DB CHECK ranges). Saves insert new rows — history is never edited.
+2. **Page:** Settings → Monitoring (staff view via `settings.view`; saving via new ADMIN permission `monitoring-settings.manage`), four plain-language cards. Retention cards expose an on/off toggle where OFF stores 0 = keep forever; the attribution and trend windows have no off-state.
+3. **Reads:** only through `MonitoringSettingsResolver` — active-context reads resolve the tenant's latest row; tenant-less reads return the config default and NEVER another tenant's row (the `MonitoringPlanSetting::current()` cross-tenant limitation must not be repeated). Explicit `…For(tenantId)` getters serve tenant-less schedulers.
+4. **Retention enforcement is per-tenant:** the story-media and communication-log prune commands iterate tenants, resolve each tenant's keep-time (0 skips), and delete with explicit `tenant_id` predicates.
+5. **Canonical defaults:** shipment window 60 days; trend window 30 days; story media 180 days; communication logs 0 (keep forever). The env values remain as fallbacks for tenants that never saved settings.
+
+**Status.** APPROVED ([`ENUM-DocStatus`](../00-meta/03-glossary.md#enum-docstatus)).
+
+**Consequences.**
+
+- Closes the flagged shipment-window gap and the P4-review retention ADR candidates; the config comments are reconciled to "DEFAULT/fallback" semantics.
+- `MentionClassifier` resolves its window per tenant at classification time; the same evidence may classify differently across tenants by design.
+- New operational register `monitoring_settings` (tenant-owned, append-only) joins the data model's operational-registers section.
+
+<a id="adr-0026"></a>
+## ADR-0026 — Operational confirmations: confidence cut-points, PAID, sentiment
+
+**Context.**
+
+Three long-flagged open decisions needed an owner call, gathered 2026-07-17.
+
+**Decision.**
+
+1. **Confidence cut-points are canonical at 0.85 / 0.60** (provider score ≥ 0.85 → HIGH; ≥ 0.60 → MEDIUM; else LOW → review per DP-004). They stay env-tunable (`QDS_ENRICHMENT_CONFIDENCE_*`) as operational calibration, no longer a missing decision.
+2. **`PAID` stays in [`ENUM-MentionType`](../00-meta/03-glossary.md#enum-mentiontype) as an inert compatibility value.** QDS works with unpaid organic seeding only; `PAID` is asserted exclusively from a platform paid-partnership label (AC-M1-003) and never inferred. It is kept for possible future use — resolving roadmap post-P1 TODO #1 with the "keep inert" option.
+3. **Sentiment (REQ-M1-009) deliberately remains Unavailable.** No NLP model/provider is chosen; the `UnavailableSentimentClassifier` binding stands. Choosing a model is a future ADR — sentiment is "off for now" by product decision, not an oversight.
+
+**Status.** APPROVED ([`ENUM-DocStatus`](../00-meta/03-glossary.md#enum-docstatus)).
+
+**Consequences.**
+
+- ConfidenceScore/config comments drop the "flagged missing decision" wording and cite this ADR.
+- The glossary PAID row gains the inert-compatibility note; AC-M1-002/003 stand unchanged.
+- Sentiment surfaces keep rendering "unavailable" honestly until a model ADR supersedes point 3.

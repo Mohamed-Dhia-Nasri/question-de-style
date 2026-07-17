@@ -276,10 +276,9 @@ return [
             'max_seconds' => (int) env('QDS_ENRICHMENT_AUDIO_MAX_SECONDS', 60),
         ],
 
-        // Numeric provider score → ENUM-ConfidenceLevel bucketing. The
-        // cut-points are NOT canonically decided (flagged missing decision;
-        // DP-004 only says LOW routes to review) — configurable until an
-        // ADR fixes them. score >= high → HIGH; >= medium → MEDIUM; else LOW.
+        // Numeric provider score → ENUM-ConfidenceLevel bucketing
+        // (ADR-0026): score >= high → HIGH; >= medium → MEDIUM; else LOW
+        // (LOW routes to review per DP-004). Env-tunable calibration.
         'confidence' => [
             'high' => (float) env('QDS_ENRICHMENT_CONFIDENCE_HIGH', 0.85),
             'medium' => (float) env('QDS_ENRICHMENT_CONFIDENCE_MEDIUM', 0.60),

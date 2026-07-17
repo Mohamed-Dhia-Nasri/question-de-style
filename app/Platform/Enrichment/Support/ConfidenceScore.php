@@ -6,9 +6,8 @@ use App\Shared\Enums\ConfidenceLevel;
 
 /**
  * Maps a numeric provider confidence score (0..1, e.g. Google Vision logo
- * score) onto the canonical ENUM-ConfidenceLevel. The cut-points are NOT
- * canonically decided (flagged missing decision) — they live in
- * config/qds.php `qds.enrichment.confidence` until an ADR fixes them.
+ * score) onto the canonical ENUM-ConfidenceLevel. Cut-points are canonical
+ * per ADR-0026 (0.85 / 0.60), env-tunable as operational calibration.
  * A missing/invalid score maps to UNKNOWN (never guessed).
  */
 final class ConfidenceScore

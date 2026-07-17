@@ -2,6 +2,7 @@
 
 namespace App\Modules\CRM\Livewire\Clients;
 
+use App\Modules\CRM\Livewire\Concerns\WithInlineCreate;
 use App\Modules\CRM\Models\Client;
 use App\Shared\Audit\AuditLogger;
 use App\Shared\Enums\Country;
@@ -23,6 +24,7 @@ use Livewire\Component;
 class ClientsIndex extends Component
 {
     use WithDataTable;
+    use WithInlineCreate;
 
     // --- create/edit form state ---
     public bool $showForm = false;
@@ -103,6 +105,7 @@ class ClientsIndex extends Component
         return [
             'client_name' => 'name',
             'client_country' => 'country',
+            ...$this->inlineValidationAttributes(),
         ];
     }
 
@@ -145,8 +148,38 @@ class ClientsIndex extends Component
 
     public function cancelForm(): void
     {
+        if ($this->inlineCreate !== null) {
+            $this->cancelInlineCreate();
+
+            return;
+        }
+
         $this->showForm = false;
         $this->resetForm();
+    }
+
+    // --- inline brand create (Clients & Brands hierarchy) ------------------
+
+    /** Open the shared brand form with a client already chosen. */
+    public function addBrandForClient(int $clientId): void
+    {
+        $this->openInlineCreate('brand');
+
+        if ($this->inlineCreate === 'brand') {
+            $this->inline_brand_client_id = (string) $clientId;
+        }
+    }
+
+    /** @return list<string> */
+    protected function inlineCreateTypes(): array
+    {
+        return ['brand'];
+    }
+
+    protected function inlineCreated(string $type, int $id): void
+    {
+        // The hierarchy re-queries its brands on every render, so a new brand
+        // appears under its client with no select to update here.
     }
 
     // --- delete ------------------------------------------------------------
@@ -214,6 +247,7 @@ class ClientsIndex extends Component
         return view('livewire.crm.clients-index', [
             'clients' => $this->clientsQuery()->paginate($this->perPage()),
             'countries' => Country::cases(),
+            'allClients' => Client::query()->orderBy('name')->get(),
         ]);
     }
 }

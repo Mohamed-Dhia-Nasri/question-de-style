@@ -155,7 +155,9 @@ class SeedingResultsDashboardTest extends TestCase
             // CONFIRMED-reach only, retired from this ESTIMATED surface).
             ->assertSee('No estimated reach yet')
             ->assertSee('Settings → Reach')
-            ->assertDontSee('DEF-003');
+            ->assertDontSee('DEF-003')
+            // Product name is a link back to its record (Stage B Task 8).
+            ->assertSee(route('crm.products.index', ['q' => 'Silk Serum']), false);
     }
 
     public function test_an_unknown_grain_falls_back_to_month(): void

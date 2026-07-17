@@ -157,7 +157,10 @@ class SeedingResultsPanelTest extends TestCase
             ->assertSee('500')
             ->assertSee('From platform')
             ->assertSee('Calculated')
-            ->assertSee($this->product->name);
+            ->assertSee($this->product->name)
+            // Creator name is a link back to its record (Stage B Task 8) —
+            // both the per-creator and per-shipment rows use it.
+            ->assertSee(route('crm.creators.show', $this->creator->id), false);
     }
 
     public function test_cpe_and_cpm_compute_from_the_run_spend_at_display_time(): void

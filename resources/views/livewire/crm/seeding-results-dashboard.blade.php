@@ -151,7 +151,11 @@
                         @foreach ($rows as $row)
                             <tr wire:key="slice-{{ $row->bucket_start }}-{{ $row->product_id }}-{{ $row->platform }}-{{ $row->content_type }}-{{ $row->country ?? 'na' }}-{{ $row->city ?? 'na' }}">
                                 <td class="px-5 py-3 text-sm font-medium text-gray-800 dark:text-white/90">
-                                    {{ $productNames[$row->product_id] ?? '#'.$row->product_id }}
+                                    @if (isset($productNames[$row->product_id]))
+                                        <a href="{{ route('crm.products.index', ['q' => $productNames[$row->product_id]]) }}" class="font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">{{ $productNames[$row->product_id] }}</a>
+                                    @else
+                                        #{{ $row->product_id }}
+                                    @endif
                                 </td>
                                 <td class="px-5 py-3 text-sm text-gray-600 dark:text-gray-300">{{ $row->bucket_start }}</td>
                                 <td class="px-5 py-3"><x-ui.badge color="light" size="sm">{{ $row->platform }}</x-ui.badge></td>
@@ -227,7 +231,11 @@
                         @foreach ($rows as $row)
                             <tr wire:key="product-{{ $row->bucket_start }}-{{ $row->product_id }}">
                                 <td class="px-5 py-3 text-sm font-medium text-gray-800 dark:text-white/90">
-                                    {{ $productNames[$row->product_id] ?? '#'.$row->product_id }}
+                                    @if (isset($productNames[$row->product_id]))
+                                        <a href="{{ route('crm.products.index', ['q' => $productNames[$row->product_id]]) }}" class="font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">{{ $productNames[$row->product_id] }}</a>
+                                    @else
+                                        #{{ $row->product_id }}
+                                    @endif
                                 </td>
                                 <td class="px-5 py-3 text-sm text-gray-600 dark:text-gray-300">{{ $row->bucket_start }}</td>
                                 <td class="px-5 py-3 text-sm text-gray-600 dark:text-gray-300">{{ number_format((int) ($row->shipments ?? 0)) }}</td>

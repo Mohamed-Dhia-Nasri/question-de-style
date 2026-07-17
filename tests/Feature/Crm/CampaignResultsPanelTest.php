@@ -168,7 +168,9 @@ class CampaignResultsPanelTest extends TestCase
             ->assertSeeHtml('>50</span>')
             ->assertSee('From platform')
             ->assertSee('Calculated')
-            ->assertSee($this->run->name); // per-run totals row
+            ->assertSee($this->run->name) // per-run totals row
+            // Run name is a link back to its record (Stage B Task 8).
+            ->assertSee(route('crm.seeding.show', $this->run), false);
     }
 
     public function test_cpe_and_cpm_compute_from_agency_spend_at_display_time(): void

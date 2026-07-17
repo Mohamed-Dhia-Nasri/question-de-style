@@ -122,7 +122,11 @@
                         @foreach ($creatorRows as $row)
                             <tr wire:key="seeding-results-creator-{{ $row->creator_id }}">
                                 <td class="px-5 py-3 text-sm font-medium text-gray-800 dark:text-white/90">
-                                    {{ $creatorNames[$row->creator_id] ?? '#'.$row->creator_id }}
+                                    @if (isset($creatorNames[$row->creator_id]))
+                                        <a href="{{ route('crm.creators.show', $row->creator_id) }}" class="font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">{{ $creatorNames[$row->creator_id] }}</a>
+                                    @else
+                                        #{{ $row->creator_id }}
+                                    @endif
                                 </td>
                                 <td class="px-5 py-3 text-sm text-gray-600 dark:text-gray-300">{{ number_format($row->shipments) }}</td>
                                 <td class="px-5 py-3 text-sm text-gray-600 dark:text-gray-300">{{ number_format($row->posted) }}</td>
@@ -178,7 +182,11 @@
                         @foreach ($shipmentRows as $row)
                             <tr wire:key="seeding-results-shipment-{{ $row->shipment_id }}">
                                 <td class="px-5 py-3 text-sm font-medium text-gray-800 dark:text-white/90">
-                                    {{ $creatorNames[$row->creator_id] ?? '#'.$row->creator_id }}
+                                    @if (isset($creatorNames[$row->creator_id]))
+                                        <a href="{{ route('crm.creators.show', $row->creator_id) }}" class="font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">{{ $creatorNames[$row->creator_id] }}</a>
+                                    @else
+                                        #{{ $row->creator_id }}
+                                    @endif
                                 </td>
                                 <td class="px-5 py-3 text-sm text-gray-600 dark:text-gray-300">
                                     {{ $productNames[$row->product_id] ?? '—' }}

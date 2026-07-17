@@ -43,6 +43,12 @@ class ClientsIndex extends Component
         if ($this->sortField === '') {
             $this->sortField = 'name';
         }
+
+        // Overview quick-action deep link (F02) — the can() guard keeps a
+        // crm.view-only visitor on a working page instead of a 403.
+        if (request()->boolean('create') && auth()->user()->can('create', Client::class)) {
+            $this->create();
+        }
     }
 
     protected function sortableColumns(): array

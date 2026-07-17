@@ -24,6 +24,7 @@ use App\Modules\CRM\Livewire\Creators\GeographyPanel;
 use App\Modules\CRM\Livewire\Creators\ParticipationPanel;
 use App\Modules\CRM\Livewire\Creators\PlatformAccountsPanel;
 use App\Modules\CRM\Livewire\Documents\DocumentsPanel;
+use App\Modules\CRM\Livewire\Overview\CrmOverview;
 use App\Modules\CRM\Livewire\Products\ProductsIndex;
 use App\Modules\CRM\Livewire\Results\CampaignResultsPanel;
 use App\Modules\CRM\Livewire\Results\SeedingResultsDashboard;
@@ -155,6 +156,10 @@ class CrmServiceProvider extends ServiceProvider
         Livewire::component('crm.documents-panel', DocumentsPanel::class);
         Livewire::component('crm.tasks-index', TasksIndex::class);
         Livewire::component('crm.tasks-panel', TasksPanel::class);
+
+        // Stage C (F02) — the `/crm` home becomes an operational Overview:
+        // setup checklist, needs-attention queue, active work, quick actions.
+        Livewire::component('crm.overview', CrmOverview::class);
 
         if ($this->app->runningInConsole()) {
             $this->commands([

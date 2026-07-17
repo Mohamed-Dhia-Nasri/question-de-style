@@ -41,6 +41,11 @@
         </div>
     @endif
 
+    {{-- Plain-English date scope: with no From/To the figures below cover all data. --}}
+    <p class="mb-4 text-theme-xs text-gray-500 dark:text-gray-400">
+        Showing: <span class="font-medium text-gray-700 dark:text-gray-300">{{ $rangeLabel }}</span>
+    </p>
+
     {{-- KPI cards --}}
     <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
@@ -49,7 +54,7 @@
             <a href="{{ route('monitoring.creators.index') }}" class="mt-1 inline-block text-theme-xs text-brand-500 hover:underline">View roster</a>
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-            <p class="text-sm text-gray-500 dark:text-gray-400">New content in period</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400">New content</p>
             <p class="mt-2 text-2xl font-semibold text-gray-800 dark:text-white/90">{{ number_format($newContent) }}</p>
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
@@ -66,29 +71,29 @@
     {{-- Rollup-backed totals — every figure tier-labelled (DP-001) --}}
     <div class="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-            <p class="text-sm text-gray-500 dark:text-gray-400">Views (period)</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Views</p>
             <div class="mt-2">
                 @if ($creatorTotals->views_sum !== null)
                     <span class="text-2xl font-semibold text-gray-800 dark:text-white/90">{{ number_format((float) $creatorTotals->views_sum) }}</span>
                     <x-metric.tier-badge tier="PUBLIC" />
                 @else
-                    <x-states.unavailable reason="No observed views in the selected period — never shown as zero." />
+                    <x-states.unavailable reason="No observed views for the selected dates — never shown as zero." />
                 @endif
             </div>
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-            <p class="text-sm text-gray-500 dark:text-gray-400">Engagement (period)</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Engagement</p>
             <div class="mt-2">
                 @if ($creatorTotals->engagement_sum !== null)
                     <span class="text-2xl font-semibold text-gray-800 dark:text-white/90">{{ number_format((float) $creatorTotals->engagement_sum) }}</span>
                     <x-metric.tier-badge tier="PUBLIC" />
                 @else
-                    <x-states.unavailable reason="No observed engagement in the selected period — never shown as zero." />
+                    <x-states.unavailable reason="No observed engagement for the selected dates — never shown as zero." />
                 @endif
             </div>
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-            <p class="text-sm text-gray-500 dark:text-gray-400">Estimated reach (period)</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Estimated reach</p>
             <div class="mt-2">
                 @if ($activeSeedingOnly)
                     <x-states.unavailable reason="Aggregated by brand — not available for the seeding filter." />
@@ -96,12 +101,12 @@
                     <span class="text-2xl font-semibold text-gray-800 dark:text-white/90">{{ number_format((float) $mentionTotals->total_estimated_reach) }}</span>
                     <x-metric.tier-badge tier="ESTIMATED" />
                 @else
-                    <x-states.unavailable reason="No estimated reach in the rollups for this period yet (REQ-M1-006)." />
+                    <x-states.unavailable reason="No estimated reach for the selected dates yet (REQ-M1-006)." />
                 @endif
             </div>
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-            <p class="text-sm text-gray-500 dark:text-gray-400">EMV (period)</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400">EMV</p>
             <div class="mt-2">
                 @if ($activeSeedingOnly)
                     <x-states.unavailable reason="Aggregated by brand — not available for the seeding filter." />
@@ -115,74 +120,16 @@
         </div>
     </div>
 
-    <div class="mt-4 grid gap-4 lg:grid-cols-2">
-        {{-- Mentions by ENUM-MentionType --}}
-        <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-            <h3 class="font-semibold text-gray-800 dark:text-white/90">Mentions by type</h3>
-            <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">
-                PAID/SEEDED only with a proving record; organic is never asserted as fact.
-            </p>
-            @php $mentionMax = max(1, (int) $mentionsByType->max()); @endphp
-            <div class="mt-4 space-y-3">
-                @foreach (['PAID', 'SEEDED', 'LIKELY_ORGANIC', 'UNKNOWN'] as $type)
-                    @php $count = (int) ($mentionsByType[$type] ?? 0); @endphp
-                    <div class="flex items-center gap-3">
-                        <span class="w-32 shrink-0 text-theme-xs font-medium text-gray-600 dark:text-gray-300">{{ $type }}</span>
-                        <div class="h-2.5 flex-1 rounded-full bg-gray-100 dark:bg-white/5">
-                            <div class="h-2.5 rounded-full bg-brand-500" style="width: {{ (int) round($count / $mentionMax * 100) }}%"></div>
-                        </div>
-                        <span class="w-10 text-right text-theme-xs text-gray-600 dark:text-gray-300">{{ $count }}</span>
-                    </div>
-                @endforeach
-            </div>
-        </div>
+    {{--
+        Hidden for now (user request 2026-07-18):
+          • "Mentions by type" — the mentions-by-ENUM-MentionType breakdown.
+          • "Data collection status" — the plain-English provider-health list
+            (rendered from $providerRows via ProviderHealthPresenter).
+        The component still computes $mentionsByType and $providerRows, so
+        restoring is a view-only change: re-add the lg:grid-cols-2 row here.
 
-        {{-- Ingestion / provider health summary --}}
-        <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-            <div class="flex items-center justify-between">
-                <h3 class="font-semibold text-gray-800 dark:text-white/90">Ingestion & provider health</h3>
-                @can(\App\Shared\Authorization\PermissionsCatalog::OPERATIONS_VIEW)
-                    <a href="{{ route('monitoring.operations') }}" class="text-theme-xs text-brand-500 hover:underline">Operations</a>
-                @endcan
-            </div>
-            <div class="mt-4 space-y-2">
-                @if ($failingProviders->isEmpty() && $staleProviders->isEmpty())
-                    <p class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-                        <x-ui.badge color="success">healthy</x-ui.badge> No provider failures or stale-data warnings.
-                    </p>
-                @endif
-                @foreach ($failingProviders as $source => $state)
-                    <p class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-                        <x-ui.badge color="error">failing</x-ui.badge>
-                        {{ $source }} — {{ $state['consecutive_failures'] }} consecutive failure(s)
-                    </p>
-                @endforeach
-                @foreach ($staleProviders as $source => $state)
-                    <p class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-                        <x-ui.badge color="warning">stale</x-ui.badge>
-                        {{ $source }} — last success {{ $state['last_success_at'] ?? 'unknown' }}
-                    </p>
-                @endforeach
-            </div>
-            <p class="mt-4 text-theme-xs text-gray-400 dark:text-gray-500">
-                Rollups refreshed: {{ $rollupsRefreshedAt?->diffForHumans() ?? 'never' }}
-            </p>
-        </div>
-    </div>
-
-    {{-- Deferred capabilities — mandatory unavailable states, never blank --}}
-    <div class="mt-4 grid gap-4 lg:grid-cols-2">
-        <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-            <h3 class="font-semibold text-gray-800 dark:text-white/90">Open-web listening</h3>
-            <div class="mt-3">
-                <x-states.unavailable reason="Open-web brand/keyword/hashtag listening from non-roster creators is deferred (DEF-006, ADR-0011)." />
-            </div>
-        </div>
-        <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-            <h3 class="font-semibold text-gray-800 dark:text-white/90">Comment & audience-reaction analysis</h3>
-            <div class="mt-3">
-                <x-states.unavailable reason="Comment collection and audience-reaction analysis are deferred (DEF-005, ADR-0009)." />
-            </div>
-        </div>
-    </div>
+        Also hidden earlier: the "Open-web listening" (DEF-006, ADR-0011) and
+        "Comment & audience-reaction analysis" (DEF-005, ADR-0009) panels, which
+        only showed an "unavailable" state for features not yet built.
+    --}}
 </div>

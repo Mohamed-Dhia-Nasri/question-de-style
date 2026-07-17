@@ -8,6 +8,7 @@ use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\Mention;
 use App\Modules\Monitoring\Models\MonitoredSubject;
 use App\Modules\Monitoring\Models\Story;
+use App\Modules\Monitoring\Support\ProviderHealthPresenter;
 use App\Platform\Analytics\RollupReader;
 use App\Platform\Enrichment\Review\ReviewQueue;
 use App\Platform\Ingestion\Observability\ProviderHealthService;
@@ -31,8 +32,9 @@ use Livewire\Component;
  * re-scopes the creator-keyed cards to ActiveSeedingCreatorIds
  * (ACTIVE+SHIPPING enrollment); brand-keyed reach/EMV cannot be
  * creator-scoped and render an explanatory unavailable state instead.
- * Deferred capabilities (open-web listening DEF-006, comment analysis
- * DEF-005) render "unavailable".
+ * Provider health is presented in plain English via ProviderHealthPresenter.
+ * The deferred-capability panels (open-web listening DEF-006, comment
+ * analysis DEF-005) are hidden in the view until those features ship.
  */
 class MonitoringOverview extends Component
 {
@@ -75,6 +77,23 @@ class MonitoringOverview extends Component
         return $this->brandId > 0 && Brand::query()->whereKey($this->brandId)->exists()
             ? $this->brandId
             : null;
+    }
+
+    /**
+     * Plain-English summary of the active date filter, shown near the top so
+     * "period" is never ambiguous: with no dates the KPI cards count all
+     * data, so this reads "all time" rather than a made-up window.
+     */
+    private function rangeLabel(?Carbon $from, ?Carbon $to): string
+    {
+        $format = fn (Carbon $date): string => $date->format('j M Y');
+
+        return match (true) {
+            $from !== null && $to !== null => $format($from).' – '.$format($to),
+            $from !== null => 'from '.$format($from),
+            $to !== null => 'until '.$format($to),
+            default => 'all time',
+        };
     }
 
     public function render(ReviewQueue $queue, ProviderHealthService $health, RollupReader $rollups): View
@@ -137,14 +156,11 @@ class MonitoringOverview extends Component
 
         $reviewCounts = $queue->counts();
 
-        $providerHealth = $health->overview();
-        $failingProviders = collect($providerHealth)
-            ->filter(fn (array $p): bool => $p['status'] === 'FAILING' || $p['consecutive_failures'] > 0);
-        $staleProviders = collect($providerHealth)
-            ->filter(fn (array $p): bool => $p['stale_data_warning'] === true);
+        $providerRows = ProviderHealthPresenter::rows($health->overview());
 
         return view('livewire.monitoring.monitoring-overview', [
             'rosterCount' => $rosterCount,
+            'rangeLabel' => $this->rangeLabel($from, $to),
             'newContent' => $newContent,
             'activeStories' => $activeStories,
             'mentionsByType' => $mentionsByType,
@@ -154,8 +170,7 @@ class MonitoringOverview extends Component
             'creatorTotals' => $rollups->creatorTotals($from, $to, $seedingCreatorIds),
             'seedingSetEmpty' => $seedingCreatorIds === [],
             'rollupsRefreshedAt' => $rollups->lastRefreshedAt(),
-            'failingProviders' => $failingProviders,
-            'staleProviders' => $staleProviders,
+            'providerRows' => $providerRows,
             'platforms' => Platform::cases(),
             'brands' => Brand::query()->orderBy('name')->get(['id', 'name']),
         ]);

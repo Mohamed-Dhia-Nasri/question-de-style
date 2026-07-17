@@ -2,8 +2,10 @@
 
 namespace App\Modules\CRM\Livewire\Seeding;
 
+use App\Modules\CRM\Livewire\Concerns\WithInlineCreate;
 use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Campaign;
+use App\Modules\CRM\Models\Client;
 use App\Modules\CRM\Models\Product;
 use App\Modules\CRM\Models\SeedingCampaign;
 use App\Shared\Audit\AuditLogger;
@@ -34,6 +36,7 @@ use Livewire\Component;
 class SeedingCampaignsIndex extends Component
 {
     use WithDataTable;
+    use WithInlineCreate;
 
     #[Url(except: '')]
     public string $statusFilter = '';
@@ -155,7 +158,7 @@ class SeedingCampaignsIndex extends Component
     /** @return array<string, string> */
     protected function validationAttributes(): array
     {
-        return [
+        return array_merge([
             'seeding_name' => 'name',
             'seeding_type' => 'seeding type',
             'seeding_brand_id' => 'brand',
@@ -163,7 +166,39 @@ class SeedingCampaignsIndex extends Component
             'seeding_campaign_id' => 'parent campaign',
             'seeding_status' => 'status',
             'seeding_spend' => 'spend',
-        ];
+        ], $this->inlineValidationAttributes());
+    }
+
+    /** @return list<string> */
+    protected function inlineCreateTypes(): array
+    {
+        return ['brand', 'product', 'campaign'];
+    }
+
+    protected function inlineBrandContextId(): ?int
+    {
+        return $this->seeding_brand_id !== '' ? (int) $this->seeding_brand_id : null;
+    }
+
+    protected function inlineCreated(string $type, int $id): void
+    {
+        if ($type === 'brand') {
+            // Same effect as updatedSeedingBrandId(): a new brand leaves the
+            // previously chosen product/campaign dangling.
+            $this->seeding_brand_id = (string) $id;
+            $this->seeding_product_id = '';
+            $this->seeding_campaign_id = '';
+
+            return;
+        }
+
+        if ($type === 'product') {
+            $this->seeding_product_id = (string) $id;
+
+            return;
+        }
+
+        $this->seeding_campaign_id = (string) $id;
     }
 
     public function save(AuditLogger $audit): void
@@ -259,6 +294,12 @@ class SeedingCampaignsIndex extends Component
 
     public function cancelForm(): void
     {
+        if ($this->inlineCreate !== null) {
+            $this->cancelInlineCreate();
+
+            return;
+        }
+
         $this->showForm = false;
         $this->resetForm();
     }
@@ -333,6 +374,7 @@ class SeedingCampaignsIndex extends Component
         return view('livewire.crm.seeding-campaigns-index', [
             'seedingCampaigns' => $this->seedingQuery()->paginate($this->perPage()),
             'brands' => Brand::orderBy('name')->get(),
+            'clients' => Client::orderBy('name')->get(),
             // Product options follow the selected brand — same reasoning as
             // the parent-campaign filter below; save() re-enforces this
             // server-side via the brand-coherence guard.

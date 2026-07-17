@@ -133,6 +133,10 @@
                         @endforeach
                     </x-form.select>
                     <x-form.error for="seeding_brand_id" />
+                    @can('create', \App\Modules\CRM\Models\Brand::class)
+                        <button type="button" wire:click="openInlineCreate('brand')"
+                            class="mt-1.5 text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">+ New brand</button>
+                    @endcan
                 </div>
 
                 <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
@@ -178,6 +182,12 @@
                             Optional default — each shipment picks its own product.
                         </p>
                         <x-form.error for="seeding_product_id" />
+                        @if ($seeding_brand_id !== '')
+                            @can('create', \App\Modules\CRM\Models\Product::class)
+                                <button type="button" wire:click="openInlineCreate('product')"
+                                    class="mt-1.5 text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">+ New product</button>
+                            @endcan
+                        @endif
                     </div>
 
                     <div>
@@ -190,6 +200,12 @@
                             @endforeach
                         </x-form.select>
                         <x-form.error for="seeding_campaign_id" />
+                        @if ($seeding_brand_id !== '')
+                            @can('create', \App\Modules\CRM\Models\Campaign::class)
+                                <button type="button" wire:click="openInlineCreate('campaign')"
+                                    class="mt-1.5 text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">+ New campaign</button>
+                            @endcan
+                        @endif
                     </div>
                 </div>
 
@@ -217,6 +233,10 @@
             </x-slot:footer>
         </x-ui.modal>
     @endif
+
+    <x-crm.inline-create :type="$inlineCreate"
+        :clients="$clients ?? \App\Modules\CRM\Models\Client::orderBy('name')->get()"
+        :new-client="$inline_new_client" />
 
     @if ($confirmingDeleteId !== null)
         <x-ui.confirm-modal title="Delete seeding run?" confirm-action="delete" cancel-action="cancelDelete"

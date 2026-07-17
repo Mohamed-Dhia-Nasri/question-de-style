@@ -117,6 +117,10 @@
                         @endforeach
                     </x-form.select>
                     <x-form.error for="product_brand_id" />
+                    @can('create', \App\Modules\CRM\Models\Brand::class)
+                        <button type="button" wire:click="openInlineCreate('brand')"
+                            class="mt-1.5 text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">+ New brand</button>
+                    @endcan
                 </div>
 
                 <div>
@@ -173,6 +177,10 @@
             </x-slot:footer>
         </x-ui.modal>
     @endif
+
+    <x-crm.inline-create :type="$inlineCreate"
+        :clients="$clients ?? \App\Modules\CRM\Models\Client::orderBy('name')->get()"
+        :new-client="$inline_new_client" />
 
     @if ($confirmingDeleteId !== null)
         <x-ui.confirm-modal title="Delete product?" confirm-action="delete" cancel-action="cancelDelete"

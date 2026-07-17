@@ -146,6 +146,10 @@
                             @endforeach
                         </x-form.select>
                         <x-form.error for="shipment_product_id" />
+                        @can('create', \App\Modules\CRM\Models\Product::class)
+                            <button type="button" wire:click="openInlineCreate('product')"
+                                class="mt-1.5 text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">+ New product</button>
+                        @endcan
                     </div>
                 </div>
 
@@ -226,6 +230,8 @@
             </x-slot:footer>
         </x-ui.modal>
     @endif
+
+    <x-crm.inline-create :type="$inlineCreate" />
 
     {{-- Manual content link (XMC-002 confirm) --}}
     @if ($linkingShipmentId !== null)

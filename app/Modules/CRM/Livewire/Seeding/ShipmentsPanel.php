@@ -3,6 +3,7 @@
 namespace App\Modules\CRM\Livewire\Seeding;
 
 use App\Modules\CRM\Exceptions\BrandRestrictionViolation;
+use App\Modules\CRM\Livewire\Concerns\WithInlineCreate;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\Product;
 use App\Modules\CRM\Models\SeedingCampaign;
@@ -35,6 +36,8 @@ use Livewire\Component;
  */
 class ShipmentsPanel extends Component
 {
+    use WithInlineCreate;
+
     public SeedingCampaign $seedingCampaign;
 
     // --- create/edit form state ---
@@ -148,7 +151,7 @@ class ShipmentsPanel extends Component
     /** @return array<string, string> */
     protected function validationAttributes(): array
     {
-        return [
+        return array_merge([
             'shipment_creator_id' => 'recipient',
             'shipment_product_id' => 'product',
             'shipment_status' => 'status',
@@ -158,7 +161,23 @@ class ShipmentsPanel extends Component
             'shipment_quantity' => 'quantity',
             'shipment_value' => 'product value',
             'link_content_id' => 'content',
-        ];
+        ], $this->inlineValidationAttributes());
+    }
+
+    /** @return list<string> */
+    protected function inlineCreateTypes(): array
+    {
+        return ['product'];
+    }
+
+    protected function inlineBrandContextId(): ?int
+    {
+        return $this->seedingCampaign->brand_id;
+    }
+
+    protected function inlineCreated(string $type, int $id): void
+    {
+        $this->shipment_product_id = (string) $id;
     }
 
     public function save(AuditLogger $audit): void
@@ -283,6 +302,12 @@ class ShipmentsPanel extends Component
 
     public function cancelForm(): void
     {
+        if ($this->inlineCreate !== null) {
+            $this->cancelInlineCreate();
+
+            return;
+        }
+
         $this->showForm = false;
         $this->resetForm();
     }

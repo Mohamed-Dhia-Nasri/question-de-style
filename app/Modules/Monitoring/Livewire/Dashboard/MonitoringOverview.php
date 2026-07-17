@@ -3,6 +3,7 @@
 namespace App\Modules\Monitoring\Livewire\Dashboard;
 
 use App\Modules\CRM\Models\Brand;
+use App\Modules\CRM\Services\ActiveSeedingCreatorIds;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\Mention;
 use App\Modules\Monitoring\Models\MonitoredSubject;
@@ -26,8 +27,12 @@ use Livewire\Component;
  * CONFIRMED reach stays deferred per DEF-003).
  *
  * All filters validate and execute server-side; KPI aggregates come from
- * approved rollups only (ADR-0010). Deferred capabilities (open-web
- * listening DEF-006, comment analysis DEF-005) render "unavailable".
+ * approved rollups only (ADR-0010). The "Active seeding only" toggle
+ * re-scopes the creator-keyed cards to ActiveSeedingCreatorIds
+ * (ACTIVE+SHIPPING enrollment); brand-keyed reach/EMV cannot be
+ * creator-scoped and render an explanatory unavailable state instead.
+ * Deferred capabilities (open-web listening DEF-006, comment analysis
+ * DEF-005) render "unavailable".
  */
 class MonitoringOverview extends Component
 {
@@ -42,6 +47,9 @@ class MonitoringOverview extends Component
 
     #[Url(except: 0)]
     public int $brandId = 0;
+
+    #[Url(except: false)]
+    public bool $activeSeedingOnly = false;
 
     public function mount(): void
     {
@@ -76,15 +84,27 @@ class MonitoringOverview extends Component
         $to = $this->dateFilter($this->to)?->endOfDay();
         $brandId = $this->brandFilter();
 
+        // "Active seeding only" (spec 2026-07-17): resolve the enrolled
+        // creator set ONCE per render. Cards gate on the boolean — an empty
+        // set must filter to zero rows, never fall back to unfiltered.
+        $seedingCreatorIds = $this->activeSeedingOnly
+            ? app(ActiveSeedingCreatorIds::class)->forCurrentTenant()
+            : null;
+
         $rosterCount = MonitoredSubject::query()
             ->where('subject_type', MonitoredSubjectType::Creator->value)
             ->where('active', true)
+            ->when($this->activeSeedingOnly, fn ($q) => $q->whereIn('creator_id', $seedingCreatorIds))
             ->count();
 
         $newContent = ContentItem::query()
             ->when($platform, fn ($q) => $q->where('platform', $platform->value))
             ->when($from, fn ($q) => $q->where('published_at', '>=', $from))
             ->when($to, fn ($q) => $q->where('published_at', '<=', $to))
+            ->when($this->activeSeedingOnly, fn ($q) => $q->whereHas(
+                'platformAccount',
+                fn ($account) => $account->whereIn('creator_id', $seedingCreatorIds),
+            ))
             ->count();
 
         $activeStories = Story::query()
@@ -94,6 +114,10 @@ class MonitoringOverview extends Component
                 ->orWhere(fn ($inner) => $inner
                     ->whereNull('expires_at')
                     ->where('captured_at', '>=', now()->subDay())))
+            ->when($this->activeSeedingOnly, fn ($q) => $q->whereHas(
+                'platformAccount',
+                fn ($account) => $account->whereIn('creator_id', $seedingCreatorIds),
+            ))
             ->count();
 
         $mentionsByType = Mention::query()
@@ -103,9 +127,15 @@ class MonitoringOverview extends Component
                 'campaign',
                 fn ($c) => $c->where('brand_id', $brandId),
             ))
+            ->when($this->activeSeedingOnly, fn ($q) => $q->whereHas(
+                'monitoredSubject',
+                fn ($subject) => $subject->whereIn('creator_id', $seedingCreatorIds),
+            ))
             ->selectRaw('mention_type, count(*) as total')
             ->groupBy('mention_type')
             ->pluck('total', 'mention_type');
+
+        $reviewCounts = $queue->counts();
 
         $providerHealth = $health->overview();
         $failingProviders = collect($providerHealth)
@@ -118,10 +148,11 @@ class MonitoringOverview extends Component
             'newContent' => $newContent,
             'activeStories' => $activeStories,
             'mentionsByType' => $mentionsByType,
-            'pendingReviews' => array_sum($queue->counts()),
-            'reviewCounts' => $queue->counts(),
+            'pendingReviews' => array_sum($reviewCounts),
+            'reviewCounts' => $reviewCounts,
             'mentionTotals' => $rollups->mentionTotals($from, $to, $brandId),
-            'creatorTotals' => $rollups->creatorTotals($from, $to),
+            'creatorTotals' => $rollups->creatorTotals($from, $to, $seedingCreatorIds),
+            'seedingSetEmpty' => $seedingCreatorIds === [],
             'rollupsRefreshedAt' => $rollups->lastRefreshedAt(),
             'failingProviders' => $failingProviders,
             'staleProviders' => $staleProviders,

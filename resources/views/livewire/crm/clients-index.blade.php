@@ -53,7 +53,7 @@
                 @foreach ($clients as $client)
                     <tbody x-data="{ open: false }" wire:key="client-{{ $client->id }}"
                         wire:loading.class="pointer-events-none opacity-50"
-                        class="divide-y divide-gray-100 transition-opacity dark:divide-gray-800">
+                        class="divide-y divide-gray-100 transition-opacity dark:divide-gray-800 [&:not(:first-of-type)]:border-t [&:not(:first-of-type)]:border-gray-100 dark:[&:not(:first-of-type)]:border-gray-800">
                         <tr>
                             <td class="px-5 py-4">
                                 <button type="button" x-on:click="open = !open" :aria-expanded="open"

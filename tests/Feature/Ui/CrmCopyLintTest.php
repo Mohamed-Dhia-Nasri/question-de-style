@@ -19,6 +19,7 @@ class CrmCopyLintTest extends TestCase
         'resources/views/livewire/crm',
         'resources/views/components/metric',
         'resources/views/components/states',
+        'resources/views/components/crm',
     ];
 
     private const BANNED = [

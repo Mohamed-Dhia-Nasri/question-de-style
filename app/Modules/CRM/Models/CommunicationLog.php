@@ -28,6 +28,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string $direction
  * @property string $summary
  * @property CarbonImmutable $occurred_at
+ * @property int|null $seeding_campaign_id
  */
 class CommunicationLog extends Model
 {
@@ -43,6 +44,7 @@ class CommunicationLog extends Model
         'direction',
         'summary',
         'occurred_at',
+        'seeding_campaign_id',
     ];
 
     /** @return array<string, string> */
@@ -63,5 +65,11 @@ class CommunicationLog extends Model
     public function campaign(): BelongsTo
     {
         return $this->belongsTo(Campaign::class);
+    }
+
+    /** @return BelongsTo<SeedingCampaign, $this> */
+    public function seedingCampaign(): BelongsTo
+    {
+        return $this->belongsTo(SeedingCampaign::class);
     }
 }

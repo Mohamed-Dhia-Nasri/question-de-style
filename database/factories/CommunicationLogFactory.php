@@ -28,6 +28,7 @@ class CommunicationLogFactory extends Factory
             'tenant_id' => fn () => $this->defaultTenantId(),
             'creator_id' => Creator::factory(),
             'campaign_id' => null,
+            'seeding_campaign_id' => null,
             'channel' => 'email',
             'direction' => 'outbound',
             'summary' => fake()->sentence(),

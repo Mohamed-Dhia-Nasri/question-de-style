@@ -7,6 +7,7 @@ use App\Modules\CRM\Livewire\Creators\BrandPreferencesPanel;
 use App\Modules\CRM\Livewire\Creators\CommunicationLogPanel;
 use App\Modules\CRM\Livewire\Creators\ContactsPanel;
 use App\Modules\CRM\Livewire\Creators\CreatorProfile;
+use App\Modules\CRM\Livewire\Creators\ParticipationPanel;
 use App\Modules\CRM\Livewire\Creators\PlatformAccountsPanel;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\PlatformAccount;
@@ -55,6 +56,17 @@ class CreatorProfileTest extends TestCase
             ->assertSeeLivewire(CommunicationLogPanel::class);
     }
 
+    public function test_profile_page_mounts_the_participation_panel(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $creator = Creator::factory()->create();
+
+        $this->get('/crm/creators/'.$creator->id)
+            ->assertOk()
+            ->assertSeeLivewire(ParticipationPanel::class);
+    }
+
     public function test_a_missing_creator_yields_404(): void
     {
         $this->actingAsCrmStaff();
@@ -72,6 +84,29 @@ class CreatorProfileTest extends TestCase
         $this->get('/crm/creators/'.$creator->id)->assertForbidden();
 
         Livewire::test(CreatorProfile::class, ['creator' => $creator])->assertForbidden();
+    }
+
+    public function test_identity_is_display_first_and_edit_toggles_the_form(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $creator = Creator::factory()->create(['display_name' => 'Display First Creator']);
+
+        // Initial render: display name as text, an Edit button — never an
+        // always-on submit form.
+        $this->get('/crm/creators/'.$creator->id)
+            ->assertOk()
+            ->assertSee('Display First Creator')
+            ->assertSee('Edit')
+            ->assertDontSee('Save identity');
+
+        Livewire::test(CreatorProfile::class, ['creator' => $creator])
+            ->assertSet('editing', false)
+            ->call('edit')
+            ->assertSet('editing', true)
+            ->call('save')
+            ->assertHasNoErrors()
+            ->assertSet('editing', false);
     }
 
     public function test_the_identity_form_updates_creator_fields_including_relationship_status(): void

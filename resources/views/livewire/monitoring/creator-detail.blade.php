@@ -3,7 +3,15 @@
     <div class="grid gap-4 lg:grid-cols-3">
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
             <div class="flex flex-wrap items-start justify-between gap-2">
-                <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">{{ $creator->display_name }}</h3>
+                <div class="flex items-center gap-3">
+                    <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">{{ $creator->display_name }}</h3>
+                    @can('crm.view')
+                        <a href="{{ route('crm.creators.show', $creator) }}"
+                            class="text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">
+                            View CRM profile →
+                        </a>
+                    @endcan
+                </div>
                 @can('create', \App\Modules\Monitoring\Models\MonitoredSubject::class)
                     <x-ui.button variant="outline" type="button" wire:click="runMonitoringNow"
                         wire:loading.attr="disabled" wire:target="runMonitoringNow"

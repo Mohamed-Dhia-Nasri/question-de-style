@@ -19,6 +19,7 @@ use App\Modules\CRM\Livewire\Creators\ContactsPanel;
 use App\Modules\CRM\Livewire\Creators\CreatorProfile;
 use App\Modules\CRM\Livewire\Creators\CreatorsIndex;
 use App\Modules\CRM\Livewire\Creators\GeographyPanel;
+use App\Modules\CRM\Livewire\Creators\ParticipationPanel;
 use App\Modules\CRM\Livewire\Creators\PlatformAccountsPanel;
 use App\Modules\CRM\Livewire\Documents\DocumentsPanel;
 use App\Modules\CRM\Livewire\Products\ProductsIndex;
@@ -115,6 +116,7 @@ class CrmServiceProvider extends ServiceProvider
         // Livewire; UsersIndex is the reference CRUD pattern).
         Livewire::component('crm.creators-index', CreatorsIndex::class);
         Livewire::component('crm.creator-profile', CreatorProfile::class);
+        Livewire::component('crm.creator-participation', ParticipationPanel::class);
         Livewire::component('crm.creator-platform-accounts', PlatformAccountsPanel::class);
         Livewire::component('crm.creator-contacts', ContactsPanel::class);
         Livewire::component('crm.creator-brand-preferences', BrandPreferencesPanel::class);

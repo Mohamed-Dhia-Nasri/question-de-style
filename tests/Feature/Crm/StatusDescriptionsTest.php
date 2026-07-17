@@ -107,7 +107,10 @@ class StatusDescriptionsTest extends TestCase
 
         $creator = Creator::factory()->create(['relationship_status' => RelationshipStatus::Active]);
 
+        // Display-first (Stage B): the select only renders once the Edit
+        // toggle opens the form.
         Livewire::test(CreatorProfile::class, ['creator' => $creator])
+            ->call('edit')
             ->assertSee('— none —')
             // @js() renders the CURRENT value on mount — the description
             // for the creator's existing status shows without any change.

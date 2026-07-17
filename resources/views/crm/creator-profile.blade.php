@@ -8,6 +8,7 @@
 
     <div class="space-y-6">
         @livewire('crm.creator-profile', ['creator' => $creator])
+        @livewire('crm.creator-participation', ['creator' => $creator])
         @livewire('crm.creator-platform-accounts', ['creator' => $creator])
         @livewire('crm.creator-geography', ['creator' => $creator])
         @livewire('crm.creator-contacts', ['creator' => $creator])

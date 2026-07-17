@@ -88,6 +88,22 @@
                         <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">{{ $campaign->status->description() }}</p>
                     </div>
                 </div>
+
+                @if ($campaign->objective || $campaign->markets)
+                    <div class="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-white/[0.03]">
+                        <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Brief</h3>
+                        @if ($campaign->objective)
+                            <p class="mt-3 text-sm text-gray-600 dark:text-gray-300">{{ $campaign->objective }}</p>
+                        @endif
+                        @if ($campaign->markets)
+                            <div class="mt-3 flex flex-wrap gap-2">
+                                @foreach ($campaign->markets as $market)
+                                    <x-ui.badge color="light">{{ $market }}</x-ui.badge>
+                                @endforeach
+                            </div>
+                        @endif
+                    </div>
+                @endif
             </div>
 
             <div x-show="tab === 'creators'" x-cloak>

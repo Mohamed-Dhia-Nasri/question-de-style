@@ -176,6 +176,26 @@
                         </p>
                         <x-form.error for="campaign_spend" />
                     </div>
+
+                    <div>
+                        <x-form.label for="campaign_objective">Objective</x-form.label>
+                        <x-form.textarea id="campaign_objective" wire:model="campaign_objective" rows="3"
+                            :error="$errors->has('campaign_objective')" />
+                        <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
+                            What this campaign is trying to achieve.
+                        </p>
+                        <x-form.error for="campaign_objective" />
+                    </div>
+
+                    <div>
+                        <x-form.label for="campaign_markets">Markets</x-form.label>
+                        <x-form.textarea id="campaign_markets" wire:model="campaign_markets" rows="3"
+                            :error="$errors->has('campaign_markets')" />
+                        <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
+                            One market per line — e.g. Germany, Austria.
+                        </p>
+                        <x-form.error for="campaign_markets" />
+                    </div>
                 @else
                     <p class="text-xs text-gray-500 dark:text-gray-400">New campaigns start as a draft — you can change the status and record spend once it’s set up.</p>
                 @endif

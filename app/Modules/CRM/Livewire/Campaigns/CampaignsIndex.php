@@ -53,6 +53,11 @@ class CampaignsIndex extends Component
 
     public string $campaign_spend = '';
 
+    public string $campaign_objective = '';
+
+    /** One market per line (ENT-Campaign.markets — list of string). */
+    public string $campaign_markets = '';
+
     // --- delete confirmation state ---
     public ?int $confirmingDeleteId = null;
 
@@ -124,6 +129,8 @@ class CampaignsIndex extends Component
         $this->campaign_start_at = $campaign->start_at?->format('Y-m-d\TH:i') ?? '';
         $this->campaign_end_at = $campaign->end_at?->format('Y-m-d\TH:i') ?? '';
         $this->campaign_spend = $campaign->spend !== null ? (string) $campaign->spend->amount : '';
+        $this->campaign_objective = $campaign->objective ?? '';
+        $this->campaign_markets = implode("\n", $campaign->markets ?? []);
         $this->showForm = true;
     }
 
@@ -137,6 +144,8 @@ class CampaignsIndex extends Component
             'campaign_start_at' => 'start date',
             'campaign_end_at' => 'end date',
             'campaign_spend' => 'spend',
+            'campaign_objective' => 'objective',
+            'campaign_markets' => 'markets',
         ], $this->inlineValidationAttributes());
     }
 
@@ -170,6 +179,8 @@ class CampaignsIndex extends Component
         if (! $creating) {
             $rules['campaign_status'] = ['required', Rule::in(array_column(CampaignStatus::cases(), 'value'))];
             $rules['campaign_spend'] = ['nullable', 'numeric', 'min:0'];
+            $rules['campaign_objective'] = ['nullable', 'string', 'max:2000'];
+            $rules['campaign_markets'] = ['nullable', 'string', 'max:2000'];
         }
 
         $validated = $this->validate($rules);
@@ -195,6 +206,11 @@ class CampaignsIndex extends Component
         ];
 
         if ($editing) {
+            $objective = trim($validated['campaign_objective'] ?? '');
+            $markets = $this->parseMarkets($validated['campaign_markets'] ?? '');
+            $attributes['objective'] = $objective !== '' ? $objective : null;
+            $attributes['markets'] = $markets !== [] ? $markets : null;
+
             $campaign->update($attributes);
         } else {
             $campaign = Campaign::create($attributes);
@@ -279,6 +295,16 @@ class CampaignsIndex extends Component
 
     // -------------------------------------------------------------------------
 
+    /**
+     * One market per line, blanks dropped — mirrors BrandsIndex::parseLines.
+     *
+     * @return list<string>
+     */
+    private function parseMarkets(string $raw): array
+    {
+        return array_values(array_filter(array_map('trim', preg_split('/\R/', $raw) ?: [])));
+    }
+
     protected function resetForm(): void
     {
         $this->resetValidation();
@@ -289,6 +315,8 @@ class CampaignsIndex extends Component
         $this->campaign_start_at = '';
         $this->campaign_end_at = '';
         $this->campaign_spend = '';
+        $this->campaign_objective = '';
+        $this->campaign_markets = '';
     }
 
     public function render(): View

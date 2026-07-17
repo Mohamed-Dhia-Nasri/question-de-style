@@ -16,6 +16,7 @@ use App\Modules\CRM\Livewire\Clients\ClientsIndex;
 use App\Modules\CRM\Livewire\Creators\BrandPreferencesPanel;
 use App\Modules\CRM\Livewire\Creators\CommunicationLogPanel;
 use App\Modules\CRM\Livewire\Creators\ContactsPanel;
+use App\Modules\CRM\Livewire\Creators\CreatorCsvImport;
 use App\Modules\CRM\Livewire\Creators\CreatorProfile;
 use App\Modules\CRM\Livewire\Creators\CreatorsIndex;
 use App\Modules\CRM\Livewire\Creators\GeographyPanel;
@@ -116,6 +117,7 @@ class CrmServiceProvider extends ServiceProvider
         // Step 2 — the first real Module 3 screens (ADR-0012 hand-built
         // Livewire; UsersIndex is the reference CRUD pattern).
         Livewire::component('crm.creators-index', CreatorsIndex::class);
+        Livewire::component('crm.creator-csv-import', CreatorCsvImport::class);
         Livewire::component('crm.creator-profile', CreatorProfile::class);
         Livewire::component('crm.creator-participation', ParticipationPanel::class);
         Livewire::component('crm.creator-platform-accounts', PlatformAccountsPanel::class);

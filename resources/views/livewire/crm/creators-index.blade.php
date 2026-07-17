@@ -51,6 +51,9 @@
                 <div class="grow"></div>
 
                 @can('create', \App\Modules\CRM\Models\Creator::class)
+                    <x-ui.button variant="outline" wire:click="$dispatch('open-csv-import')">
+                        Import CSV
+                    </x-ui.button>
                     <x-ui.button wire:click="create">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M12 5v14m-7-7h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />

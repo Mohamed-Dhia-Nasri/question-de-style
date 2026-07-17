@@ -44,6 +44,8 @@
             </div>
 
             <div x-show="tab === 'overview'" x-cloak class="space-y-6">
+                @livewire('crm.campaign-status-actions', ['campaign' => $campaign])
+
                 @php
                     $setupSteps = [
                         ['done' => $campaign->start_at !== null && $campaign->end_at !== null, 'label' => 'Set the campaign dates', 'hint' => 'Edit the campaign on the Campaigns page.'],

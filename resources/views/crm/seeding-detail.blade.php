@@ -49,6 +49,8 @@
             </div>
 
             <div x-show="tab === 'overview'" x-cloak class="space-y-6">
+                @livewire('crm.seeding-status-actions', ['seedingCampaign' => $seedingCampaign])
+
                 @php
                     $setupSteps = [
                         ['done' => $seedingCampaign->product_id !== null, 'label' => 'Choose a product', 'hint' => 'Edit the run on the Seeding runs page.'],

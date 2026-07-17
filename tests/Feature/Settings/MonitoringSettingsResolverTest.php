@@ -79,4 +79,19 @@ class MonitoringSettingsResolverTest extends TestCase
     {
         $this->assertSame(30, config('qds.enrichment.engagement_trend_window_days'));
     }
+
+    public function test_trend_window_config_fallback_is_clamped_to_its_domain(): void
+    {
+        app(TenantContext::class)->clear();
+
+        // Below domain minimum (7) clamps to 7
+        config(['qds.enrichment.engagement_trend_window_days' => 2]);
+        $resolver = app(MonitoringSettingsResolver::class);
+        $this->assertSame(7, $resolver->engagementTrendWindowDays());
+
+        // Above domain maximum (90) clamps to 90
+        config(['qds.enrichment.engagement_trend_window_days' => 500]);
+        $resolver = app(MonitoringSettingsResolver::class);
+        $this->assertSame(90, $resolver->engagementTrendWindowDays());
+    }
 }

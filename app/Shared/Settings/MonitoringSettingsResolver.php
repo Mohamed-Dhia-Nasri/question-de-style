@@ -34,12 +34,13 @@ class MonitoringSettingsResolver
         return max(1, $row->shipment_window_days ?? (int) config('qds.enrichment.attribution.shipment_window_days'));
     }
 
-    /** Engagement-trend rolling window N (ADR-0024). */
+    /** Engagement-trend rolling window N (ADR-0024); clamped to 7–90 domain (matches DB CHECK constraint). */
     public function engagementTrendWindowDays(): int
     {
         $row = $this->contextRow();
+        $value = $row->engagement_trend_window_days ?? (int) config('qds.enrichment.engagement_trend_window_days');
 
-        return max(1, $row->engagement_trend_window_days ?? (int) config('qds.enrichment.engagement_trend_window_days'));
+        return min(90, max(7, $value));
     }
 
     /** Story media retention for ONE tenant; 0 = keep forever. */

@@ -7,17 +7,11 @@
     ]" />
 
     <div class="space-y-6">
-        <div class="rounded-2xl border border-gray-200 bg-white px-6 py-4 dark:border-gray-800 dark:bg-white/[0.03]">
-            <div class="flex flex-wrap items-center gap-x-8 gap-y-2 text-sm text-gray-500 dark:text-gray-400">
-                <span>Brand:
-                    <span class="font-medium text-gray-800 dark:text-white/90">{{ $campaign->brand->name }}</span>
-                </span>
-                <span>Status: <x-ui.badge color="primary">{{ $campaign->status->label() }}</x-ui.badge></span>
-                <span>Dates:
-                    {{ $campaign->start_at?->format('d.m.Y') ?? '—' }} – {{ $campaign->end_at?->format('d.m.Y') ?? '—' }}
-                </span>
-            </div>
-        </div>
+        <x-crm.context-header :client="$campaign->brand->client" :brand="$campaign->brand" :campaign="$campaign" :campaign-link="false" :status="$campaign->status">
+            <span>Dates:
+                {{ $campaign->start_at?->format('d.m.Y') ?? '—' }} – {{ $campaign->end_at?->format('d.m.Y') ?? '—' }}
+            </span>
+        </x-crm.context-header>
 
         @livewire('crm.campaign-results', ['campaign' => $campaign])
 

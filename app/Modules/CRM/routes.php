@@ -1,6 +1,7 @@
 <?php
 
 use App\Modules\CRM\Http\Controllers\DocumentDownloadController;
+use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\SeedingCampaign;
@@ -24,6 +25,9 @@ Route::middleware(['web', 'auth', 'can:'.PermissionsCatalog::CRM_VIEW, 'subscrib
         // (REQ-M3-005/006/007) + the operator half of content matching.
         Route::view('/clients', 'crm.clients')->name('clients.index');
         Route::view('/brands', 'crm.brands')->name('brands.index');
+        Route::get('/brands/{brand}', fn (Brand $brand) => view('crm.brand-detail', [
+            'brand' => $brand->load('client')->loadCount(['products', 'campaigns', 'seedingCampaigns']),
+        ]))->name('brands.show');
         Route::view('/products', 'crm.products')->name('products.index');
         Route::view('/campaigns', 'crm.campaigns')->name('campaigns.index');
         Route::get('/campaigns/{campaign}', fn (Campaign $campaign) => view('crm.campaign-detail', ['campaign' => $campaign]))

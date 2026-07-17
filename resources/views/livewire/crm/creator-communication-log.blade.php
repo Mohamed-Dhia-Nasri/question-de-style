@@ -12,6 +12,23 @@
         @endcan
     </div>
 
+    {{-- Soft one-tap nudge after an outbound message to a creator with no
+         relationship stage yet. Suggestion only — never automatic. --}}
+    @if ($suggestContacted)
+        <div class="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
+            <x-ui.alert variant="info">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <span>You logged a message to {{ $creator->display_name }}. Mark them as Contacted?</span>
+                    <div class="flex shrink-0 items-center gap-2">
+                        <x-ui.button size="sm" wire:click="markContacted" wire:target="markContacted"
+                            wire:loading.attr="disabled">Mark as Contacted</x-ui.button>
+                        <x-ui.button size="sm" variant="outline" wire:click="dismissContacted">Not now</x-ui.button>
+                    </div>
+                </div>
+            </x-ui.alert>
+        </div>
+    @endif
+
     @if ($logs->isEmpty())
         <x-states.empty title="No conversations logged yet">
             Keep the relationship history — outreach, replies, calls.

@@ -6,6 +6,8 @@ use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\CommunicationLog;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\SeedingCampaign;
+use App\Shared\Audit\AuditLogger;
+use App\Shared\Enums\RelationshipStatus;
 use App\Shared\Tenancy\TenantRule;
 use Illuminate\Contracts\View\View;
 use Illuminate\Validation\Rule;
@@ -44,6 +46,13 @@ class CommunicationLogPanel extends Component
     public string $log_campaign_id = '';
 
     public string $log_seeding_campaign_id = '';
+
+    /**
+     * SOFT one-tap nudge (§2.5): raised after an outbound log for a creator
+     * with no relationship stage yet. Never advances the stage on its own —
+     * the operator taps markContacted or dismisses it.
+     */
+    public bool $suggestContacted = false;
 
     public function mount(Creator $creator): void
     {
@@ -122,9 +131,49 @@ class CommunicationLogPanel extends Component
         }
 
         $this->creator->refresh();
+
+        // Reaching out to a creator with no relationship stage yet is the
+        // moment they become "Contacted". Offer the one-tap nudge; the
+        // operator decides. Recomputed on every save so a non-qualifying
+        // save clears a stale suggestion.
+        $this->suggestContacted = $validated['log_direction'] === 'outbound'
+            && in_array(
+                $this->creator->relationship_status,
+                [RelationshipStatus::None, RelationshipStatus::Prospect, null],
+                true,
+            );
+
         $this->showForm = false;
         $this->resetForm();
         $this->dispatch('notify', type: 'success', message: $editing ? 'Log entry updated.' : 'Log entry added.');
+    }
+
+    /**
+     * Accept the nudge: advance the creator to Contacted. Authorizes and
+     * audits like every other stage write (the status-change shape mirrors
+     * campaign.status_changed).
+     */
+    public function markContacted(AuditLogger $audit): void
+    {
+        $this->authorize('update', $this->creator);
+
+        $previous = $this->creator->relationship_status;
+        $this->creator->relationship_status = RelationshipStatus::Contacted;
+        $this->creator->save();
+
+        $audit->record('creator.relationship_changed', $this->creator, [
+            'from' => $previous?->value,
+            'to' => RelationshipStatus::Contacted->value,
+        ]);
+
+        $this->creator->refresh();
+        $this->suggestContacted = false;
+        $this->dispatch('notify', type: 'success', message: 'Relationship set to Contacted.');
+    }
+
+    public function dismissContacted(): void
+    {
+        $this->suggestContacted = false;
     }
 
     public function cancelForm(): void

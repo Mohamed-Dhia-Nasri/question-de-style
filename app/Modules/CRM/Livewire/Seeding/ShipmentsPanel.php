@@ -148,6 +148,66 @@ class ShipmentsPanel extends Component
         }
     }
 
+    /**
+     * The forward-only ladder the field→status nudge reasons over. Only the
+     * milestones a date can imply are ranked; Returned/Failed are terminal
+     * detours that no date should silently promote past, so they are absent
+     * (a null rank means "no nudge").
+     *
+     * @var array<string, int>
+     */
+    private const STATUS_LADDER = [
+        ShipmentStatus::Pending->value => 0,
+        ShipmentStatus::Preparing->value => 1,
+        ShipmentStatus::Shipped->value => 2,
+        ShipmentStatus::InTransit->value => 3,
+        ShipmentStatus::Delivered->value => 4,
+    ];
+
+    /**
+     * SOFT field→status nudge (§2.5): a date entered ahead of the status is
+     * almost always a status the operator forgot to advance. Suggest the
+     * milestone the date implies — never set it automatically. A shipped date
+     * below Shipped suggests Shipped; a delivered date below Delivered
+     * suggests Delivered. Returns null when there is nothing to nudge.
+     *
+     * @return array{status: string, label: string}|null
+     */
+    public function statusHint(): ?array
+    {
+        $rank = self::STATUS_LADDER[$this->shipment_status] ?? null;
+
+        if ($rank === null) {
+            return null;
+        }
+
+        if ($this->shipment_shipped_at !== '' && $rank < self::STATUS_LADDER[ShipmentStatus::Shipped->value]) {
+            return ['status' => ShipmentStatus::Shipped->value, 'label' => ShipmentStatus::Shipped->label()];
+        }
+
+        if ($this->shipment_delivered_at !== '' && $rank < self::STATUS_LADDER[ShipmentStatus::Delivered->value]) {
+            return ['status' => ShipmentStatus::Delivered->value, 'label' => ShipmentStatus::Delivered->label()];
+        }
+
+        return null;
+    }
+
+    /**
+     * Accept the nudge: move the form's status prop only. No DB write and no
+     * authorize() here — this mutates a form field, exactly as the status
+     * <select> does; the operator still submits through save(), which
+     * authorizes and persists. Lifting to Shipped/Delivered only reveals
+     * fields (updatedShipmentStatus never clears on the way up).
+     */
+    public function acceptStatusHint(string $status): void
+    {
+        if (! in_array($status, array_column(ShipmentStatus::cases(), 'value'), true)) {
+            return;
+        }
+
+        $this->shipment_status = $status;
+    }
+
     /** @return array<string, string> */
     protected function validationAttributes(): array
     {

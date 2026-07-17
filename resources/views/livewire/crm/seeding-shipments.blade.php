@@ -3,8 +3,8 @@
         <div>
             <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Shipments</h3>
             <p class="mt-0.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                Manual status updates are always supported (courier APIs are optional). Posted state
-                is derived from matched content (REQ-M3-008) — link or unlink content per shipment.
+                Update each shipment’s status by hand as it moves. “Posted” fills in automatically
+                when content is linked to the shipment.
             </p>
         </div>
 
@@ -192,7 +192,7 @@
                         <x-form.input id="shipment_value" wire:model="shipment_value" type="number" step="0.01" min="0"
                             :error="$errors->has('shipment_value')" />
                         <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                            Manual agency input — stored at tier CONFIRMED.
+                            What the product was worth when it shipped.
                         </p>
                         <x-form.error for="shipment_value" />
                     </div>
@@ -226,8 +226,8 @@
                         @endforeach
                     </x-form.select>
                     <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                        The operator confirms this content resulted from the shipment (XMC-002); the
-                        posted state and campaign attribution update accordingly.
+                        Link a post to this shipment when the creator publishes it — that’s how
+                        results and “posted” status are counted.
                     </p>
                     <x-form.error for="link_content_id" />
                 </div>

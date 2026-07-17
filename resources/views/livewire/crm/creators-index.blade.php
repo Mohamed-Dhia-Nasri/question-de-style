@@ -114,7 +114,7 @@
                                 @if ($creator->geoAttribution !== null)
                                     {{ \App\Shared\Enums\Country::labelFor($creator->geoAttribution->country_code) }}@if ($creator->geoAttribution->city) · {{ $creator->geoAttribution->city }}@endif
                                 @else
-                                    <x-states.unavailable reason="No operator-assigned geography (ADR-0018); automatic attribution ships with Module 2 (REQ-M2-003)." />
+                                    <x-states.unavailable reason="No location set — add it on the creator’s profile under Geography." />
                                 @endif
                             </td>
                             <td class="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">
@@ -197,11 +197,8 @@
     @if ($confirmingDeleteId !== null)
         <x-ui.confirm-modal title="Delete creator?" confirm-action="delete" cancel-action="cancelDelete"
             confirm-label="Delete creator">
-            This permanently removes the creator together with its platform accounts, contacts,
-            brand preferences, and communication log — the way a stray duplicate is reconciled
-            (no merge exists in v1, ADR-0014). Creators with monitoring history, roster entries,
-            or campaign records cannot be deleted. The action is recorded in the audit log and
-            cannot be undone.
+            Deleting a creator is permanent. Creators with monitoring history, campaign roster
+            entries, or shipments cannot be deleted — remove those records first.
         </x-ui.confirm-modal>
     @endif
 </div>

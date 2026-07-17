@@ -156,7 +156,7 @@
                             @endforeach
                         </x-form.select>
                         <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                            The authoritative per-unit product is set on each shipment.
+                            Optional default — each shipment picks its own product.
                         </p>
                         <x-form.error for="seeding_product_id" />
                     </div>
@@ -178,7 +178,7 @@
                     <x-form.input id="seeding_spend" wire:model="seeding_spend" type="number" step="0.01" min="0"
                         :error="$errors->has('seeding_spend')" />
                     <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                        Manual agency input — stored at tier CONFIRMED; the CPE/CPM input on results.
+                        What you actually paid — used for the cost-per-result numbers on Results.
                     </p>
                     <x-form.error for="seeding_spend" />
                 </div>

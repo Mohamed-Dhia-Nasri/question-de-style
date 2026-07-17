@@ -2,7 +2,7 @@
     {{-- Server-side filters (validated in the component; MonitoringOverview idiom) --}}
     <div class="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div>
-            <x-form.label for="results-grain">Grain</x-form.label>
+            <x-form.label for="results-grain">View by</x-form.label>
             <x-form.select id="results-grain" wire:model.live="grain">
                 @foreach ($grains as $g)
                     <option value="{{ $g }}">{{ ucfirst($g) }}</option>
@@ -36,7 +36,7 @@
             </x-form.select>
         </div>
         <div>
-            <x-form.label for="results-platform">Platform (slice)</x-form.label>
+            <x-form.label for="results-platform">Platform</x-form.label>
             <x-form.select id="results-platform" wire:model.live="platform">
                 <option value="">All platforms</option>
                 @foreach ($platforms as $p)
@@ -45,7 +45,7 @@
             </x-form.select>
         </div>
         <div>
-            <x-form.label for="results-content-type">Content type (slice)</x-form.label>
+            <x-form.label for="results-content-type">Content type</x-form.label>
             <x-form.select id="results-content-type" wire:model.live="contentType">
                 <option value="">All content types</option>
                 @foreach ($contentTypes as $type)
@@ -54,7 +54,7 @@
             </x-form.select>
         </div>
         <div>
-            <x-form.label for="results-country">Creator country (slice)</x-form.label>
+            <x-form.label for="results-country">Creator country</x-form.label>
             <x-form.select id="results-country" wire:model.live="country">
                 <option value="">All countries</option>
                 @foreach ($countries as $c)
@@ -62,11 +62,12 @@
                 @endforeach
             </x-form.select>
             <p class="mt-1 text-theme-xs text-gray-400 dark:text-gray-500">
-                Geography belongs to the POSTING CREATOR (ADR-0018), never to a brand or product; rows without creator geography render as unavailable.
+                Location belongs to the posting creator. Rows without a creator location show
+                “unavailable”.
             </p>
         </div>
         <div>
-            <x-form.label for="results-city">Creator city (slice)</x-form.label>
+            <x-form.label for="results-city">Creator city</x-form.label>
             <x-form.select id="results-city" wire:model.live="city">
                 <option value="">All cities</option>
                 @foreach ($cities as $cityOption)
@@ -108,15 +109,16 @@
     <div class="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
         <div class="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
             <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Product totals</h3>
+            <x-metric.tier-legend class="mt-1" />
             <p class="mt-0.5 text-theme-xs text-gray-500 dark:text-gray-400">
                 @if ($sliceActive)
-                    Slice active — content-side measures only. Shipment-level columns (shipments,
-                    posted, post rate) are not shown: shipments carry no platform, content-type,
-                    country, or city dimension; clear the slice to see them. "Creators posted"
-                    counts creators with matched content inside the slice.
+                    Filtered view — shipment columns (shipments, posted, post rate) are hidden:
+                    shipments carry no platform, content-type, or location information. Clear
+                    those filters to see them. “Creators posted” counts creators with matched
+                    content inside this view.
                 @else
-                    Cross-influencer totals per product (REQ-M3-013) — post rate is DERIVED,
-                    recomputed at the rollup grain, never summed.
+                    Totals per product across all creators. Post rate is calculated for the
+                    selected period.
                 @endif
             </p>
         </div>
@@ -174,28 +176,28 @@
                                     @if ($row->total_views !== null)
                                         {{ number_format((float) $row->total_views) }} <x-metric.tier-badge tier="PUBLIC" />
                                     @else
-                                        <x-states.unavailable reason="No observed views in this slice — never shown as zero." />
+                                        <x-states.unavailable reason="No views recorded in this view — never shown as zero." />
                                     @endif
                                 </td>
                                 <td class="px-5 py-3 text-sm text-gray-600 dark:text-gray-300">
                                     @if ($row->total_engagement !== null)
                                         {{ number_format((float) $row->total_engagement) }} <x-metric.tier-badge tier="DERIVED" />
                                     @else
-                                        <x-states.unavailable reason="No observed engagement in this slice — never shown as zero." />
+                                        <x-states.unavailable reason="No engagement recorded in this view — never shown as zero." />
                                     @endif
                                 </td>
                                 <td class="px-5 py-3 text-sm text-gray-600 dark:text-gray-300">
                                     @if ($row->total_estimated_reach !== null)
                                         {{ number_format((float) $row->total_estimated_reach) }} <x-metric.tier-badge tier="ESTIMATED" />
                                     @else
-                                        <x-states.unavailable reason="No estimated reach for this slice yet (REQ-M1-006)." />
+                                        <x-states.unavailable reason="No estimated reach yet — reach needs an active reach setting (Settings → Reach)." />
                                     @endif
                                 </td>
                                 <td class="px-5 py-3 text-sm text-gray-600 dark:text-gray-300">
                                     @if ($row->total_emv !== null)
                                         {{ number_format((float) $row->total_emv, 2) }} <x-metric.tier-badge tier="ESTIMATED" />
                                     @else
-                                        <x-states.unavailable reason="EMV requires an active configuration and calculated results (REQ-M1-011)." />
+                                        <x-states.unavailable reason="No EMV yet — EMV needs rates set up under Settings → EMV." />
                                     @endif
                                 </td>
                             </tr>
@@ -257,14 +259,14 @@
                                     @if ($row->total_estimated_reach !== null)
                                         {{ number_format((float) $row->total_estimated_reach) }} <x-metric.tier-badge tier="ESTIMATED" />
                                     @else
-                                        <x-states.unavailable reason="No estimated reach for this slice yet (REQ-M1-006)." />
+                                        <x-states.unavailable reason="No estimated reach yet — reach needs an active reach setting (Settings → Reach)." />
                                     @endif
                                 </td>
                                 <td class="px-5 py-3 text-sm text-gray-600 dark:text-gray-300">
                                     @if ($row->total_emv !== null)
                                         {{ number_format((float) $row->total_emv, 2) }} <x-metric.tier-badge tier="ESTIMATED" />
                                     @else
-                                        <x-states.unavailable reason="EMV requires an active configuration and calculated results (REQ-M1-011)." />
+                                        <x-states.unavailable reason="No EMV yet — EMV needs rates set up under Settings → EMV." />
                                     @endif
                                 </td>
                             </tr>
@@ -279,7 +281,7 @@
             {{-- Deep-review M4: producing models, not the active config. --}}
             <x-metric.emv-disclosure :configurations="$emvConfigurations" />
             <p class="mt-2 text-theme-xs text-gray-400 dark:text-gray-500">
-                Rollups refreshed {{ $rollupsRefreshedAt?->diffForHumans() ?? 'never' }}.
+                Data refreshed {{ $rollupsRefreshedAt?->diffForHumans() ?? 'never' }}.
             </p>
         </div>
     </div>

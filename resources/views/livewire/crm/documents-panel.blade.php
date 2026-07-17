@@ -3,8 +3,8 @@
         <div>
             <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Documents</h3>
             <p class="mt-0.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                Contracts, briefs, and other attachments (AC-M3-016). Files live on private
-                storage and download through short-lived signed links only.
+                Contracts, briefs, and other files — stored privately, downloads use
+                short-lived links.
             </p>
         </div>
 

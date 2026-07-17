@@ -3,7 +3,8 @@
         <div>
             <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Seeded creators</h3>
             <p class="mt-0.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                Shipments can only go to creators attached here. Brand restrictions are enforced on join (AC-M3-007).
+                Shipments can only go to creators on this list. Creators who refuse this brand
+                are blocked automatically.
             </p>
         </div>
 

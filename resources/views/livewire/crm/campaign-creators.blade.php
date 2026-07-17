@@ -3,7 +3,8 @@
         <div>
             <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Participating creators</h3>
             <p class="mt-0.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                Brand restrictions are enforced as hard filters on join (AC-M3-007).
+                The creators taking part in this campaign. Creators who refuse this brand are
+                blocked automatically.
             </p>
         </div>
 

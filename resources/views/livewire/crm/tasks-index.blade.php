@@ -191,7 +191,7 @@
                     <x-form.input id="task_due_at" wire:model="task_due_at" type="datetime-local"
                         :error="$errors->has('task_due_at')" />
                     <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                        A dated task fires a one-time reminder as the deadline nears (AC-M3-017).
+                        You’ll get a one-time reminder shortly before the deadline.
                     </p>
                     <x-form.error for="task_due_at" />
                 </div>

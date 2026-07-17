@@ -190,7 +190,7 @@ class CampaignResultsPanelTest extends TestCase
         $this->seedResults();
 
         Livewire::test(CampaignResultsPanel::class, ['campaign' => $this->campaign])
-            ->assertSee('Requires agency-entered spend (AC-M3-015)');
+            ->assertSee('No spend entered for this campaign yet');
     }
 
     public function test_cpe_is_unavailable_with_no_observed_engagement_never_zero_or_infinity(): void
@@ -214,8 +214,8 @@ class CampaignResultsPanelTest extends TestCase
         // the tile is honest about "not yet" (REQ-M1-006) — never DEF-003,
         // and the retired "True unique reach" placeholder tile is gone.
         Livewire::test(CampaignResultsPanel::class, ['campaign' => $this->campaign])
-            ->assertSee('No estimated reach for this campaign yet')
-            ->assertSee('REQ-M1-006')
+            ->assertSee('No estimated reach yet')
+            ->assertSee('Settings → Reach')
             ->assertDontSee('DEF-003')
             ->assertDontSee('True unique reach');
     }

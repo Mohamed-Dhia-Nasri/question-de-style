@@ -10,7 +10,7 @@
     @if ($current === null)
         <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
             No geography assigned.
-            <x-states.unavailable reason="Automatic geographic attribution ships with Module 2 (REQ-M2-003, phase P2); until then geography is operator-assigned here (ADR-0018)." />
+            <x-states.unavailable reason="No location set yet — pick the country below." />
         </p>
     @else
         <p class="mt-2 text-sm text-gray-600 dark:text-gray-300">
@@ -48,8 +48,8 @@
             </x-ui.button>
         </form>
         <p class="mt-2 text-theme-xs text-gray-400 dark:text-gray-500">
-            Clearing the country withdraws the assignment. Country slices on the
-            results dashboard use this on the next rollup refresh.
+            Clearing the country removes the location. Dashboards pick the change up on the
+            next data refresh.
         </p>
     @endcan
 </div>

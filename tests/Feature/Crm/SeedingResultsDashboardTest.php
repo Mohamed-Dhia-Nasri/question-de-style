@@ -153,8 +153,8 @@ class SeedingResultsDashboardTest extends TestCase
             // reach honesty — no estimated reach computed for this slice
             // yet, never a fabricated number, and never DEF-003 (that's
             // CONFIRMED-reach only, retired from this ESTIMATED surface).
-            ->assertSee('No estimated reach for this slice yet')
-            ->assertSee('REQ-M1-006')
+            ->assertSee('No estimated reach yet')
+            ->assertSee('Settings → Reach')
             ->assertDontSee('DEF-003');
     }
 
@@ -193,7 +193,7 @@ class SeedingResultsDashboardTest extends TestCase
         // explained away (shipments carry no platform dimension).
         Livewire::test(SeedingResultsDashboard::class)
             ->set('platform', 'INSTAGRAM')
-            ->assertSee('Slice active')
+            ->assertSee('Filtered view')
             ->assertSee('Silk Serum')
             ->assertSee('500')
             ->assertDontSee('Post rate');
@@ -211,7 +211,7 @@ class SeedingResultsDashboardTest extends TestCase
 
         Livewire::test(SeedingResultsDashboard::class)
             ->set('contentType', 'REEL')
-            ->assertSee('Slice active')
+            ->assertSee('Filtered view')
             ->assertSee('Silk Serum');
 
         Livewire::test(SeedingResultsDashboard::class)
@@ -227,7 +227,7 @@ class SeedingResultsDashboardTest extends TestCase
         // DIM-Geo is empty until Module 2 — a country slice matches nothing.
         Livewire::test(SeedingResultsDashboard::class)
             ->set('country', 'FR')
-            ->assertSee('Slice active')
+            ->assertSee('Filtered view')
             ->assertSee('No seeding results in the rollups yet');
 
         // Malformed country input is ignored server-side (no slice), never
@@ -339,6 +339,6 @@ class SeedingResultsDashboardTest extends TestCase
 
         Livewire::test(SeedingResultsDashboard::class)
             ->assertSee('No seeding results in the rollups yet')
-            ->assertSee('Rollups refreshed');
+            ->assertSee('Data refreshed');
     }
 }

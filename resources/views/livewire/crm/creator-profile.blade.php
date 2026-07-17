@@ -10,9 +10,6 @@
                     <span wire:loading wire:target="runMonitoringNow">Starting…</span>
                 </x-ui.button>
             @endcan
-            <x-ui.badge color="light" title="Creator identity is operator-managed in v1 (ADR-0014); there is no merge feature.">
-                Operator-managed
-            </x-ui.badge>
         </div>
     </div>
 

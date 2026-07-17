@@ -147,7 +147,7 @@
                     <x-form.input id="campaign_spend" wire:model="campaign_spend" type="number" step="0.01" min="0"
                         :error="$errors->has('campaign_spend')" />
                     <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                        Manual agency input — stored at tier CONFIRMED; the CPE/CPM input on results.
+                        What you actually paid — used for the cost-per-result numbers on Results.
                     </p>
                     <x-form.error for="campaign_spend" />
                 </div>

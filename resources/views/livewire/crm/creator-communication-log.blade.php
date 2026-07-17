@@ -3,7 +3,8 @@
         <div>
             <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Communication log</h3>
             <p class="mt-0.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                Relationship history (REQ-M3-004): outreach and replies, newest first.
+                The conversation history with this creator — outreach and replies, newest
+                first.
             </p>
         </div>
         @can('create', \App\Modules\CRM\Models\CommunicationLog::class)

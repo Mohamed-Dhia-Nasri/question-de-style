@@ -3,7 +3,8 @@
         <div>
             <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Brand preferences</h3>
             <p class="mt-0.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                Preferred and restricted brand names (REQ-M3-003) — plain name lists, enforced on campaign joins from Step 3.
+                Brands this creator prefers — and brands they refuse. Refused brands are blocked
+                when adding the creator to campaigns and seeding runs.
             </p>
         </div>
         @can('create', \App\Modules\CRM\Models\BrandPreference::class)

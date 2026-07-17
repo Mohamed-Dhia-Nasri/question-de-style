@@ -77,14 +77,14 @@ class GeographyPanel extends Component
         if ($country === null) {
             $geography->clear($this->creator);
             $this->fillFromCurrent();
-            $this->dispatch('notify', type: 'success', message: 'Geography cleared — it renders unavailable again.');
+            $this->dispatch('notify', type: 'success', message: 'Location cleared.');
 
             return;
         }
 
         $geography->assign($this->creator, $country, $region, $city);
         $this->fillFromCurrent();
-        $this->dispatch('notify', type: 'success', message: 'Geography assigned. Rollups pick it up on the next refresh.');
+        $this->dispatch('notify', type: 'success', message: 'Location saved. Dashboards update on the next data refresh.');
     }
 
     private function fillFromCurrent(): void

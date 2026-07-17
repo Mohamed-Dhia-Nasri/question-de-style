@@ -172,9 +172,9 @@ return [
         // Lifetime of signed URLs granting access to archived media.
         'signed_url_ttl_minutes' => (int) env('QDS_MEDIA_SIGNED_URL_TTL_MINUTES', 10),
 
-        // Archived story media retention (media storage lifecycle, DP-005).
-        // Files older than this are deleted from the media disk and the
-        // story keeps only its metadata. 0 disables pruning entirely.
+        // Archived story media retention DEFAULT (media storage lifecycle,
+        // DP-005, ADR-0025): the fallback for tenants that never saved
+        // Settings → Monitoring. 0 disables pruning for such tenants.
         'media_retention_days' => (int) env('QDS_MEDIA_RETENTION_DAYS', 180),
 
         // Quarantined-record retention (redacted payloads, DP-005).
@@ -393,9 +393,9 @@ return [
     |--------------------------------------------------------------------------
     | Data-subject export/erasure run on demand (qds:gdpr-export-creator /
     | qds:gdpr-erase-creator); retention enforcement runs daily. The
-    | communication-log retention period is NOT canonically decided (same
-    | flagged class as the cadences) — 0 disables it until an ADR fixes the
-    | policy. GDPR export files always expire with qds.exports.ttl_hours.
+    | communication-log retention DEFAULT is the fallback for tenants that
+    | never saved Settings → Monitoring (ADR-0025) — 0 keeps history forever
+    | for such tenants. GDPR export files always expire with qds.exports.ttl_hours.
     */
     'gdpr' => [
         'communication_log_retention_days' => (int) env('QDS_GDPR_COMMS_RETENTION_DAYS', 0),

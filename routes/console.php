@@ -28,9 +28,9 @@ Schedule::command('qds:run-monitoring-cycle')
 Schedule::command('qds:run-monitoring-cycle --stories-only')
     ->cron((string) config('qds.ingestion.story_cycle_cron'));
 
-// SVC-EnrichmentAI — enrichment sweep over newly ingested content
-// (REQ-M1-002/008/009/011). Cadence NOT canonically decided (flagged) —
-// configurable via qds.enrichment.sweep_cron.
+// SVC-EnrichmentAI — recovery backstop sweep (ADR-0023: enrichment is
+// dispatched per data pull; this recurring sweep only catches targets
+// whose run crashed or was reaped).
 Schedule::command('qds:run-enrichment')
     ->cron((string) config('qds.enrichment.sweep_cron'));
 

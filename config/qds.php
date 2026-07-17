@@ -237,16 +237,18 @@ return [
     |--------------------------------------------------------------------------
     | SVC-EnrichmentAI (L3) — classification, sentiment, recognition, EMV
     |--------------------------------------------------------------------------
-    | Runtime toggles for the enrichment pipeline. Enrichment cadence is NOT
-    | canonically decided (same flagged missing decision as ingestion) —
-    | configurable here until an ADR fixes it. Recognition providers are the
-    | frozen SRC-google-* contracts; a provider with no credentials is
-    | skipped and its outputs stay unavailable (never fabricated).
+    | Runtime toggles for the enrichment pipeline. Enrichment is dispatched
+    | per data pull (ADR-0023); the recurring sweep below is the recovery
+    | BACKSTOP for crashed/reaped runs, not the primary trigger. Recognition
+    | providers are the frozen SRC-google-* contracts; a provider with no
+    | credentials is skipped and its outputs stay unavailable (never fabricated).
     */
     'enrichment' => [
         'enabled' => env('QDS_ENRICHMENT_ENABLED', false),
 
-        // Recurring sweep over recently ingested, not-yet-enriched content.
+        // Recovery backstop sweep (ADR-0023): re-collects targets whose
+        // per-pull run crashed or was reaped; a no-op for anything already
+        // RUNNING/COMPLETED.
         'sweep_cron' => env('QDS_ENRICHMENT_SWEEP_CRON', '15 */6 * * *'),
 
         // Max targets picked up per sweep (cost control).

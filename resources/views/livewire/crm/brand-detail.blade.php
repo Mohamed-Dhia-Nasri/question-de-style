@@ -39,7 +39,7 @@
                     <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
                         @foreach ($products as $product)
                             <tr wire:key="brand-product-{{ $product->id }}">
-                                <td class="px-5 py-4 text-sm font-medium text-gray-800 dark:text-white/90">{{ $product->name }}</td>
+                                <td class="px-5 py-4 text-sm font-medium text-gray-800 dark:text-white/90"><a href="{{ route('crm.products.index', ['q' => $product->name]) }}" class="font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">{{ $product->name }}</a></td>
                                 <td class="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{{ $product->variant ?? '—' }}</td>
                                 <td class="px-5 py-4">
                                     @if ($product->unit_value)

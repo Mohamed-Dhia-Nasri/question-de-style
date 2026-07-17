@@ -10,7 +10,11 @@
         <x-crm.context-header :client="$seedingCampaign->brand->client" :brand="$seedingCampaign->brand" :campaign="$seedingCampaign->campaign" :seeding-run="$seedingCampaign" :status="$seedingCampaign->status">
             <span>Seeding type: <x-ui.badge color="light">{{ $seedingCampaign->seeding_type->label() }}</x-ui.badge></span>
             <span>Product:
-                <span class="font-medium text-gray-800 dark:text-white/90">{{ $seedingCampaign->product?->name ?? '—' }}</span>
+                @if ($seedingCampaign->product)
+                    <a href="{{ route('crm.products.index', ['q' => $seedingCampaign->product->name]) }}" class="font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">{{ $seedingCampaign->product->name }}</a>
+                @else
+                    <span class="font-medium text-gray-800 dark:text-white/90">—</span>
+                @endif
             </span>
         </x-crm.context-header>
 

@@ -37,7 +37,8 @@ class BrandDetailTest extends TestCase
             ->assertSee('Kampagne Eins')
             ->assertSee('Run Eins')
             ->assertSee(route('crm.campaigns.show', $campaign))
-            ->assertSee(route('crm.seeding.show', $run));
+            ->assertSee(route('crm.seeding.show', $run))
+            ->assertSee(route('crm.products.index', ['q' => 'Serum Eins']), false);
     }
 
     public function test_component_refuses_client_viewers(): void

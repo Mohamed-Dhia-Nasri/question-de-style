@@ -4,6 +4,8 @@ namespace App\Modules\Monitoring\Livewire\Settings;
 
 use App\Models\User;
 use App\Modules\Monitoring\Models\MonitoringSetting;
+use App\Shared\Settings\MonitoringSettingsResolver;
+use App\Shared\Tenancy\TenantContext;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Component;
@@ -41,22 +43,18 @@ class MonitoringSettings extends Component
 
     public ?string $formError = null;
 
-    public function mount(): void
+    public function mount(MonitoringSettingsResolver $settings): void
     {
         $this->authorize('viewAny', MonitoringSetting::class);
 
-        // Latest row for the requester's tenant (TenantScope; HTTP always
-        // has a tenant context), else the config defaults.
-        $row = MonitoringSetting::query()->latest('id')->first();
+        // ADR-0025: all reads go through the resolver (tenant row → config
+        // fallback). HTTP always has a tenant context.
+        $tenantId = app(TenantContext::class)->idOrFail();
 
-        $shipment = $row->shipment_window_days
-            ?? (int) config('qds.enrichment.attribution.shipment_window_days');
-        $trend = $row->engagement_trend_window_days
-            ?? (int) config('qds.enrichment.engagement_trend_window_days');
-        $story = $row->story_retention_days
-            ?? (int) config('qds.ingestion.media_retention_days');
-        $comms = $row->communication_retention_days
-            ?? (int) config('qds.gdpr.communication_log_retention_days');
+        $shipment = $settings->shipmentWindowDays();
+        $trend = $settings->engagementTrendWindowDays();
+        $story = $settings->storyRetentionDaysFor($tenantId);
+        $comms = $settings->communicationRetentionDaysFor($tenantId);
 
         $this->shipmentDays = (string) $shipment;
         $this->trendDays = (string) $trend;

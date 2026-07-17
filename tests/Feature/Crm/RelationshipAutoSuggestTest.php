@@ -88,6 +88,30 @@ class RelationshipAutoSuggestTest extends TestCase
         ]);
     }
 
+    public function test_marking_contacted_is_a_no_op_when_the_creator_advanced_underneath(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $creator = Creator::factory()->create(['relationship_status' => RelationshipStatus::Prospect]);
+
+        $component = $this->logOutbound($creator)->assertSet('suggestContacted', true);
+
+        // Someone else advances the creator past first contact between the
+        // outbound log and this tap — the promotion must not regress them.
+        $creator->update(['relationship_status' => RelationshipStatus::Active]);
+
+        $component->call('markContacted')
+            ->assertHasNoErrors()
+            ->assertSet('suggestContacted', false);
+
+        $this->assertSame(RelationshipStatus::Active, $creator->fresh()->relationship_status);
+
+        $this->assertDatabaseMissing('audit_logs', [
+            'action' => 'creator.relationship_changed',
+            'subject_id' => $creator->id,
+        ]);
+    }
+
     public function test_an_outbound_log_for_an_active_creator_does_not_suggest(): void
     {
         $this->actingAsCrmStaff();

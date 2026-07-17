@@ -209,4 +209,65 @@ class BlocklistEnforcementTest extends TestCase
         $this->assertFalse($run->creators()->whereKey($blocked->id)->exists());
         $this->assertSame(0, Shipment::query()->where('seeding_campaign_id', $run->id)->count());
     }
+
+    public function test_editing_an_existing_shipment_whose_recipient_is_now_blocklisted_still_saves(): void
+    {
+        $this->actingAsCrmStaff();
+        $brand = Brand::factory()->create();
+        $run = SeedingCampaign::factory()->create(['brand_id' => $brand->id]);
+        $product = Product::factory()->create(['brand_id' => $brand->id]);
+
+        // A parcel that already shipped, to a creator who was on the roster.
+        $creator = Creator::factory()->create(['display_name' => 'Ariane Förster']);
+        $run->creators()->attach($creator->id);
+        $shipment = Shipment::factory()->create([
+            'seeding_campaign_id' => $run->id,
+            'creator_id' => $creator->id,
+            'product_id' => $product->id,
+            'status' => ShipmentStatus::Shipped,
+            'shipped_at' => now()->subDay(),
+        ]);
+
+        // Only AFTER shipping is the creator marked "do not contact or book".
+        $creator->update(['relationship_status' => RelationshipStatus::Blocklisted]);
+
+        // The lifecycle of a parcel that already left must still finish.
+        Livewire::test(ShipmentsPanel::class, ['seedingCampaign' => $run])
+            ->call('edit', $shipment->id)
+            ->set('shipment_status', ShipmentStatus::Delivered->value)
+            ->set('shipment_delivered_at', now()->format('Y-m-d\TH:i'))
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertSame(ShipmentStatus::Delivered, $shipment->fresh()->status);
+    }
+
+    public function test_repointing_an_existing_shipment_to_a_different_blocklisted_creator_is_hard_blocked(): void
+    {
+        $this->actingAsCrmStaff();
+        $brand = Brand::factory()->create();
+        $run = SeedingCampaign::factory()->create(['brand_id' => $brand->id]);
+        $product = Product::factory()->create(['brand_id' => $brand->id]);
+
+        $original = Creator::factory()->create(['display_name' => 'Ariane Förster']);
+        $run->creators()->attach($original->id);
+        $shipment = Shipment::factory()->create([
+            'seeding_campaign_id' => $run->id,
+            'creator_id' => $original->id,
+            'product_id' => $product->id,
+            'status' => ShipmentStatus::Shipped,
+            'shipped_at' => now()->subDay(),
+        ]);
+
+        $otherBlocked = $this->blocklisted('Blocklisted Bea');
+
+        // Re-pointing the parcel at a blocklisted recipient is still refused.
+        Livewire::test(ShipmentsPanel::class, ['seedingCampaign' => $run])
+            ->call('edit', $shipment->id)
+            ->set('shipment_creator_id', (string) $otherBlocked->id)
+            ->call('save')
+            ->assertHasErrors(['shipment_creator_id']);
+
+        $this->assertSame($original->id, $shipment->fresh()->creator_id);
+    }
 }

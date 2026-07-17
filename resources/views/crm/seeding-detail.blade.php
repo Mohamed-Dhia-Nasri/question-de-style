@@ -82,7 +82,10 @@
 
                 @if ($seedingCampaign->shipments_count > 0)
                     @php
-                        $expectedPosts = $seedingCampaign->expected_posts_count ?: $seedingCampaign->shipments_count;
+                        // Posted is measured against parcels that actually
+                        // expect a post — a run needing none reads 0/0, never
+                        // 0/N. Posted is not a divisor, so no guard is needed.
+                        $expectedPosts = $seedingCampaign->expected_posts_count;
                         $deliveredPct = (int) round($seedingCampaign->delivered_count / $seedingCampaign->shipments_count * 100);
                     @endphp
                     <div class="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-white/[0.03]">
@@ -92,7 +95,7 @@
                         <div class="mt-3 h-2.5 rounded-full bg-gray-100 dark:bg-white/5">
                             <div class="h-2.5 rounded-full bg-brand-500" style="width: {{ $deliveredPct }}%"></div>
                         </div>
-                        <p class="mt-2 text-theme-xs text-gray-500 dark:text-gray-400">Posted updates after monitoring matches the content.</p>
+                        <p class="mt-2 text-theme-xs text-gray-500 dark:text-gray-400">The Posted count goes up once a creator’s post is matched to this run.</p>
                     </div>
                 @endif
 

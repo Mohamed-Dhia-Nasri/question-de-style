@@ -157,6 +157,23 @@ class CommunicationLogPanel extends Component
     {
         $this->authorize('update', $this->creator);
 
+        // Re-check the trigger against fresh state: the creator may have
+        // advanced past first contact (e.g. to Active) between the outbound
+        // log and this tap. This is a forward-only first-contact promotion —
+        // it must never regress a later stage, so refuse silently unless the
+        // nudge still holds and the creator is still pre-contact.
+        $this->creator->refresh();
+
+        if (! $this->suggestContacted || ! in_array(
+            $this->creator->relationship_status,
+            [RelationshipStatus::None, RelationshipStatus::Prospect, null],
+            true,
+        )) {
+            $this->suggestContacted = false;
+
+            return;
+        }
+
         $previous = $this->creator->relationship_status;
         $this->creator->relationship_status = RelationshipStatus::Contacted;
         $this->creator->save();

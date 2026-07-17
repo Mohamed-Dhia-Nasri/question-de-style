@@ -80,7 +80,7 @@ class SeedingProgressStripTest extends TestCase
             ->assertSee('Shipped 2/3')
             ->assertSee('Delivered 1/3')
             ->assertSee('Posted 1/3')
-            ->assertSee('Posted updates after monitoring matches the content.');
+            ->assertSee('The Posted count goes up once a creator’s post is matched to this run.');
     }
 
     public function test_the_strip_does_not_render_for_a_run_with_zero_shipments(): void
@@ -91,6 +91,31 @@ class SeedingProgressStripTest extends TestCase
 
         $this->get(route('crm.seeding.show', $run))
             ->assertOk()
-            ->assertDontSee('Posted updates after monitoring matches the content.');
+            ->assertDontSee('The Posted count goes up once a creator’s post is matched to this run.');
+    }
+
+    public function test_a_run_that_requires_no_posts_shows_posted_zero_of_zero(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $brand = Brand::factory()->create();
+        $run = SeedingCampaign::factory()->create(['brand_id' => $brand->id]);
+        $product = Product::factory()->create(['brand_id' => $brand->id]);
+
+        // A gifting run where no post is expected: every parcel is
+        // posting_required = false. "Posted" then has a zero denominator —
+        // it must read 0/0, never 0/N (which would overstate outstanding work).
+        Shipment::factory()->count(3)->create([
+            'seeding_campaign_id' => $run->id,
+            'product_id' => $product->id,
+            'status' => ShipmentStatus::Delivered,
+            'posting_required' => false,
+            'posted' => false,
+        ]);
+
+        $this->get(route('crm.seeding.show', $run))
+            ->assertOk()
+            ->assertSee('Posted 0/0')
+            ->assertDontSee('Posted 0/3');
     }
 }

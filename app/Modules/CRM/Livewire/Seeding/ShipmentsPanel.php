@@ -277,10 +277,14 @@ class ShipmentsPanel extends Component
 
         // "Do not contact or book" hard-blocks a shipment recipient outright —
         // the single-recipient counterpart to the bulk roster paths' soft-skip
-        // (item 5b). Runs before the transaction so nothing is written, and
-        // applies whether or not the recipient is already on the roster
-        // (a creator blocklisted after joining must still not receive parcels).
-        if (app(BrandRestrictionGuard::class)->blocklistedCreatorIds([$creatorId]) !== []) {
+        // (item 5b). Runs before the transaction so nothing is written. Gated
+        // the SAME way as the restriction check below: enforced only on CREATE
+        // or when the recipient actually CHANGES. A creator blocklisted AFTER a
+        // parcel already shipped must still have that existing parcel's
+        // lifecycle finished (mark Delivered/Returned, add tracking) — only a
+        // NEW parcel, or re-pointing one at a blocklisted creator, is refused.
+        if ((! $editing || $creatorId !== $shipment->creator_id)
+            && app(BrandRestrictionGuard::class)->blocklistedCreatorIds([$creatorId]) !== []) {
             throw ValidationException::withMessages([
                 'shipment_creator_id' => 'This creator is marked ‘do not contact or book’ and cannot receive a shipment.',
             ]);

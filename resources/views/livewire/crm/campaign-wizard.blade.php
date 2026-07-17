@@ -278,7 +278,7 @@
             @if ($step === 4)
                 <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Add creators</h2>
                 <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                    Pick who takes part. Anyone whose no-go list includes this brand is flagged now and skipped on create.
+                    Pick who takes part. Anyone on their no-go list for this brand, or marked ‘do not contact or book’, is flagged now and skipped on create.
                 </p>
 
                 <div class="mt-6 space-y-4">
@@ -408,7 +408,7 @@
                 </dl>
 
                 <p class="mt-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-500 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-400">
-                    Anyone whose no-go list includes this brand is skipped, and the skipped names are reported on the next screen.
+                    Anyone on their no-go list for this brand, or marked ‘do not contact or book’, is skipped, and the skipped names are reported on the next screen.
                 </p>
             @endif
 

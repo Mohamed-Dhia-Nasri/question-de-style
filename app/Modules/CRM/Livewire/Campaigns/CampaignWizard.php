@@ -475,10 +475,23 @@ class CampaignWizard extends Component
 
             $candidateIds = $candidates->pluck('id')->map(fn ($id) => (int) $id)->all();
 
+            // An existing brand carries aliases, so fold them exactly as
+            // commit() does (the Brand overload) — a restriction keyed on an
+            // alias must flag here too. The typed-name matcher stays only for
+            // the new-brand case, where the brand may not exist yet.
             $brandName = $this->currentBrandName();
-            $restrictedIds = $brandName !== ''
-                ? $guard->restrictedCreatorIdsForName($candidateIds, $brandName)
-                : [];
+            $existingBrand = $selectedBrandId !== null
+                ? Brand::query()->whereKey($selectedBrandId)->first()
+                : null;
+
+            if ($existingBrand !== null) {
+                $restrictedIds = $guard->restrictedCreatorIds($candidateIds, $existingBrand);
+            } else {
+                $restrictedIds = $brandName !== ''
+                    ? $guard->restrictedCreatorIdsForName($candidateIds, $brandName)
+                    : [];
+            }
+
             $blocklistedIds = $guard->blocklistedCreatorIds($candidateIds);
         }
 

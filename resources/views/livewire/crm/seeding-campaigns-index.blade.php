@@ -4,12 +4,12 @@
             <div class="flex flex-wrap items-center gap-3">
                 <div class="relative grow sm:max-w-xs">
                     <x-form.input wire:model.live.debounce.300ms="search" type="search"
-                        placeholder="Search seeding runs…" aria-label="Search seeding campaigns" />
+                        placeholder="Search seeding runs…" aria-label="Search seeding runs" />
                 </div>
 
                 <div class="w-full sm:w-44">
-                    <x-form.select wire:model.live="typeFilter" aria-label="Filter by variant">
-                        <option value="">All variants</option>
+                    <x-form.select wire:model.live="typeFilter" aria-label="Filter by seeding type">
+                        <option value="">All seeding types</option>
                         @foreach ($types as $typeOption)
                             <option value="{{ $typeOption->value }}">{{ $typeOption->label() }}</option>
                         @endforeach
@@ -42,15 +42,27 @@
         </x-slot:header>
 
         @if ($seedingCampaigns->isEmpty())
-            <x-states.empty title="No seeding runs match your filters">
-                Track gifting and product placements — each run records exactly one of the four variants.
-            </x-states.empty>
+            @if ($search !== '' || $statusFilter !== '' || $typeFilter !== '')
+                <x-states.empty title="No seeding runs match your filters">
+                    Try adjusting or clearing the search and filters above.
+                </x-states.empty>
+            @else
+                <x-states.empty title="No seeding runs yet">
+                    A seeding run sends products to selected creators — on its own or as part of a
+                    campaign. You need a brand first.
+                    <x-slot:action>
+                        @can('create', \App\Modules\CRM\Models\SeedingCampaign::class)
+                            <x-ui.button size="sm" wire:click="create">New seeding run</x-ui.button>
+                        @endcan
+                    </x-slot:action>
+                </x-states.empty>
+            @endif
         @else
             <table class="w-full min-w-[900px]">
                 <thead>
                     <tr class="border-b border-gray-200 dark:border-gray-800">
                         <x-table.th field="name" :sort-field="$sortField" :sort-direction="$sortDirection">Name</x-table.th>
-                        <x-table.th field="seeding_type" :sort-field="$sortField" :sort-direction="$sortDirection">Variant</x-table.th>
+                        <x-table.th field="seeding_type" :sort-field="$sortField" :sort-direction="$sortDirection">Seeding type</x-table.th>
                         <x-table.th>Brand</x-table.th>
                         <x-table.th>Product</x-table.th>
                         <x-table.th field="status" :sort-field="$sortField" :sort-direction="$sortDirection">Status</x-table.th>
@@ -113,24 +125,28 @@
                 </div>
 
                 <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                    <div>
-                        <x-form.label for="seeding_type" required>Variant</x-form.label>
-                        <x-form.select id="seeding_type" wire:model="seeding_type" :error="$errors->has('seeding_type')">
-                            <option value="">Select a variant…</option>
+                    <div x-data="{ s: @js($seeding_type), map: @js($typeDescriptions) }">
+                        <x-form.label for="seeding_type" required>Seeding type</x-form.label>
+                        <x-form.select id="seeding_type" wire:model="seeding_type" x-on:change="s = $event.target.value"
+                            :error="$errors->has('seeding_type')">
+                            <option value="">Select a seeding type…</option>
                             @foreach ($types as $typeOption)
                                 <option value="{{ $typeOption->value }}">{{ $typeOption->label() }}</option>
                             @endforeach
                         </x-form.select>
+                        <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
                         <x-form.error for="seeding_type" />
                     </div>
 
-                    <div>
+                    <div x-data="{ s: @js($seeding_status), map: @js($statusDescriptions) }">
                         <x-form.label for="seeding_status" required>Status</x-form.label>
-                        <x-form.select id="seeding_status" wire:model="seeding_status" :error="$errors->has('seeding_status')">
+                        <x-form.select id="seeding_status" wire:model="seeding_status" x-on:change="s = $event.target.value"
+                            :error="$errors->has('seeding_status')">
                             @foreach ($statuses as $statusOption)
                                 <option value="{{ $statusOption->value }}">{{ $statusOption->label() }}</option>
                             @endforeach
                         </x-form.select>
+                        <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
                         <x-form.error for="seeding_status" />
                     </div>
                 </div>
@@ -156,7 +172,7 @@
                             @endforeach
                         </x-form.select>
                         <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                            The authoritative per-unit product is set on each shipment.
+                            Optional default — each shipment picks its own product.
                         </p>
                         <x-form.error for="seeding_product_id" />
                     </div>
@@ -174,11 +190,11 @@
                 </div>
 
                 <div>
-                    <x-form.label for="seeding_spend">Spend (agency input, CONFIRMED)</x-form.label>
+                    <x-form.label for="seeding_spend">Spend ({{ app(\App\Shared\Support\TenantCurrency::class)->code() }})</x-form.label>
                     <x-form.input id="seeding_spend" wire:model="seeding_spend" type="number" step="0.01" min="0"
                         :error="$errors->has('seeding_spend')" />
                     <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                        Manual agency input — stored at tier CONFIRMED; the CPE/CPM input on results.
+                        What you actually paid — used for the cost-per-result numbers on Results.
                     </p>
                     <x-form.error for="seeding_spend" />
                 </div>

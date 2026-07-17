@@ -69,13 +69,18 @@
         </x-slot:header>
 
         @if ($users->isEmpty())
-            <x-states.empty title="No users match your filters">
-                @if ($search !== '' || $roleFilter !== '' || $statusFilter !== '')
+            @if ($search !== '' || $roleFilter !== '' || $statusFilter !== '')
+                <x-states.empty title="No users match your filters">
                     Try adjusting or clearing the search and filters above.
-                @else
-                    Create the first user with the "New user" button.
-                @endif
-            </x-states.empty>
+                </x-states.empty>
+            @else
+                <x-states.empty title="No team members yet">
+                    Invite the people who will work in QDS.
+                    <x-slot:action>
+                        <x-ui.button size="sm" wire:click="create">New user</x-ui.button>
+                    </x-slot:action>
+                </x-states.empty>
+            @endif
         @else
             <table class="w-full min-w-[900px]">
                 <thead>

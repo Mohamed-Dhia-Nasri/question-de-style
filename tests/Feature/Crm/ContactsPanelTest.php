@@ -14,10 +14,10 @@ use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
- * Contacts panel: manual CRUD (REQ-M3-002, AC-M3-004), the literal
- * "unavailable" auto-extraction affordance (DEF-002, AC-M3-005), and the
- * GDPR hard-delete path (DP-005, AC-M3-006) with an identifier-only audit
- * event.
+ * Contacts panel: manual CRUD (REQ-M3-002, AC-M3-004) and the GDPR
+ * hard-delete path (DP-005, AC-M3-006) with an identifier-only audit
+ * event. The auto-extraction affordance was retired (F25) — it advertised
+ * a feature that never existed.
  */
 class ContactsPanelTest extends TestCase
 {
@@ -42,17 +42,16 @@ class ContactsPanelTest extends TestCase
             ->assertForbidden();
     }
 
-    public function test_the_auto_extraction_affordance_renders_the_literal_unavailable(): void
+    public function test_the_auto_extraction_affordance_is_not_rendered(): void
     {
         $this->actingAsCrmStaff();
 
         $creator = Creator::factory()->create();
 
-        // AC-M3-005 / DEF-002 / Rule 8: the affordance shows "unavailable" —
-        // never empty, never zero, never a working auto-fill.
+        // F25: the "Auto-extract email/phone: unavailable" row advertised a
+        // feature that does not exist and was deleted outright.
         Livewire::test(ContactsPanel::class, ['creator' => $creator])
-            ->assertSee('Auto-extract email/phone:')
-            ->assertSee('unavailable');
+            ->assertDontSee('Auto-extract');
     }
 
     public function test_an_operator_adds_a_manual_contact(): void

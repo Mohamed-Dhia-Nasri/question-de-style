@@ -1,7 +1,7 @@
 {{--
     ENUM-MetricTier badge (DP-001): every displayed metric carries its tier;
-    an ESTIMATED value is never presented as fact. Values canonical in
-    docs/00-meta/03-glossary.md#enum-metrictier.
+    an ESTIMATED value is never presented as fact. Plain words per the
+    2026-07-16 CRM UX audit (F21); values canonical in the glossary.
 --}}
 @props([
     /** string|\App\Shared\Enums\MetricTier */
@@ -9,15 +9,17 @@
 ])
 
 @php
-    $value = $tier instanceof \App\Shared\Enums\MetricTier ? $tier->value : (string) $tier;
+    $enum = $tier instanceof \App\Shared\Enums\MetricTier
+        ? $tier
+        : \App\Shared\Enums\MetricTier::tryFrom((string) $tier);
 
-    $color = match ($value) {
-        'PUBLIC' => 'info',
-        'DERIVED' => 'primary',
-        'ESTIMATED' => 'warning',
-        'CONFIRMED' => 'success',
+    $color = match ($enum) {
+        \App\Shared\Enums\MetricTier::Public => 'info',
+        \App\Shared\Enums\MetricTier::Derived => 'primary',
+        \App\Shared\Enums\MetricTier::Estimated => 'warning',
+        \App\Shared\Enums\MetricTier::Confirmed => 'success',
         default => 'light',
     };
 @endphp
 
-<x-ui.badge :color="$color" size="sm" {{ $attributes }}>{{ $value }}</x-ui.badge>
+<x-ui.badge :color="$color" size="sm" :title="$enum?->description()" {{ $attributes }}>{{ $enum?->label() ?? $tier }}</x-ui.badge>

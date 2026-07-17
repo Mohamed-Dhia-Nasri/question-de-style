@@ -3,7 +3,8 @@
         <div>
             <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Platform accounts</h3>
             <p class="mt-0.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                The human asserts which accounts belong to this person — accounts are curated here by hand (ADR-0014).
+                The accounts your team has confirmed belong to this person — added and removed by
+                hand.
             </p>
         </div>
         {{-- Deliberately NO auto-detect and NO merge control here: ADR-0014
@@ -16,7 +17,13 @@
 
     @if ($accounts->isEmpty())
         <x-states.empty title="No platform accounts yet">
-            Add this creator's Instagram, TikTok, or YouTube account — at most one per platform.
+            Link this creator’s Instagram, TikTok, or YouTube account — monitoring starts from
+            here.
+            <x-slot:action>
+                @can('create', \App\Modules\CRM\Models\PlatformAccount::class)
+                    <x-ui.button size="sm" wire:click="add">Add account</x-ui.button>
+                @endcan
+            </x-slot:action>
         </x-states.empty>
     @else
         <div class="overflow-x-auto">
@@ -36,7 +43,7 @@
                     @foreach ($accounts as $account)
                         <tr wire:key="account-{{ $account->id }}">
                             <td class="px-5 py-4">
-                                <x-ui.badge color="light">{{ $account->platform->value }}</x-ui.badge>
+                                <x-ui.badge color="light">{{ $account->platform->label() }}</x-ui.badge>
                             </td>
                             <td class="px-5 py-4 text-sm font-medium text-gray-800 dark:text-white/90">
                                 {{ $account->handle }}
@@ -65,14 +72,14 @@
                                         {{ number_format($account->follower_count->amount, 0, ',', '.') }}
                                     </span>
                                     {{-- DP-001: the tier travels with the number. --}}
-                                    <x-ui.badge color="light" size="sm">{{ $account->follower_count->tier->value }}</x-ui.badge>
+                                    <x-metric.tier-badge :tier="$account->follower_count->tier" />
                                 @else
                                     <span class="text-sm text-gray-400">&mdash;</span>
                                 @endif
                             </td>
                             <td class="px-5 py-4">
                                 @if ($account->provenance->source === \App\Platform\Ingestion\SourceRegistry::AGENCY_MANUAL_ENTRY)
-                                    <x-ui.badge color="info" title="Entered by hand by agency staff (ADR-0015)">Manual entry</x-ui.badge>
+                                    <x-ui.badge color="info" title="Entered by hand by agency staff.">Manual entry</x-ui.badge>
                                 @else
                                     <span class="text-theme-xs text-gray-500 dark:text-gray-400"
                                         title="Fetched {{ $account->provenance->fetchedAt->format('d.m.Y H:i') }}">
@@ -113,7 +120,7 @@
                         :error="$errors->has('account_platform')">
                         <option value="">Select a platform…</option>
                         @foreach ($platforms as $platformOption)
-                            <option value="{{ $platformOption->value }}">{{ $platformOption->value }}</option>
+                            <option value="{{ $platformOption->value }}">{{ $platformOption->label() }}</option>
                         @endforeach
                     </x-form.select>
                     <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
@@ -141,7 +148,8 @@
                     <x-form.textarea id="account_links" wire:model="account_links" rows="3"
                         :error="$errors->has('account_links')" placeholder="https://… (one per line)" />
                     <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                        Public profile links only — contact details belong in the Contacts panel (manual entry, DEF-002).
+                        Public profile links only — emails and phone numbers belong in the
+                        Contacts panel.
                     </p>
                     <x-form.error for="account_links" />
                 </div>
@@ -163,10 +171,8 @@
     @if ($confirmingRemoveId !== null)
         <x-ui.confirm-modal title="Remove platform account?" confirm-action="remove" cancel-action="cancelRemove"
             confirm-label="Remove account">
-            This deletes the account from the creator. There is no way to move an account to another
-            creator in v1 (ADR-0014) — if this account belongs to a different creator, remove it here
-            and add it there by hand. Accounts with monitoring history cannot be removed. The action
-            is recorded in the audit log.
+            Removing an account stops it from counting toward this creator. If it belongs to a
+            different creator, remove it here and add it there.
         </x-ui.confirm-modal>
     @endif
 </div>

@@ -291,7 +291,7 @@ How a [`GL-Mention`](#gl-mention) most likely came about.
 
 | Value | Meaning |
 |---|---|
-| `PAID` | Proven paid placement (a record/label establishes payment). |
+| `PAID` | Proven paid placement (a record/label establishes payment). Kept as an inert compatibility value per [ADR-0026](../05-decisions/decision-log.md#adr-0026): asserted only from a platform paid-partnership label, never inferred. |
 | `SEEDED` | Proven to result from product seeding/gifting. |
 | `LIKELY_ORGANIC` | No paid/seeded record; appears organic. |
 | `UNKNOWN` | Insufficient signal to classify. |

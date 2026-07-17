@@ -62,14 +62,21 @@
         </x-slot:header>
 
         @if ($creators->isEmpty())
-            <x-states.empty title="No creators match your filters">
-                @if ($search !== '' || $statusFilter !== '' || $countryFilter !== '' || $cityFilter !== '')
+            @if ($search !== '' || $statusFilter !== '' || $countryFilter !== '' || $cityFilter !== '')
+                <x-states.empty title="No creators match your filters">
                     Try adjusting or clearing the search and filters above.
-                @else
-                    Create the first creator with the "New creator" button. Creators proposed by
-                    Monitoring or Discovery also appear here.
-                @endif
-            </x-states.empty>
+                </x-states.empty>
+            @else
+                <x-states.empty title="No creators yet">
+                    Creators are the influencers you work with. Adding a creator automatically
+                    starts monitoring their accounts.
+                    <x-slot:action>
+                        @can('create', \App\Modules\CRM\Models\Creator::class)
+                            <x-ui.button size="sm" wire:click="create">New creator</x-ui.button>
+                        @endcan
+                    </x-slot:action>
+                </x-states.empty>
+            @endif
         @else
             <table class="w-full min-w-[900px]">
                 <thead>
@@ -98,23 +105,23 @@
                                 @else
                                     <div class="flex flex-wrap gap-1.5">
                                         @foreach ($creator->platformAccounts as $account)
-                                            <x-ui.badge color="light">{{ $account->platform->value }} · {{ $account->handle }}</x-ui.badge>
+                                            <x-ui.badge color="light">{{ $account->platform->label() }} · {{ $account->handle }}</x-ui.badge>
                                         @endforeach
                                     </div>
                                 @endif
                             </td>
                             <td class="px-5 py-4">
-                                @if ($creator->relationship_status)
-                                    <x-ui.badge color="primary">{{ $creator->relationship_status->label() }}</x-ui.badge>
+                                @if ($creator->relationship_status === null || $creator->relationship_status === \App\Shared\Enums\RelationshipStatus::None)
+                                    <span class="text-sm text-gray-400">—</span>
                                 @else
-                                    <span class="text-sm text-gray-400">&mdash;</span>
+                                    <x-ui.badge color="primary">{{ $creator->relationship_status->label() }}</x-ui.badge>
                                 @endif
                             </td>
                             <td class="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">
                                 @if ($creator->geoAttribution !== null)
                                     {{ \App\Shared\Enums\Country::labelFor($creator->geoAttribution->country_code) }}@if ($creator->geoAttribution->city) · {{ $creator->geoAttribution->city }}@endif
                                 @else
-                                    <x-states.unavailable reason="No operator-assigned geography (ADR-0018); automatic attribution ships with Module 2 (REQ-M2-003)." />
+                                    <x-states.unavailable reason="No location set — add it on the creator’s profile under Geography." />
                                 @endif
                             </td>
                             <td class="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">
@@ -168,15 +175,16 @@
                     <x-form.error for="primary_language" />
                 </div>
 
-                <div>
+                <div x-data="{ s: @js($relationship_status), map: @js($statusDescriptions) }">
                     <x-form.label for="relationship_status">Relationship status</x-form.label>
                     <x-form.select id="relationship_status" wire:model="relationship_status"
-                        :error="$errors->has('relationship_status')">
-                        <option value="">No status</option>
+                        x-on:change="s = $event.target.value" :error="$errors->has('relationship_status')">
+                        <option value="">— none —</option>
                         @foreach ($statuses as $statusOption)
                             <option value="{{ $statusOption->value }}">{{ $statusOption->label() }}</option>
                         @endforeach
                     </x-form.select>
+                    <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
                     <x-form.error for="relationship_status" />
                 </div>
             </form>
@@ -197,11 +205,8 @@
     @if ($confirmingDeleteId !== null)
         <x-ui.confirm-modal title="Delete creator?" confirm-action="delete" cancel-action="cancelDelete"
             confirm-label="Delete creator">
-            This permanently removes the creator together with its platform accounts, contacts,
-            brand preferences, and communication log — the way a stray duplicate is reconciled
-            (no merge exists in v1, ADR-0014). Creators with monitoring history, roster entries,
-            or campaign records cannot be deleted. The action is recorded in the audit log and
-            cannot be undone.
+            Deleting a creator is permanent. Creators with monitoring history, campaign roster
+            entries, or shipments cannot be deleted — remove those records first.
         </x-ui.confirm-modal>
     @endif
 </div>

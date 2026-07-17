@@ -33,4 +33,20 @@ enum RelationshipStatus: string
             self::Blocklisted => 'Blocklisted',
         };
     }
+
+    /** One-line plain-language description (presentation only). */
+    public function description(): string
+    {
+        return match ($this) {
+            self::None => 'No relationship yet.',
+            self::Prospect => 'On the radar — no contact yet.',
+            self::Contacted => 'First message sent.',
+            self::InConversation => 'Talking — nothing agreed yet.',
+            self::Active => 'Currently working together.',
+            self::Collaborated => 'Worked together before.',
+            self::Paused => 'Relationship on hold.',
+            self::Declined => 'They said no.',
+            self::Blocklisted => 'Do not contact or book.',
+        };
+    }
 }

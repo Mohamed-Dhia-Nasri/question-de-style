@@ -146,6 +146,20 @@ class SeedingCampaignsIndex extends Component
         $this->showForm = true;
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'seeding_name' => 'name',
+            'seeding_type' => 'seeding type',
+            'seeding_brand_id' => 'brand',
+            'seeding_product_id' => 'product',
+            'seeding_campaign_id' => 'parent campaign',
+            'seeding_status' => 'status',
+            'seeding_spend' => 'spend',
+        ];
+    }
+
     public function save(AuditLogger $audit): void
     {
         $editing = $this->editingSeedingId !== null;
@@ -221,7 +235,7 @@ class SeedingCampaignsIndex extends Component
 
         $this->showForm = false;
         $this->resetForm();
-        $this->dispatch('notify', type: 'success', message: $editing ? 'Seeding campaign updated.' : 'Seeding campaign created.');
+        $this->dispatch('notify', type: 'success', message: $editing ? 'Seeding run updated.' : 'Seeding run created.');
     }
 
     public function cancelForm(): void
@@ -254,7 +268,7 @@ class SeedingCampaignsIndex extends Component
             DB::transaction(fn () => $seeding->delete());
         } catch (QueryException) {
             $this->confirmingDeleteId = null;
-            $this->dispatch('notify', type: 'error', message: 'Cannot delete: this seeding campaign is still referenced by shipments or documents.');
+            $this->dispatch('notify', type: 'error', message: 'Cannot delete: this seeding run is still referenced by shipments or documents.');
 
             return;
         }
@@ -264,7 +278,7 @@ class SeedingCampaignsIndex extends Component
         $this->confirmingDeleteId = null;
         $this->clearSelection();
         $this->clampPage();
-        $this->dispatch('notify', type: 'success', message: 'Seeding campaign deleted.');
+        $this->dispatch('notify', type: 'success', message: 'Seeding run deleted.');
     }
 
     public function cancelDelete(): void
@@ -309,6 +323,12 @@ class SeedingCampaignsIndex extends Component
                 : Campaign::query()->whereRaw('false')->get(),
             'types' => SeedingType::cases(),
             'statuses' => SeedingCampaignStatus::cases(),
+            'typeDescriptions' => collect(SeedingType::cases())
+                ->mapWithKeys(fn ($t) => [$t->value => $t->description()])
+                ->all(),
+            'statusDescriptions' => collect(SeedingCampaignStatus::cases())
+                ->mapWithKeys(fn ($s) => [$s->value => $s->description()])
+                ->all(),
         ]);
     }
 }

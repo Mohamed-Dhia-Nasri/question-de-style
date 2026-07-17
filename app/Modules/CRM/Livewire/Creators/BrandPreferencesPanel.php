@@ -63,6 +63,16 @@ class BrandPreferencesPanel extends Component
         $this->showForm = true;
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'preference_preferred' => 'preferred brands',
+            'preference_restricted' => 'restricted brands',
+            'preference_notes' => 'notes',
+        ];
+    }
+
     public function save(): void
     {
         $editing = $this->editingPreferenceId !== null;

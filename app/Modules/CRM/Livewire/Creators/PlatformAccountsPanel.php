@@ -80,6 +80,17 @@ class PlatformAccountsPanel extends Component
         $this->showForm = true;
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'account_platform' => 'platform',
+            'account_handle' => 'handle',
+            'account_bio' => 'bio',
+            'account_links' => 'links',
+        ];
+    }
+
     public function save(CreatorWriter $writer, AuditLogger $audit): void
     {
         $editing = $this->editingAccountId !== null;

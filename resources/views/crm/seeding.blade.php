@@ -1,8 +1,8 @@
-<x-layouts.app title="Seeding campaigns">
-    <x-page-header title="Seeding campaigns" :breadcrumbs="[
+<x-layouts.app title="Seeding runs">
+    <x-page-header title="Seeding runs" :breadcrumbs="[
         'Dashboard' => route('dashboard'),
-        'CRM & Seeding' => route('crm.index'),
-        'Seeding' => null,
+        'CRM' => route('crm.index'),
+        'Seeding runs' => null,
     ]" />
 
     @livewire('crm.seeding-campaigns-index')

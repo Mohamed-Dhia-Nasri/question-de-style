@@ -30,6 +30,7 @@ class ContentItemPersister
         $created = 0;
         $duplicates = 0;
         $skipped = 0;
+        $createdIds = [];
 
         foreach ($items as $item) {
             if ($item->platform !== $account->platform) {
@@ -64,6 +65,7 @@ class ContentItemPersister
                 // Explicit ownership from the parent account row (ADR-0019).
                 $contentItem->tenant_id = $account->tenant_id;
                 $contentItem->save();
+                $createdIds[] = (int) $contentItem->id;
 
                 $created++;
 
@@ -95,6 +97,7 @@ class ContentItemPersister
             duplicates: $duplicates,
             skipped: $skipped,
             persistenceMs: (microtime(true) - $startedAt) * 1000,
+            createdIds: $createdIds,
         );
     }
 

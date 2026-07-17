@@ -11,11 +11,12 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Str;
 
 /**
- * Recurring enrichment sweep: queues enrichment for recently ingested
- * content/stories that have no completed (or running) enrichment run yet.
- * Self-gates on qds.enrichment.enabled like every scheduled QDS command.
- * Cadence is config-tunable — NOT canonically decided (flagged, same as
- * the ingestion/snapshot cadences).
+ * Recovery backstop sweep (ADR-0023): enrichment is dispatched per data
+ * pull; this recurring sweep only re-collects recently ingested
+ * content/stories whose run crashed or was reaped (no completed or
+ * running enrichment run yet). Self-gates on qds.enrichment.enabled like
+ * every scheduled QDS command. Its cron is an operational knob of the
+ * backstop, not a product cadence.
  */
 class RunEnrichmentCommand extends Command
 {

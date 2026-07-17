@@ -2,9 +2,12 @@
 
 namespace App\Modules\CRM\Livewire\Seeding;
 
+use App\Modules\CRM\Exceptions\BrandRestrictionViolation;
+use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\Product;
 use App\Modules\CRM\Models\SeedingCampaign;
 use App\Modules\CRM\Models\Shipment;
+use App\Modules\CRM\Services\BrandRestrictionGuard;
 use App\Modules\CRM\Services\ShipmentContentWriter;
 use App\Modules\Monitoring\Contracts\ContentMatchFeedback;
 use App\Modules\Monitoring\Models\ContentItem;
@@ -14,6 +17,7 @@ use App\Shared\Enums\ShipmentStatus;
 use App\Shared\Tenancy\TenantRule;
 use App\Shared\ValueObjects\MetricValue;
 use Illuminate\Contracts\View\View;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Livewire\Component;
@@ -111,6 +115,22 @@ class ShipmentsPanel extends Component
         $this->showForm = true;
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'shipment_creator_id' => 'recipient',
+            'shipment_product_id' => 'product',
+            'shipment_status' => 'status',
+            'shipment_tracking_number' => 'tracking number',
+            'shipment_shipped_at' => 'shipped date',
+            'shipment_delivered_at' => 'delivered date',
+            'shipment_quantity' => 'quantity',
+            'shipment_value' => 'product value',
+            'link_content_id' => 'content',
+        ];
+    }
+
     public function save(AuditLogger $audit): void
     {
         $editing = $this->editingShipmentId !== null;
@@ -119,7 +139,9 @@ class ShipmentsPanel extends Component
         $this->authorize($editing ? 'update' : 'create', $shipment ?? Shipment::class);
 
         $validated = $this->validate([
-            // Spec D5: recipients come from the run's attached creators.
+            // Spec D5 + F03: recipients live on the run's roster — an
+            // off-roster recipient is auto-attached at save (brand
+            // restrictions still block).
             'shipment_creator_id' => ['required', 'integer'],
             'shipment_product_id' => ['required', 'integer', TenantRule::exists('products', 'id')],
             'shipment_status' => ['required', Rule::in(array_column(ShipmentStatus::cases(), 'value'))],
@@ -131,14 +153,34 @@ class ShipmentsPanel extends Component
         ]);
 
         $creatorId = (int) $validated['shipment_creator_id'];
-
-        if (! $this->seedingCampaign->creators()->whereKey($creatorId)->exists()) {
-            throw ValidationException::withMessages([
-                'shipment_creator_id' => 'The recipient must be a creator attached to this seeding run.',
-            ]);
-        }
-
         $productId = (int) $validated['shipment_product_id'];
+
+        // F03 self-heal: a shipment recipient belongs on the roster. For new
+        // shipments the dropdown only offers roster creators, so this path is
+        // legacy rows (pre-backfill) and non-UI writes — attach instead of
+        // dead-ending, but never past a brand restriction. All checks below
+        // are read-only; the actual attach happens later, inside the
+        // transaction, only once every validation has passed — otherwise a
+        // later failure (e.g. the product check) would leave a phantom
+        // roster attach for a shipment that was never created.
+        $needsAttach = ! $this->seedingCampaign->creators()->whereKey($creatorId)->exists();
+        $creatorToAttach = null;
+
+        if ($needsAttach) {
+            $creatorToAttach = Creator::query()->whereKey($creatorId)->first();
+
+            if ($creatorToAttach === null) {
+                throw ValidationException::withMessages([
+                    'shipment_creator_id' => 'Pick a creator from this seeding run.',
+                ]);
+            }
+
+            try {
+                app(BrandRestrictionGuard::class)->assertNotRestricted($creatorToAttach, $this->seedingCampaign->brand);
+            } catch (BrandRestrictionViolation $violation) {
+                throw ValidationException::withMessages(['shipment_creator_id' => $violation->getMessage()]);
+            }
+        }
 
         if (Product::findOrFail($productId)->brand_id !== $this->seedingCampaign->brand_id) {
             throw ValidationException::withMessages([
@@ -163,24 +205,34 @@ class ShipmentsPanel extends Component
             'posting_required' => $this->shipment_posting_required,
         ];
 
-        if ($editing) {
-            $shipment->update($attributes);
-        } else {
-            $shipment = $this->seedingCampaign->shipments()->create($attributes);
-        }
+        // Everything above is validation-only (no writes). Everything below
+        // mutates, so it runs atomically: the self-heal attach and the
+        // shipment write either both land or neither does.
+        DB::transaction(function () use ($needsAttach, $creatorToAttach, $audit, $editing, &$shipment, $attributes, $previousStatus) {
+            if ($needsAttach) {
+                $this->seedingCampaign->creators()->syncWithoutDetaching([$creatorToAttach->id]);
+                $audit->record('seeding_campaign_creator.attached', $this->seedingCampaign, ['creator_id' => $creatorToAttach->id]);
+            }
 
-        $audit->record($editing ? 'shipment.updated' : 'shipment.created', $shipment, [
-            'creator_id' => $shipment->creator_id,
-            'product_id' => $shipment->product_id,
-        ]);
+            if ($editing) {
+                $shipment->update($attributes);
+            } else {
+                $shipment = $this->seedingCampaign->shipments()->create($attributes);
+            }
 
-        // AC-M3-012: state changes are recorded.
-        if ($editing && $previousStatus !== $shipment->status) {
-            $audit->record('shipment.status_changed', $shipment, [
-                'from' => $previousStatus->value,
-                'to' => $shipment->status->value,
+            $audit->record($editing ? 'shipment.updated' : 'shipment.created', $shipment, [
+                'creator_id' => $shipment->creator_id,
+                'product_id' => $shipment->product_id,
             ]);
-        }
+
+            // AC-M3-012: state changes are recorded.
+            if ($editing && $previousStatus !== $shipment->status) {
+                $audit->record('shipment.status_changed', $shipment, [
+                    'from' => $previousStatus->value,
+                    'to' => $shipment->status->value,
+                ]);
+            }
+        });
 
         $this->seedingCampaign->refresh();
         $this->showForm = false;
@@ -388,6 +440,9 @@ class ShipmentsPanel extends Component
             'recipients' => $this->seedingCampaign->creators()->orderBy('display_name')->get(),
             'products' => $this->seedingCampaign->brand->products()->orderBy('name')->get(),
             'statuses' => ShipmentStatus::cases(),
+            'statusDescriptions' => collect(ShipmentStatus::cases())
+                ->mapWithKeys(fn ($s) => [$s->value => $s->description()])
+                ->all(),
             'linkableContent' => $linkableContent,
         ]);
     }

@@ -68,6 +68,17 @@ class CommunicationLogPanel extends Component
         $this->showForm = true;
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'log_channel' => 'channel',
+            'log_direction' => 'direction',
+            'log_summary' => 'summary',
+            'log_occurred_at' => 'date and time',
+        ];
+    }
+
     public function save(): void
     {
         $editing = $this->editingLogId !== null;

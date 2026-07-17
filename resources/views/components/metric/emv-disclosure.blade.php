@@ -12,18 +12,19 @@
 
 <div {{ $attributes }}>
     @if ($configurations->isEmpty())
-        <x-states.unavailable reason="EMV model disclosure: no EMV has been computed yet (REQ-M1-011 — EMV requires a user-activated, transparent rate card and a calculation run)." />
+        <x-states.unavailable reason="No EMV yet — EMV is calculated once rates are set up under Settings → EMV." />
     @else
         @if ($configurations->count() > 1)
             <p class="text-theme-xs font-medium text-gray-500 dark:text-gray-400">
-                EMV figures across current QDS results span {{ $configurations->count() }} rate cards (workspace-wide disclosure):
+                These figures use {{ $configurations->count() }} different rate cards (the settings changed over time):
             </p>
         @endif
         @foreach ($configurations as $configuration)
             <p class="text-theme-xs text-gray-500 dark:text-gray-400" wire:key="emv-disclosure-{{ $configuration->id }}">
-                EMV model "{{ $configuration->name }}" · formula {{ $configuration->formula_version }} ·
-                rate card {{ $configuration->rate_card_version }} · currency {{ $configuration->currency }}.
-                Rates: {{ json_encode($configuration->rates) }}
+                Earned Media Value (EMV) estimated with the “{{ $configuration->name }}” rate card ({{ $configuration->currency }}).
+                @can(\App\Shared\Authorization\PermissionsCatalog::SETTINGS_VIEW)
+                    <a href="{{ route('settings.emv') }}" class="text-brand-500 hover:text-brand-600 dark:text-brand-400" wire:navigate>View or change the rates</a>.
+                @endcan
             </p>
         @endforeach
     @endif

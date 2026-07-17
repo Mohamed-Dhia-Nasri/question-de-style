@@ -8,6 +8,7 @@ use App\Shared\Enums\Country;
 use App\Shared\Livewire\Concerns\WithDataTable;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -60,6 +61,7 @@ class ClientsIndex extends Component
         return $this->applySort(
             Client::query()
                 ->withCount('brands')
+                ->with(['brands' => fn (HasMany $query) => $query->orderBy('name')])
                 ->when($this->search !== '', function (Builder $query) {
                     $query->where('name', 'ilike', '%'.$this->search.'%');
                 })
@@ -87,6 +89,15 @@ class ClientsIndex extends Component
         $this->client_name = $client->name;
         $this->client_country = $client->country ?? '';
         $this->showForm = true;
+    }
+
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'client_name' => 'name',
+            'client_country' => 'country',
+        ];
     }
 
     public function save(AuditLogger $audit): void

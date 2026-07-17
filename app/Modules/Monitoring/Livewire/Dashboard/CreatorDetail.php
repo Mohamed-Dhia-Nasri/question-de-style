@@ -11,6 +11,7 @@ use App\Platform\Enrichment\Metrics\DerivedMetricsService;
 use App\Shared\Enums\ContentType;
 use App\Shared\Enums\Platform;
 use App\Shared\Livewire\Concerns\RunsCreatorMonitoringNow;
+use App\Shared\Settings\MonitoringSettingsResolver;
 use Illuminate\Contracts\View\View;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -25,7 +26,8 @@ use Livewire\WithPagination;
  *
  * Posting frequency renders Unavailable (no canonical formula — flagged
  * decision gap); audience demographics render Unavailable (DEF-001);
- * contact auto-extraction renders Unavailable (DEF-002).
+ * contact auto-extraction renders Unavailable (DEF-002). Engagement trend
+ * is DERIVED per ADR-0024 (rolling window, ADR-0025 per-tenant length).
  *
  * Hosts the shared "run monitoring now" lever (RunsCreatorMonitoringNow)
  * so an operator can poll this creator on demand from the detail page.
@@ -63,7 +65,7 @@ class CreatorDetail extends Component
         $this->resetPage();
     }
 
-    public function render(RollupReader $rollups, DerivedMetricsService $derived): View
+    public function render(RollupReader $rollups, DerivedMetricsService $derived, MonitoringSettingsResolver $settings): View
     {
         $accountIds = $this->creator->platformAccounts->pluck('id');
         $platform = Platform::tryFrom($this->platform);
@@ -112,6 +114,10 @@ class CreatorDetail extends Component
             ->values()
             ->all();
 
+        // ADR-0024 engagement trend: rolling N-day windows (per-tenant N,
+        // ADR-0025) over the creator's observed likes+comments.
+        $trendWindowDays = $settings->engagementTrendWindowDays();
+
         return view('livewire.monitoring.creator-detail', [
             'series' => $series,
             'latestBucket' => $series->last(),
@@ -120,6 +126,8 @@ class CreatorDetail extends Component
             'mentions' => $mentions,
             'averagePerformance' => $derived->averagePerformance($viewAmounts, 'average_views'),
             'medianPerformance' => $derived->medianPerformance($viewAmounts, 'median_views'),
+            'engagementTrend' => $derived->engagementTrend($this->creator, $trendWindowDays),
+            'trendWindowDays' => $trendWindowDays,
             'grains' => RollupReader::GRAINS,
             'platforms' => Platform::cases(),
             'contentTypes' => ContentType::cases(),

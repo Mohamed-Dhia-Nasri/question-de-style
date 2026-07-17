@@ -3,7 +3,8 @@
         <div>
             <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Brand preferences</h3>
             <p class="mt-0.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                Preferred and restricted brand names (REQ-M3-003) — plain name lists, enforced on campaign joins from Step 3.
+                Brands this creator prefers — and brands they refuse. Refused brands are blocked
+                when adding the creator to campaigns and seeding runs.
             </p>
         </div>
         @can('create', \App\Modules\CRM\Models\BrandPreference::class)
@@ -12,8 +13,14 @@
     </div>
 
     @if ($preferences->isEmpty())
-        <x-states.empty title="No brand preferences recorded">
-            Record which brands this creator prefers — and which they will not work with.
+        <x-states.empty title="No brand preferences yet">
+            Record brands this creator prefers — and brands they refuse. Refused brands are
+            blocked automatically.
+            <x-slot:action>
+                @can('create', \App\Modules\CRM\Models\BrandPreference::class)
+                    <x-ui.button size="sm" wire:click="add">Add preference</x-ui.button>
+                @endcan
+            </x-slot:action>
         </x-states.empty>
     @else
         <div class="divide-y divide-gray-100 dark:divide-gray-800">

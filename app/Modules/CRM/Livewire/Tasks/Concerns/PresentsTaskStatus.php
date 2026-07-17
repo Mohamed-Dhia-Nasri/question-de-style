@@ -8,8 +8,7 @@ use Carbon\CarbonImmutable;
 
 /**
  * Presentation helpers shared by the tasks surfaces. ENUM-TaskStatus has
- * no label() yet (the enum lives in Shared and is outside this step's
- * ownership) — same convention as the sibling enums' label() methods.
+ * its own label() (Shared) — statusLabel() below just delegates to it.
  */
 trait PresentsTaskStatus
 {
@@ -47,16 +46,10 @@ trait PresentsTaskStatus
             : null;
     }
 
-    /** Human-facing label (presentation only — ShipmentStatus convention). */
+    /** Human-facing label (presentation only — delegates to TaskStatus::label()). */
     public function statusLabel(TaskStatus $status): string
     {
-        return match ($status) {
-            TaskStatus::Open => 'Open',
-            TaskStatus::InProgress => 'In progress',
-            TaskStatus::Blocked => 'Blocked',
-            TaskStatus::Done => 'Done',
-            TaskStatus::Cancelled => 'Cancelled',
-        };
+        return $status->label();
     }
 
     /** Badge color per status (presentation only). */

@@ -29,4 +29,15 @@ enum SeedingType: string
             self::Organic => 'Organic',
         };
     }
+
+    /** One-line plain-language description (presentation only). */
+    public function description(): string
+    {
+        return match ($this) {
+            self::Gifting => 'Free product, no posting agreement.',
+            self::GiftingWithPost => 'Free product with an agreed post.',
+            self::PaidPlusProduct => 'Paid collaboration plus product.',
+            self::Organic => 'They bought or found it themselves — nothing was sent.',
+        };
+    }
 }

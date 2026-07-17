@@ -33,6 +33,14 @@ class SeedingCreatorsPanel extends Component
         $this->seedingCampaign = $seedingCampaign;
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'attach_creator_id' => 'creator',
+        ];
+    }
+
     public function attach(BrandRestrictionGuard $guard, AuditLogger $audit): void
     {
         $this->authorize('update', $this->seedingCampaign);
@@ -76,6 +84,18 @@ class SeedingCreatorsPanel extends Component
         }
 
         $this->authorize('update', $this->seedingCampaign);
+
+        $shipmentCount = $this->seedingCampaign->shipments()
+            ->where('creator_id', $this->confirmingDetachId)
+            ->count();
+
+        if ($shipmentCount > 0) {
+            $this->confirmingDetachId = null;
+
+            throw ValidationException::withMessages([
+                'detach' => "This creator has {$shipmentCount} shipment(s) on this run — delete those shipments first.",
+            ]);
+        }
 
         $this->seedingCampaign->creators()->detach($this->confirmingDetachId);
 

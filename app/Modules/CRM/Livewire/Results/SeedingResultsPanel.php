@@ -62,7 +62,7 @@ class SeedingResultsPanel extends Component
     private function costReason(string $noDivisorReason): string
     {
         return $this->seedingCampaign->spend === null
-            ? 'Requires agency-entered spend (AC-M3-015) — no spend is recorded for this seeding run.'
+            ? 'No spend entered for this seeding run yet — add it when editing the run.'
             : $noDivisorReason;
     }
 

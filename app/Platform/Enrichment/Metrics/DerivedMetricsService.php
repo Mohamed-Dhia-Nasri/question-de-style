@@ -4,6 +4,7 @@ namespace App\Platform\Enrichment\Metrics;
 
 use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Campaign;
+use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\Mention;
@@ -34,9 +35,13 @@ use Carbon\CarbonImmutable;
  * Follower growth (AC-M1-008/021) is reconstructed from ordered own-DB
  * MetricSnapshots (ADR-0003) as the difference across the window.
  *
- * NO canonical formula exists for posting frequency or engagement trend —
- * those boundaries return NULL (unavailable) and are reported as missing
- * decisions; do not invent formulas here.
+ * Engagement trend (MET-EngagementTrend) is canonical per ADR-0024: mean
+ * observed likes+comments per post, last N days vs the N days before, as
+ * a whole signed percent (N is the per-tenant trend window, ADR-0025).
+ *
+ * NO canonical formula exists for posting frequency (ADR-0024 explicitly
+ * leaves it undecided) — that boundary returns NULL (unavailable); do not
+ * invent one here.
  */
 class DerivedMetricsService
 {
@@ -208,12 +213,75 @@ class DerivedMetricsService
     }
 
     /**
-     * NO canonical formula exists — unavailable until a doc amendment
-     * defines it. Flagged missing formula; do not invent one here.
+     * ADR-0024: rolling-window engagement trend for a creator across all
+     * their platform accounts. Content with NEITHER likes nor comments
+     * observed is excluded (missing is never zero); a single observed
+     * component counts as-is. NULL when either window has no included
+     * content or the previous average is zero — never a fabricated figure.
      */
-    public function engagementTrend(PlatformAccount $account, CarbonImmutable $from, CarbonImmutable $to): ?MetricValue
+    public function engagementTrend(Creator $creator, int $windowDays): ?EngagementTrend
     {
-        return null;
+        $now = CarbonImmutable::now();
+        $currentStart = $now->subDays($windowDays);
+        $previousStart = $now->subDays($windowDays * 2);
+
+        $items = ContentItem::query()
+            ->whereIn('platform_account_id', $creator->platformAccounts()->select('id'))
+            ->where('published_at', '>=', $previousStart)
+            ->where('published_at', '<', $now)
+            ->get();
+
+        $current = [];
+        $previous = [];
+
+        foreach ($items as $item) {
+            $engagement = $this->observedEngagement($item);
+
+            if ($engagement === null || $item->published_at === null) {
+                continue;
+            }
+
+            if ($item->published_at->greaterThanOrEqualTo($currentStart)) {
+                $current[] = $engagement;
+            } else {
+                $previous[] = $engagement;
+            }
+        }
+
+        if ($current === [] || $previous === []) {
+            return null;
+        }
+
+        $currentAverage = array_sum($current) / count($current);
+        $previousAverage = array_sum($previous) / count($previous);
+
+        if ($previousAverage <= 0.0) {
+            return null;
+        }
+
+        return new EngagementTrend(
+            currentAverage: $currentAverage,
+            previousAverage: $previousAverage,
+            percentChange: (int) round(($currentAverage - $previousAverage) / $previousAverage * 100),
+            currentCount: count($current),
+            previousCount: count($previous),
+        );
+    }
+
+    /**
+     * Sum of the OBSERVED likes/comments of one item; null when neither is
+     * observed (such an item contributes nothing — missing is never zero).
+     */
+    private function observedEngagement(ContentItem $content): ?float
+    {
+        $likes = $this->publicAmount($content, 'likes');
+        $comments = $this->publicAmount($content, 'comments');
+
+        if ($likes === null && $comments === null) {
+            return null;
+        }
+
+        return ($likes ?? 0.0) + ($comments ?? 0.0);
     }
 
     /** Count of SEEDED-classified mentions in a period (seeded-post count). */

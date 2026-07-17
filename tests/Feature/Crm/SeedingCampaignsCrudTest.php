@@ -132,7 +132,8 @@ class SeedingCampaignsCrudTest extends TestCase
             ->set('seeding_campaign_id', (string) $campaign->id)
             ->set('seeding_status', SeedingCampaignStatus::Planned->value)
             ->call('save')
-            ->assertHasNoErrors();
+            ->assertHasNoErrors()
+            ->assertDispatched('notify', message: 'Seeding run created.');
 
         $seeding = SeedingCampaign::where('name', 'Herbst Gifting')->firstOrFail();
         // AC-M3-010: exactly one of the four variants + a closed-set status.

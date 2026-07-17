@@ -3,8 +3,8 @@
         <div>
             <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Shipments</h3>
             <p class="mt-0.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                Manual status updates are always supported (courier APIs are optional). Posted state
-                is derived from matched content (REQ-M3-008) — link or unlink content per shipment.
+                Update each shipment’s status by hand as it moves. “Posted” fills in automatically
+                when content is linked to the shipment.
             </p>
         </div>
 
@@ -15,7 +15,12 @@
 
     @if ($shipments->isEmpty())
         <x-states.empty title="No shipments yet">
-            Create a shipment for one of the seeded creators — the product is the aggregation key.
+            A shipment sends one product to one creator on this run’s roster.
+            <x-slot:action>
+                @can('create', \App\Modules\CRM\Models\Shipment::class)
+                    <x-ui.button size="sm" wire:click="create">New shipment</x-ui.button>
+                @endcan
+            </x-slot:action>
         </x-states.empty>
     @else
         <div class="overflow-x-auto">
@@ -43,8 +48,8 @@
                                 {{ $shipment->product->name }}
                                 @if ($shipment->product_value_at_ship)
                                     <span class="text-theme-xs text-gray-400">
-                                        ({{ number_format($shipment->product_value_at_ship->amount, 2, ',', '.') }}
-                                        <x-ui.badge color="light" size="sm">{{ $shipment->product_value_at_ship->tier->value }}</x-ui.badge>)
+                                        ({{ number_format($shipment->product_value_at_ship->amount, 2, ',', '.') }} {{ app(\App\Shared\Support\TenantCurrency::class)->code() }}
+                                        <x-metric.tier-badge :tier="$shipment->product_value_at_ship->tier" />)
                                     </span>
                                 @endif
                             </td>
@@ -71,7 +76,7 @@
                                         @foreach ($shipment->resultingContent as $content)
                                             <span class="flex items-center gap-2 text-theme-xs text-gray-500 dark:text-gray-400"
                                                 wire:key="link-{{ $shipment->id }}-{{ $content->id }}">
-                                                <x-ui.badge color="light" size="sm">{{ $content->platform->value }}</x-ui.badge>
+                                                <x-ui.badge color="light" size="sm">{{ $content->platform->label() }}</x-ui.badge>
                                                 <span class="max-w-[10rem] truncate" title="{{ $content->caption }}">
                                                     {{ $content->external_id }}
                                                 </span>
@@ -145,13 +150,15 @@
                 </div>
 
                 <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                    <div>
+                    <div x-data="{ s: @js($shipment_status), map: @js($statusDescriptions) }">
                         <x-form.label for="shipment_status" required>Status</x-form.label>
-                        <x-form.select id="shipment_status" wire:model="shipment_status" :error="$errors->has('shipment_status')">
+                        <x-form.select id="shipment_status" wire:model="shipment_status" x-on:change="s = $event.target.value"
+                            :error="$errors->has('shipment_status')">
                             @foreach ($statuses as $statusOption)
                                 <option value="{{ $statusOption->value }}">{{ $statusOption->label() }}</option>
                             @endforeach
                         </x-form.select>
+                        <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
                         <x-form.error for="shipment_status" />
                     </div>
 
@@ -188,11 +195,11 @@
                     </div>
 
                     <div>
-                        <x-form.label for="shipment_value">Value of goods</x-form.label>
+                        <x-form.label for="shipment_value">Value of goods ({{ app(\App\Shared\Support\TenantCurrency::class)->code() }})</x-form.label>
                         <x-form.input id="shipment_value" wire:model="shipment_value" type="number" step="0.01" min="0"
                             :error="$errors->has('shipment_value')" />
                         <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                            Manual agency input — stored at tier CONFIRMED.
+                            What the product was worth when it shipped.
                         </p>
                         <x-form.error for="shipment_value" />
                     </div>
@@ -221,13 +228,13 @@
                         <option value="">Select the recipient's content…</option>
                         @foreach ($linkableContent as $contentOption)
                             <option value="{{ $contentOption->id }}">
-                                [{{ $contentOption->platform->value }}] {{ $contentOption->external_id }} — {{ $contentOption->published_at?->format('d.m.Y') ?? 'undated' }}
+                                [{{ $contentOption->platform->label() }}] {{ $contentOption->external_id }} — {{ $contentOption->published_at?->format('d.m.Y') ?? 'undated' }}
                             </option>
                         @endforeach
                     </x-form.select>
                     <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                        The operator confirms this content resulted from the shipment (XMC-002); the
-                        posted state and campaign attribution update accordingly.
+                        Link a post to this shipment when the creator publishes it — that’s how
+                        results and “posted” status are counted.
                     </p>
                     <x-form.error for="link_content_id" />
                 </div>

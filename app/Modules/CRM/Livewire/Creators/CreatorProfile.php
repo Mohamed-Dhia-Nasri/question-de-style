@@ -12,7 +12,9 @@ use Livewire\Component;
 
 /**
  * Creator profile — identity card (spec §2.4): the creator's own fields,
- * including the editable ENUM-RelationshipStatus stage (REQ-M3-004). The
+ * including the editable ENUM-RelationshipStatus stage (REQ-M3-004). Display-
+ * first (Stage B): the card renders read-only text until `edit()` opens the
+ * form; `save()` returns it to read-only on success. The
  * account/contact/preference/log panels are sibling Livewire components on
  * the same page. There is deliberately NO merge or reassign control here
  * (ADR-0014). Creator writes route through CreatorWriter.
@@ -27,6 +29,8 @@ class CreatorProfile extends Component
 
     public Creator $creator;
 
+    public bool $editing = false;
+
     public string $display_name = '';
 
     public string $primary_language = '';
@@ -39,6 +43,16 @@ class CreatorProfile extends Component
 
         $this->creator = $creator;
         $this->fillForm();
+    }
+
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'display_name' => 'display name',
+            'primary_language' => 'primary language',
+            'relationship_status' => 'relationship status',
+        ];
     }
 
     public function save(CreatorWriter $writer): void
@@ -62,13 +76,22 @@ class CreatorProfile extends Component
 
         $this->creator->refresh();
         $this->fillForm();
+        $this->editing = false;
         $this->dispatch('notify', type: 'success', message: 'Creator updated.');
     }
 
-    public function resetToCurrent(): void
+    public function edit(): void
+    {
+        $this->authorize('update', $this->creator);
+
+        $this->editing = true;
+    }
+
+    public function cancelEdit(): void
     {
         $this->resetValidation();
         $this->fillForm();
+        $this->editing = false;
     }
 
     protected function fillForm(): void
@@ -82,6 +105,9 @@ class CreatorProfile extends Component
     {
         return view('livewire.crm.creator-profile', [
             'statuses' => RelationshipStatus::cases(),
+            'statusDescriptions' => collect(RelationshipStatus::cases())
+                ->mapWithKeys(fn ($s) => [$s->value => $s->description()])
+                ->all(),
         ]);
     }
 }

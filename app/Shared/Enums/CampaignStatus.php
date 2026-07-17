@@ -27,4 +27,17 @@ enum CampaignStatus: string
             self::Cancelled => 'Cancelled',
         };
     }
+
+    /** One-line plain-language description (presentation only). */
+    public function description(): string
+    {
+        return match ($this) {
+            self::Draft => 'Being set up — not counted in results yet.',
+            self::Planned => 'Ready to go — waiting for the start date.',
+            self::Active => 'Running now — content and results are tracked.',
+            self::Paused => 'On hold — nothing new starts.',
+            self::Completed => 'Finished — results are final.',
+            self::Cancelled => 'Called off — kept for the records.',
+        };
+    }
 }

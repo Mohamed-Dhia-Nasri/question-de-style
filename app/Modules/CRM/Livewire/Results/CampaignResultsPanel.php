@@ -56,7 +56,7 @@ class CampaignResultsPanel extends Component
     private function costReason(null|string|int|float $divisor, string $noDivisorReason): string
     {
         return $this->campaign->spend === null
-            ? 'Requires agency-entered spend (AC-M3-015) — no spend is recorded for this campaign.'
+            ? 'No spend entered for this campaign yet — add it when editing the campaign.'
             : $noDivisorReason;
     }
 

@@ -11,4 +11,14 @@ enum Platform: string
     case Instagram = 'INSTAGRAM';
     case TikTok = 'TIKTOK';
     case YouTube = 'YOUTUBE';
+
+    /** Human-facing label (presentation only — same convention as RoleName). */
+    public function label(): string
+    {
+        return match ($this) {
+            self::Instagram => 'Instagram',
+            self::TikTok => 'TikTok',
+            self::YouTube => 'YouTube',
+        };
+    }
 }

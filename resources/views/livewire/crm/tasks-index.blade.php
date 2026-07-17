@@ -69,9 +69,21 @@
         </x-slot:header>
 
         @if ($tasks->isEmpty())
-            <x-states.empty title="No tasks found">
-                Tasks track deadlines and follow-ups — optionally linked to a creator or campaign.
-            </x-states.empty>
+            @if ($search !== '' || $status !== '' || $assigneeFilter !== '' || $dueWindow !== '')
+                <x-states.empty title="No tasks match your filters">
+                    Try adjusting or clearing the search and filters above.
+                </x-states.empty>
+            @else
+                <x-states.empty title="No tasks yet">
+                    Deadlines and follow-ups — link them to a creator or campaign and you’ll get a
+                    reminder before they’re due.
+                    <x-slot:action>
+                        @can('create', \App\Modules\CRM\Models\Task::class)
+                            <x-ui.button size="sm" wire:click="create">New task</x-ui.button>
+                        @endcan
+                    </x-slot:action>
+                </x-states.empty>
+            @endif
         @else
             <table class="w-full min-w-[900px]">
                 <thead>
@@ -163,13 +175,15 @@
                 </div>
 
                 <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                    <div>
+                    <div x-data="{ s: @js($task_status), map: @js($statusDescriptions) }">
                         <x-form.label for="task_status" required>Status</x-form.label>
-                        <x-form.select id="task_status" wire:model="task_status" :error="$errors->has('task_status')">
+                        <x-form.select id="task_status" wire:model="task_status" x-on:change="s = $event.target.value"
+                            :error="$errors->has('task_status')">
                             @foreach ($statuses as $statusOption)
                                 <option value="{{ $statusOption->value }}">{{ $this->statusLabel($statusOption) }}</option>
                             @endforeach
                         </x-form.select>
+                        <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
                         <x-form.error for="task_status" />
                     </div>
 
@@ -191,7 +205,7 @@
                     <x-form.input id="task_due_at" wire:model="task_due_at" type="datetime-local"
                         :error="$errors->has('task_due_at')" />
                     <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                        A dated task fires a one-time reminder as the deadline nears (AC-M3-017).
+                        You’ll get a one-time reminder shortly before the deadline.
                     </p>
                     <x-form.error for="task_due_at" />
                 </div>

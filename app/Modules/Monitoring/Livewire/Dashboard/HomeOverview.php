@@ -4,13 +4,13 @@ namespace App\Modules\Monitoring\Livewire\Dashboard;
 
 use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\SeedingCampaign;
+use App\Modules\CRM\Services\ActiveSeedingCreatorIds;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\Mention;
 use App\Modules\Monitoring\Models\MonitoredSubject;
 use App\Platform\Analytics\RollupReader;
 use App\Shared\Enums\CampaignStatus;
 use App\Shared\Enums\MonitoredSubjectType;
-use App\Shared\Enums\SeedingCampaignStatus;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Carbon;
 use Livewire\Component;
@@ -49,10 +49,7 @@ class HomeOverview extends Component
             ->count();
 
         $activeSeedingRuns = SeedingCampaign::query()
-            ->whereIn('status', [
-                SeedingCampaignStatus::Active->value,
-                SeedingCampaignStatus::Shipping->value,
-            ])
+            ->whereIn('status', ActiveSeedingCreatorIds::statusValues())
             ->count();
 
         $mentionTotals = $rollups->mentionTotals($since);

@@ -4,6 +4,7 @@ namespace Tests\Feature\Enrichment;
 
 use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Campaign;
+use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\Mention;
@@ -260,15 +261,95 @@ class MetricsAndReachTest extends TestCase
         $this->assertNull($growth);
     }
 
-    public function test_posting_frequency_and_engagement_trend_are_unavailable(): void
+    public function test_posting_frequency_stays_unavailable(): void
     {
         $account = PlatformAccount::factory()->create();
-        $from = CarbonImmutable::parse('2026-06-01');
-        $to = CarbonImmutable::parse('2026-07-01');
 
-        // No canonical formula exists — NULL (unavailable), never invented.
-        $this->assertNull($this->metrics->postingFrequency($account, $from, $to));
-        $this->assertNull($this->metrics->engagementTrend($account, $from, $to));
+        // ADR-0024 explicitly leaves posting frequency undecided — NULL
+        // (unavailable), never invented.
+        $this->assertNull($this->metrics->postingFrequency(
+            $account,
+            CarbonImmutable::parse('2026-06-01'),
+            CarbonImmutable::parse('2026-07-01'),
+        ));
+    }
+
+    private function trendContent(PlatformAccount $account, int $daysAgo, ?float $likes, ?float $comments): ContentItem
+    {
+        $metrics = [];
+
+        if ($likes !== null) {
+            $metrics[] = new MetricValue($likes, MetricTier::Public, 'likes');
+        }
+
+        if ($comments !== null) {
+            $metrics[] = new MetricValue($comments, MetricTier::Public, 'comments');
+        }
+
+        return ContentItem::factory()->create([
+            'platform_account_id' => $account->id,
+            'platform' => $account->platform,
+            'published_at' => CarbonImmutable::now()->subDays($daysAgo),
+            'public_metrics' => $metrics,
+        ]);
+    }
+
+    public function test_engagement_trend_compares_the_two_rolling_windows(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-07-17 12:00:00'));
+
+        $creator = Creator::factory()->create();
+        $account = PlatformAccount::factory()->create(['creator_id' => $creator->id]);
+
+        // Previous window (30–60 days ago): averages (80+120)/2 = 100.
+        $this->trendContent($account, 45, likes: 70.0, comments: 10.0);
+        $this->trendContent($account, 40, likes: 100.0, comments: 20.0);
+        // Current window (0–30 days ago): averages (140+160)/2 = 150.
+        $this->trendContent($account, 10, likes: 130.0, comments: 10.0);
+        $this->trendContent($account, 5, likes: 150.0, comments: 10.0);
+        // Excluded: neither likes nor comments observed (missing ≠ zero).
+        $this->trendContent($account, 8, likes: null, comments: null);
+
+        $trend = $this->metrics->engagementTrend($creator->fresh(), 30);
+
+        $this->assertNotNull($trend);
+        $this->assertEqualsWithDelta(150.0, $trend->currentAverage, 1e-9);
+        $this->assertEqualsWithDelta(100.0, $trend->previousAverage, 1e-9);
+        $this->assertSame(50, $trend->percentChange);
+        $this->assertSame(2, $trend->currentCount);
+        $this->assertSame(2, $trend->previousCount);
+    }
+
+    public function test_engagement_trend_counts_a_single_observed_component(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-07-17 12:00:00'));
+
+        $creator = Creator::factory()->create();
+        $account = PlatformAccount::factory()->create(['creator_id' => $creator->id]);
+
+        $this->trendContent($account, 40, likes: 100.0, comments: null); // previous avg 100
+        $this->trendContent($account, 10, likes: null, comments: 90.0);  // current avg 90
+
+        $trend = $this->metrics->engagementTrend($creator->fresh(), 30);
+
+        $this->assertNotNull($trend);
+        $this->assertSame(-10, $trend->percentChange);
+    }
+
+    public function test_engagement_trend_is_unavailable_without_both_windows_or_with_zero_base(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-07-17 12:00:00'));
+
+        $creator = Creator::factory()->create();
+        $account = PlatformAccount::factory()->create(['creator_id' => $creator->id]);
+
+        // Only current-window content → no comparison base.
+        $this->trendContent($account, 10, likes: 100.0, comments: null);
+        $this->assertNull($this->metrics->engagementTrend($creator->fresh(), 30));
+
+        // Previous window exists but averages zero → division base is zero.
+        $this->trendContent($account, 40, likes: 0.0, comments: null);
+        $this->assertNull($this->metrics->engagementTrend($creator->fresh(), 30));
     }
 
     // ── Mention counts ──────────────────────────────────────────────────

@@ -24,9 +24,21 @@
         </x-slot:header>
 
         @if ($clients->isEmpty())
-            <x-states.empty title="No clients yet">
-                Clients are the top of the client → brand → product hierarchy.
-            </x-states.empty>
+            @if ($search !== '')
+                <x-states.empty title="No clients match your search">
+                    Try a different search term.
+                </x-states.empty>
+            @else
+                <x-states.empty title="No clients yet">
+                    A client is the company your agency works for — brands, products, and campaigns
+                    all hang off a client.
+                    <x-slot:action>
+                        @can('create', \App\Modules\CRM\Models\Client::class)
+                            <x-ui.button size="sm" wire:click="create">New client</x-ui.button>
+                        @endcan
+                    </x-slot:action>
+                </x-states.empty>
+            @endif
         @else
             <table class="w-full min-w-[700px]">
                 <thead>
@@ -38,11 +50,18 @@
                         <x-table.th><span class="sr-only">Actions</span></x-table.th>
                     </tr>
                 </thead>
-                <tbody wire:loading.class="pointer-events-none opacity-50"
-                    class="divide-y divide-gray-100 transition-opacity dark:divide-gray-800">
-                    @foreach ($clients as $client)
-                        <tr wire:key="client-{{ $client->id }}">
-                            <td class="px-5 py-4 text-sm font-medium text-gray-800 dark:text-white/90">{{ $client->name }}</td>
+                @foreach ($clients as $client)
+                    <tbody x-data="{ open: false }" wire:key="client-{{ $client->id }}"
+                        wire:loading.class="pointer-events-none opacity-50"
+                        class="divide-y divide-gray-100 transition-opacity dark:divide-gray-800 [&:not(:first-of-type)]:border-t [&:not(:first-of-type)]:border-gray-100 dark:[&:not(:first-of-type)]:border-gray-800">
+                        <tr>
+                            <td class="px-5 py-4">
+                                <button type="button" x-on:click="open = !open" :aria-expanded="open"
+                                    class="flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-white/90">
+                                    <svg :class="open ? 'rotate-90' : ''" class="h-4 w-4 shrink-0 text-gray-400 transition-transform" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                    {{ $client->name }}
+                                </button>
+                            </td>
                             <td class="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{{ \App\Shared\Enums\Country::labelFor($client->country) ?? '—' }}</td>
                             <td class="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{{ $client->brands_count }}</td>
                             <td class="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{{ $client->created_at->format('d.m.Y') }}</td>
@@ -59,8 +78,26 @@
                                 </div>
                             </td>
                         </tr>
-                    @endforeach
-                </tbody>
+                        <tr x-show="open" x-cloak>
+                            <td colspan="5" class="bg-gray-50 px-5 py-3 dark:bg-white/[0.02]">
+                                @if ($client->brands->isEmpty())
+                                    <p class="text-sm text-gray-500 dark:text-gray-400">No brands yet — create one on the <a href="{{ route('crm.brands.index') }}" class="font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">Brands page</a>.</p>
+                                @else
+                                    <ul class="flex flex-wrap gap-x-6 gap-y-1.5">
+                                        @foreach ($client->brands as $brand)
+                                            <li>
+                                                <a href="{{ route('crm.brands.show', $brand) }}" class="text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">{{ $brand->name }}</a>
+                                                @if ($brand->sector)
+                                                    <span class="text-theme-xs text-gray-400">· {{ $brand->sector->label() }}</span>
+                                                @endif
+                                            </li>
+                                        @endforeach
+                                    </ul>
+                                @endif
+                            </td>
+                        </tr>
+                    </tbody>
+                @endforeach
             </table>
         @endif
 

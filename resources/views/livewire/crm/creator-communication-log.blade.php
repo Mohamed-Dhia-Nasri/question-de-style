@@ -3,7 +3,8 @@
         <div>
             <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Communication log</h3>
             <p class="mt-0.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                Relationship history (REQ-M3-004): outreach and replies, newest first.
+                The conversation history with this creator — outreach and replies, newest
+                first.
             </p>
         </div>
         @can('create', \App\Modules\CRM\Models\CommunicationLog::class)
@@ -12,8 +13,13 @@
     </div>
 
     @if ($logs->isEmpty())
-        <x-states.empty title="No communication logged yet">
-            Log the first outreach, call, or reply to start this creator's relationship history.
+        <x-states.empty title="No conversations logged yet">
+            Keep the relationship history — outreach, replies, calls.
+            <x-slot:action>
+                @can('create', \App\Modules\CRM\Models\CommunicationLog::class)
+                    <x-ui.button size="sm" wire:click="add">Log entry</x-ui.button>
+                @endcan
+            </x-slot:action>
         </x-states.empty>
     @else
         <div class="overflow-x-auto">

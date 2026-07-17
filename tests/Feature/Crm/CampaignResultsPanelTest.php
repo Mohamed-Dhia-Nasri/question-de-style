@@ -166,9 +166,11 @@ class CampaignResultsPanelTest extends TestCase
             // assertSee('50') would also match the '500' views value
             // (deep-review L5).
             ->assertSeeHtml('>50</span>')
-            ->assertSee('PUBLIC')
-            ->assertSee('DERIVED')
-            ->assertSee($this->run->name); // per-run totals row
+            ->assertSee('From platform')
+            ->assertSee('Calculated')
+            ->assertSee($this->run->name) // per-run totals row
+            // Run name is a link back to its record (Stage B Task 8).
+            ->assertSee(route('crm.seeding.show', $this->run), false);
     }
 
     public function test_cpe_and_cpm_compute_from_agency_spend_at_display_time(): void
@@ -181,7 +183,7 @@ class CampaignResultsPanelTest extends TestCase
         Livewire::test(CampaignResultsPanel::class, ['campaign' => $this->campaign])
             ->assertSee('10.00')
             ->assertSee('1,000.00')
-            ->assertSee('DERIVED');
+            ->assertSee('Calculated');
     }
 
     public function test_cpe_and_cpm_are_unavailable_without_spend(): void
@@ -190,7 +192,7 @@ class CampaignResultsPanelTest extends TestCase
         $this->seedResults();
 
         Livewire::test(CampaignResultsPanel::class, ['campaign' => $this->campaign])
-            ->assertSee('Requires agency-entered spend (AC-M3-015)');
+            ->assertSee('No spend entered for this campaign yet');
     }
 
     public function test_cpe_is_unavailable_with_no_observed_engagement_never_zero_or_infinity(): void
@@ -214,8 +216,8 @@ class CampaignResultsPanelTest extends TestCase
         // the tile is honest about "not yet" (REQ-M1-006) — never DEF-003,
         // and the retired "True unique reach" placeholder tile is gone.
         Livewire::test(CampaignResultsPanel::class, ['campaign' => $this->campaign])
-            ->assertSee('No estimated reach for this campaign yet')
-            ->assertSee('REQ-M1-006')
+            ->assertSee('No estimated reach yet')
+            ->assertSee('Settings → Reach')
             ->assertDontSee('DEF-003')
             ->assertDontSee('True unique reach');
     }
@@ -230,19 +232,24 @@ class CampaignResultsPanelTest extends TestCase
 
         // Nothing computed anywhere: the disclosure says so explicitly.
         Livewire::test(CampaignResultsPanel::class, ['campaign' => $this->campaign])
-            ->assertSee('no EMV has been computed');
+            ->assertSee('No EMV yet');
 
-        // A figure produced under "Benchmark 2026"...
-        $producing = EmvConfiguration::factory()->create(['name' => 'Benchmark 2026']);
+        // A figure produced under "Benchmark 2026"... Distinct currencies
+        // (not the factory's default 'EUR' for both) so the disclosure's
+        // currency assertion actually discriminates producing vs. active
+        // (deep-review follow-up: a $producing->currency assertion is
+        // inert when both configurations share the same hardcoded value).
+        $producing = EmvConfiguration::factory()->create(['name' => 'Benchmark 2026', 'currency' => 'USD']);
         $this->makeEmvResult(ContentItem::factory()->create(), $producing);
 
         // ...stays disclosed as such even after a NEWER model becomes the
         // active one without any recalculation.
-        $active = EmvConfiguration::factory()->active()->create(['name' => 'Benchmark 2027']);
+        $active = EmvConfiguration::factory()->active()->create(['name' => 'Benchmark 2027', 'currency' => 'GBP']);
 
         Livewire::test(CampaignResultsPanel::class, ['campaign' => $this->campaign])
             ->assertSee('Benchmark 2026')
-            ->assertSee($producing->rate_card_version)
+            ->assertSee('USD')
+            ->assertDontSee('GBP')
             ->assertDontSee('Benchmark 2027');
 
         // Once a figure IS produced under the newer model, both producing
@@ -252,7 +259,7 @@ class CampaignResultsPanelTest extends TestCase
         Livewire::test(CampaignResultsPanel::class, ['campaign' => $this->campaign])
             ->assertSee('Benchmark 2026')
             ->assertSee('Benchmark 2027')
-            ->assertSee('span 2 rate cards');
+            ->assertSee('use 2 different rate cards');
     }
 
     private function makeEmvResult(ContentItem $content, EmvConfiguration $configuration): EmvResult

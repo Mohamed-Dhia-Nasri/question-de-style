@@ -33,6 +33,14 @@ class CampaignCreatorsPanel extends Component
         $this->campaign = $campaign;
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'attach_creator_id' => 'creator',
+        ];
+    }
+
     public function attach(BrandRestrictionGuard $guard, AuditLogger $audit): void
     {
         $this->authorize('update', $this->campaign);

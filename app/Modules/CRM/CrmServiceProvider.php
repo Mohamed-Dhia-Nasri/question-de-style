@@ -8,6 +8,7 @@ use App\Modules\CRM\Console\GdprEraseCreatorCommand;
 use App\Modules\CRM\Console\GdprExportCreatorCommand;
 use App\Modules\CRM\Console\SendTaskRemindersCommand;
 use App\Modules\CRM\Contracts\CreatorProposals;
+use App\Modules\CRM\Livewire\Brands\BrandDetail;
 use App\Modules\CRM\Livewire\Brands\BrandsIndex;
 use App\Modules\CRM\Livewire\Campaigns\CampaignCreatorsPanel;
 use App\Modules\CRM\Livewire\Campaigns\CampaignsIndex;
@@ -18,6 +19,7 @@ use App\Modules\CRM\Livewire\Creators\ContactsPanel;
 use App\Modules\CRM\Livewire\Creators\CreatorProfile;
 use App\Modules\CRM\Livewire\Creators\CreatorsIndex;
 use App\Modules\CRM\Livewire\Creators\GeographyPanel;
+use App\Modules\CRM\Livewire\Creators\ParticipationPanel;
 use App\Modules\CRM\Livewire\Creators\PlatformAccountsPanel;
 use App\Modules\CRM\Livewire\Documents\DocumentsPanel;
 use App\Modules\CRM\Livewire\Products\ProductsIndex;
@@ -114,6 +116,7 @@ class CrmServiceProvider extends ServiceProvider
         // Livewire; UsersIndex is the reference CRUD pattern).
         Livewire::component('crm.creators-index', CreatorsIndex::class);
         Livewire::component('crm.creator-profile', CreatorProfile::class);
+        Livewire::component('crm.creator-participation', ParticipationPanel::class);
         Livewire::component('crm.creator-platform-accounts', PlatformAccountsPanel::class);
         Livewire::component('crm.creator-contacts', ContactsPanel::class);
         Livewire::component('crm.creator-brand-preferences', BrandPreferencesPanel::class);
@@ -124,6 +127,7 @@ class CrmServiceProvider extends ServiceProvider
         // (REQ-M3-005/006/007 + the operator half of REQ-M3-008).
         Livewire::component('crm.clients-index', ClientsIndex::class);
         Livewire::component('crm.brands-index', BrandsIndex::class);
+        Livewire::component('crm.brand-detail', BrandDetail::class);
         Livewire::component('crm.products-index', ProductsIndex::class);
         Livewire::component('crm.campaigns-index', CampaignsIndex::class);
         Livewire::component('crm.campaign-creators', CampaignCreatorsPanel::class);

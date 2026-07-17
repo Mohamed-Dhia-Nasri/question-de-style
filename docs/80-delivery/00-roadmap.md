@@ -432,18 +432,8 @@ decision or its relevant canonical file. These are **not yet scheduled work**
 and carry no `REQ-*`. Detailed engineering context for all three lives in the
 enrichment review handoff `reviews/REVIEW-module1-enrichment-2026-07-05.md`.
 
-1. **Isolate `PAID` from the QDS organic-seeding workflow.** QDS works only with
-   unpaid organic product seeding, yet
-   [`ENUM-MentionType`](../00-meta/03-glossary.md#enum-mentiontype) retains
-   `PAID` for shared-enum compatibility. Decide and document whether `PAID` is
-   removed from the QDS classification path entirely or kept only as an inert
-   compatibility value that QDS never asserts — it is currently produced only
-   from a platform paid-partnership label
-   ([AC-M1-003](../50-modules/module-1-monitoring.md#ac-m1-003)), never inferred.
-   Fold the outcome into the
-   [Module 1 spec](../50-modules/module-1-monitoring.md) and, if it changes the
-   enum's meaning, the
-   [glossary](../00-meta/03-glossary.md#enum-mentiontype).
+1. **Isolate `PAID` from the QDS organic-seeding workflow.**
+   **Resolved by [ADR-0026](../05-decisions/decision-log.md#adr-0026)** — PAID is kept as an inert compatibility value, asserted only from a platform paid-partnership label, never inferred.
 
 2. **State that EMV rates are user-managed.**
    [`REQ-M1-011`](../50-modules/module-1-monitoring.md) /
@@ -461,6 +451,7 @@ enrichment review handoff `reviews/REVIEW-module1-enrichment-2026-07-05.md`.
    `RUNNING` runs as failed so the target becomes eligible again. This belongs to
    **P4 — Hardening** (data-quality / operational monitoring), alongside the
    existing scraper-health work.
+   **Delivered** — the stale-run reaper ships in the data-quality monitor (P4), and [ADR-0023](../05-decisions/decision-log.md#adr-0023) makes the sweep the recovery backstop it feeds.
 
 4. **Live-verify the Google AI sources.** The recognition clients and
    normalizers for

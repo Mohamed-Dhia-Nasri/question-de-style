@@ -22,6 +22,7 @@ class SettingsNavTest extends TestCase
         $res->assertOk();
         $res->assertSee(route('settings.emv'));
         $res->assertSee(route('settings.reach'));
+        $res->assertSee(route('settings.monitoring'));
     }
 
     public function test_client_viewer_does_not_see_settings_links(): void

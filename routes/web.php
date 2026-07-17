@@ -30,6 +30,7 @@ Route::middleware(['auth', 'can:'.PermissionsCatalog::SETTINGS_VIEW, 'subscribed
     ->prefix('settings')->as('settings.')->group(function () {
         Route::view('/emv', 'settings.emv')->name('emv');
         Route::view('/reach', 'settings.reach')->name('reach');
+        Route::view('/monitoring', 'settings.monitoring')->name('monitoring');
     });
 
 // Module areas (monitoring, discovery, crm, admin/users) are registered by

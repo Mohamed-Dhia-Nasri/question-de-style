@@ -33,9 +33,21 @@
         </x-slot:header>
 
         @if ($campaigns->isEmpty())
-            <x-states.empty title="No campaigns match your filters">
-                Create the first campaign with the "New campaign" button.
-            </x-states.empty>
+            @if ($search !== '' || $statusFilter !== '')
+                <x-states.empty title="No campaigns match your filters">
+                    Try adjusting or clearing the search and filters above.
+                </x-states.empty>
+            @else
+                <x-states.empty title="No campaigns yet">
+                    A campaign plans and measures work for one brand over a time period. You need
+                    a client and a brand first.
+                    <x-slot:action>
+                        @can('create', \App\Modules\CRM\Models\Campaign::class)
+                            <x-ui.button size="sm" wire:click="create">New campaign</x-ui.button>
+                        @endcan
+                    </x-slot:action>
+                </x-states.empty>
+            @endif
         @else
             <table class="w-full min-w-[900px]">
                 <thead>
@@ -43,7 +55,7 @@
                         <x-table.th field="name" :sort-field="$sortField" :sort-direction="$sortDirection">Name</x-table.th>
                         <x-table.th>Brand</x-table.th>
                         <x-table.th field="status" :sort-field="$sortField" :sort-direction="$sortDirection">Status</x-table.th>
-                        <x-table.th field="start_at" :sort-field="$sortField" :sort-direction="$sortDirection">Runs</x-table.th>
+                        <x-table.th field="start_at" :sort-field="$sortField" :sort-direction="$sortDirection">Dates</x-table.th>
                         <x-table.th>Creators</x-table.th>
                         <x-table.th><span class="sr-only">Actions</span></x-table.th>
                     </tr>
@@ -115,13 +127,15 @@
                         <x-form.error for="campaign_brand_id" />
                     </div>
 
-                    <div>
+                    <div x-data="{ s: @js($campaign_status), map: @js($statusDescriptions) }">
                         <x-form.label for="campaign_status" required>Status</x-form.label>
-                        <x-form.select id="campaign_status" wire:model="campaign_status" :error="$errors->has('campaign_status')">
+                        <x-form.select id="campaign_status" wire:model="campaign_status"
+                            x-on:change="s = $event.target.value" :error="$errors->has('campaign_status')">
                             @foreach ($statuses as $statusOption)
                                 <option value="{{ $statusOption->value }}">{{ $statusOption->label() }}</option>
                             @endforeach
                         </x-form.select>
+                        <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
                         <x-form.error for="campaign_status" />
                     </div>
                 </div>
@@ -143,11 +157,11 @@
                 </div>
 
                 <div>
-                    <x-form.label for="campaign_spend">Spend (agency input, CONFIRMED)</x-form.label>
+                    <x-form.label for="campaign_spend">Spend ({{ app(\App\Shared\Support\TenantCurrency::class)->code() }})</x-form.label>
                     <x-form.input id="campaign_spend" wire:model="campaign_spend" type="number" step="0.01" min="0"
                         :error="$errors->has('campaign_spend')" />
                     <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                        Manual agency input — stored at tier CONFIRMED; the CPE/CPM input on results.
+                        What you actually paid — used for the cost-per-result numbers on Results.
                     </p>
                     <x-form.error for="campaign_spend" />
                 </div>

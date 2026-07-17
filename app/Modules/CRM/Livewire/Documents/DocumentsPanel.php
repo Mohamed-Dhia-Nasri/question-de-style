@@ -85,6 +85,14 @@ class DocumentsPanel extends Component
         $this->showForm = true;
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'upload' => 'file',
+        ];
+    }
+
     public function save(AuditLogger $audit): void
     {
         $this->authorize('create', DocumentAttachment::class);

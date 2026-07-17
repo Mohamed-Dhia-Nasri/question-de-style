@@ -3,7 +3,8 @@
         <div>
             <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Seeded creators</h3>
             <p class="mt-0.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                Shipments can only go to creators attached here. Brand restrictions are enforced on join (AC-M3-007).
+                Shipments can only go to creators on this list. Creators who refuse this brand
+                are blocked automatically.
             </p>
         </div>
 
@@ -26,7 +27,8 @@
 
     @if ($attached->isEmpty())
         <x-states.empty title="No creators on this seeding run yet">
-            Attach the creators who receive product — restricted creators are blocked before commit.
+            Add the creators who will receive products — shipments can only go to creators on
+            this list.
         </x-states.empty>
     @else
         <ul class="divide-y divide-gray-100 dark:divide-gray-800">
@@ -47,11 +49,13 @@
         </ul>
     @endif
 
+    <x-form.error for="detach" class="px-6 pb-4" />
+
     @if ($confirmingDetachId !== null)
         <x-ui.confirm-modal title="Remove creator from seeding run?" confirm-action="detach" cancel-action="cancelDetach"
             confirm-label="Remove creator">
-            Existing shipments to this creator keep their history. The action is recorded in the
-            audit log.
+            Creators with shipments on this run can’t be removed — delete their shipments first.
+            The action is recorded in the audit log.
         </x-ui.confirm-modal>
     @endif
 </div>

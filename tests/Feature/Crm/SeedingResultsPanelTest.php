@@ -155,9 +155,12 @@ class SeedingResultsPanelTest extends TestCase
             ->assertSee('Posted')
             ->assertSee('10.0')        // days to post, DERIVED at the loader
             ->assertSee('500')
-            ->assertSee('PUBLIC')
-            ->assertSee('DERIVED')
-            ->assertSee($this->product->name);
+            ->assertSee('From platform')
+            ->assertSee('Calculated')
+            ->assertSee($this->product->name)
+            // Creator name is a link back to its record (Stage B Task 8) —
+            // both the per-creator and per-shipment rows use it.
+            ->assertSee(route('crm.creators.show', $this->creator->id), false);
     }
 
     public function test_cpe_and_cpm_compute_from_the_run_spend_at_display_time(): void
@@ -178,7 +181,7 @@ class SeedingResultsPanelTest extends TestCase
         $this->seedResults();
 
         Livewire::test(SeedingResultsPanel::class, ['seedingCampaign' => $this->run])
-            ->assertSee('Requires agency-entered spend (AC-M3-015)');
+            ->assertSee('No spend entered for this seeding run yet');
     }
 
     public function test_cpe_is_unavailable_with_no_observed_engagement_never_zero_or_infinity(): void
@@ -202,8 +205,8 @@ class SeedingResultsPanelTest extends TestCase
         // tile is honest about "not yet" (REQ-M1-006) — never DEF-003, and
         // the retired "True unique reach" placeholder tile is gone.
         Livewire::test(SeedingResultsPanel::class, ['seedingCampaign' => $this->run])
-            ->assertSee('No estimated reach for this run yet')
-            ->assertSee('REQ-M1-006')
+            ->assertSee('No estimated reach yet')
+            ->assertSee('Settings → Reach')
             ->assertDontSee('DEF-003')
             ->assertDontSee('True unique reach');
     }
@@ -217,7 +220,7 @@ class SeedingResultsPanelTest extends TestCase
         EmvConfiguration::factory()->active()->create(['name' => 'Benchmark 2027']);
 
         Livewire::test(SeedingResultsPanel::class, ['seedingCampaign' => $this->run])
-            ->assertSee('no EMV has been computed')
+            ->assertSee('No EMV yet')
             ->assertDontSee('Benchmark 2027');
 
         $producing = EmvConfiguration::factory()->create(['name' => 'Benchmark 2026']);
@@ -245,6 +248,6 @@ class SeedingResultsPanelTest extends TestCase
         Livewire::test(SeedingResultsPanel::class, ['seedingCampaign' => $this->run])
             ->assertSee('0 / 0')
             ->assertSee('No observed views for this seeding run')
-            ->assertSee('No shipment results in the rollups yet');
+            ->assertSee('No shipment results yet');
     }
 }

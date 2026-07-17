@@ -5,6 +5,7 @@ namespace App\Platform\Enrichment\Attribution;
 use App\Platform\Enrichment\Support\HashtagScope;
 use App\Shared\Enums\ConfidenceLevel;
 use App\Shared\Enums\MentionType;
+use App\Shared\Settings\MonitoringSettingsResolver;
 
 /**
  * Pure evidence-chain classifier for organic-seeding attribution
@@ -30,6 +31,14 @@ use App\Shared\Enums\MentionType;
  */
 class MentionClassifier
 {
+    /**
+     * One resolver per classifier instance: the resolver memoizes rows per
+     * tenant id and reads the ACTIVE TenantContext on every call, so reuse
+     * is tenant-safe even across runAs switches — while collapsing the
+     * per-shipment settings lookups into one query per tenant.
+     */
+    private ?MonitoringSettingsResolver $settings = null;
+
     public function classify(EvidenceBundle $evidence): ?ClassificationResult
     {
         $strongRecognitions = array_values(array_filter(
@@ -208,7 +217,7 @@ class MentionClassifier
             return false;
         }
 
-        $windowDays = max(1, (int) config('qds.enrichment.attribution.shipment_window_days'));
+        $windowDays = $this->shipmentWindowDays();
 
         return $evidence->publishedAt->lessThan($anchor)
             || $evidence->publishedAt->greaterThan($anchor->addDays($windowDays));
@@ -275,7 +284,7 @@ class MentionClassifier
             return false;
         }
 
-        $windowDays = max(1, (int) config('qds.enrichment.attribution.shipment_window_days'));
+        $windowDays = $this->shipmentWindowDays();
 
         foreach ($aligned as $shipment) {
             $anchor = $shipment->anchorDate();
@@ -291,5 +300,17 @@ class MentionClassifier
         }
 
         return false;
+    }
+
+    /**
+     * Per-tenant gift-link window (ADR-0025): enrichment always runs under
+     * TenantContext::runAs, so the active tenant's Settings → Monitoring
+     * value applies; tenant-less callers get the config default.
+     */
+    private function shipmentWindowDays(): int
+    {
+        $this->settings ??= app(MonitoringSettingsResolver::class);
+
+        return $this->settings->shipmentWindowDays();
     }
 }

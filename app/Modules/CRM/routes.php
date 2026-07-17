@@ -1,6 +1,7 @@
 <?php
 
 use App\Modules\CRM\Http\Controllers\DocumentDownloadController;
+use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\SeedingCampaign;
@@ -24,13 +25,18 @@ Route::middleware(['web', 'auth', 'can:'.PermissionsCatalog::CRM_VIEW, 'subscrib
         // (REQ-M3-005/006/007) + the operator half of content matching.
         Route::view('/clients', 'crm.clients')->name('clients.index');
         Route::view('/brands', 'crm.brands')->name('brands.index');
+        Route::get('/brands/{brand}', fn (Brand $brand) => view('crm.brand-detail', [
+            'brand' => $brand->load('client')->loadCount(['products', 'campaigns', 'seedingCampaigns']),
+        ]))->name('brands.show');
         Route::view('/products', 'crm.products')->name('products.index');
         Route::view('/campaigns', 'crm.campaigns')->name('campaigns.index');
-        Route::get('/campaigns/{campaign}', fn (Campaign $campaign) => view('crm.campaign-detail', ['campaign' => $campaign]))
-            ->name('campaigns.show');
+        Route::get('/campaigns/{campaign}', fn (Campaign $campaign) => view('crm.campaign-detail', [
+            'campaign' => $campaign->load('brand.client')->loadCount(['creators', 'seedingCampaigns']),
+        ]))->name('campaigns.show');
         Route::view('/seeding', 'crm.seeding')->name('seeding.index');
-        Route::get('/seeding/{seedingCampaign}', fn (SeedingCampaign $seedingCampaign) => view('crm.seeding-detail', ['seedingCampaign' => $seedingCampaign]))
-            ->name('seeding.show');
+        Route::get('/seeding/{seedingCampaign}', fn (SeedingCampaign $seedingCampaign) => view('crm.seeding-detail', [
+            'seedingCampaign' => $seedingCampaign->load(['brand.client', 'campaign', 'product'])->loadCount(['creators', 'shipments']),
+        ]))->name('seeding.show');
 
         // Step 4 — the cross-influencer product results dashboard
         // (REQ-M3-013, AC-M3-019). Results are rollup reads (ADR-0010):

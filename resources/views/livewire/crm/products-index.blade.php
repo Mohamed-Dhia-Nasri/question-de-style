@@ -24,9 +24,20 @@
         </x-slot:header>
 
         @if ($products->isEmpty())
-            <x-states.empty title="No products yet">
-                The product is the key that aggregates seeding results across many creators.
-            </x-states.empty>
+            @if ($search !== '')
+                <x-states.empty title="No products match your search">
+                    Try a different search term.
+                </x-states.empty>
+            @else
+                <x-states.empty title="No products yet">
+                    Products are what you send to creators. Each product belongs to a brand.
+                    <x-slot:action>
+                        @can('create', \App\Modules\CRM\Models\Product::class)
+                            <x-ui.button size="sm" wire:click="create">New product</x-ui.button>
+                        @endcan
+                    </x-slot:action>
+                </x-states.empty>
+            @endif
         @else
             <table class="w-full min-w-[900px]">
                 <thead>
@@ -34,9 +45,9 @@
                         <x-table.th field="name" :sort-field="$sortField" :sort-direction="$sortDirection">Name</x-table.th>
                         <x-table.th>Brand</x-table.th>
                         <x-table.th field="sku" :sort-field="$sortField" :sort-direction="$sortDirection">SKU</x-table.th>
-                        <x-table.th>Variant</x-table.th>
+                        <x-table.th>Product variant</x-table.th>
                         <x-table.th>Unit value</x-table.th>
-                        <x-table.th>Category</x-table.th>
+                        <x-table.th>Sector</x-table.th>
                         <x-table.th><span class="sr-only">Actions</span></x-table.th>
                     </tr>
                 </thead>
@@ -51,17 +62,17 @@
                             <td class="px-5 py-4">
                                 @if ($product->unit_value)
                                     <span class="text-sm text-gray-800 dark:text-white/90">
-                                        {{ number_format($product->unit_value->amount, 2, ',', '.') }}
+                                        {{ number_format($product->unit_value->amount, 2, ',', '.') }} {{ app(\App\Shared\Support\TenantCurrency::class)->code() }}
                                     </span>
                                     {{-- DP-001: the tier travels with the number. --}}
-                                    <x-ui.badge color="light" size="sm">{{ $product->unit_value->tier->value }}</x-ui.badge>
+                                    <x-metric.tier-badge :tier="$product->unit_value->tier" />
                                 @else
                                     <span class="text-sm text-gray-400">&mdash;</span>
                                 @endif
                             </td>
                             <td class="px-5 py-4">
                                 @if ($product->category)
-                                    <x-ui.badge color="light">{{ $product->category->value }}</x-ui.badge>
+                                    <x-ui.badge color="light">{{ $product->category->label() }}</x-ui.badge>
                                 @else
                                     <span class="text-sm text-gray-400">&mdash;</span>
                                 @endif
@@ -122,30 +133,30 @@
                     </div>
 
                     <div>
-                        <x-form.label for="product_variant">Variant</x-form.label>
+                        <x-form.label for="product_variant">Product variant</x-form.label>
                         <x-form.input id="product_variant" wire:model="product_variant"
-                            :error="$errors->has('product_variant')" placeholder="Size / colour / variant" />
+                            :error="$errors->has('product_variant')" placeholder="Size or colour" />
                         <x-form.error for="product_variant" />
                     </div>
                 </div>
 
                 <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
                     <div>
-                        <x-form.label for="product_unit_value">Unit value</x-form.label>
+                        <x-form.label for="product_unit_value">Unit value ({{ app(\App\Shared\Support\TenantCurrency::class)->code() }})</x-form.label>
                         <x-form.input id="product_unit_value" wire:model="product_unit_value" type="number" step="0.01" min="0"
                             :error="$errors->has('product_unit_value')" />
                         <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                            Manual agency input — stored at tier CONFIRMED.
+                            Entered by you, so it’s used exactly as typed.
                         </p>
                         <x-form.error for="product_unit_value" />
                     </div>
 
                     <div>
-                        <x-form.label for="product_category">Category</x-form.label>
+                        <x-form.label for="product_category">Sector</x-form.label>
                         <x-form.select id="product_category" wire:model="product_category" :error="$errors->has('product_category')">
-                            <option value="">No category</option>
+                            <option value="">No sector</option>
                             @foreach ($categories as $categoryOption)
-                                <option value="{{ $categoryOption->value }}">{{ $categoryOption->value }}</option>
+                                <option value="{{ $categoryOption->value }}">{{ $categoryOption->label() }}</option>
                             @endforeach
                         </x-form.select>
                         <x-form.error for="product_category" />
@@ -166,7 +177,7 @@
     @if ($confirmingDeleteId !== null)
         <x-ui.confirm-modal title="Delete product?" confirm-action="delete" cancel-action="cancelDelete"
             confirm-label="Delete product">
-            Products referenced by seeding campaigns or shipments cannot be deleted. The action is
+            Products referenced by seeding runs or shipments cannot be deleted. The action is
             recorded in the audit log.
         </x-ui.confirm-modal>
     @endif

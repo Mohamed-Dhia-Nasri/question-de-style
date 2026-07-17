@@ -176,6 +176,19 @@ class TasksIndex extends Component
         $this->showForm = true;
     }
 
+    /** @return array<string, string> */
+    protected function validationAttributes(): array
+    {
+        return [
+            'task_title' => 'title',
+            'task_status' => 'status',
+            'task_assignee_id' => 'assignee',
+            'task_due_at' => 'due date',
+            'task_creator_id' => 'creator',
+            'task_campaign_id' => 'campaign',
+        ];
+    }
+
     public function save(AuditLogger $audit): void
     {
         $editing = $this->editingTaskId !== null;
@@ -297,6 +310,9 @@ class TasksIndex extends Component
             'overdueCount' => $this->scopeOverdue(Task::query())->count(),
             'dueSoonCount' => $this->scopeDueSoon(Task::query())->count(),
             'statuses' => TaskStatus::cases(),
+            'statusDescriptions' => collect(TaskStatus::cases())
+                ->mapWithKeys(fn ($s) => [$s->value => $s->description()])
+                ->all(),
             'users' => User::query()->orderBy('display_name')->get(),
             'creators' => Creator::query()->orderBy('display_name')->get(),
             'campaigns' => Campaign::query()->orderBy('name')->get(),

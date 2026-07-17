@@ -29,4 +29,18 @@ enum ShipmentStatus: string
             self::Failed => 'Failed',
         };
     }
+
+    /** One-line plain-language description (presentation only). */
+    public function description(): string
+    {
+        return match ($this) {
+            self::Pending => 'Not prepared yet.',
+            self::Preparing => 'Being packed.',
+            self::Shipped => 'Handed to the courier.',
+            self::InTransit => 'On its way.',
+            self::Delivered => 'Arrived at the creator.',
+            self::Returned => 'Came back undelivered.',
+            self::Failed => 'Could not be delivered.',
+        };
+    }
 }

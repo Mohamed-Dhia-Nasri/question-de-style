@@ -118,6 +118,38 @@ class ClientsCrudTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'client.deleted', 'subject_id' => $client->id]);
     }
 
+    public function test_client_rows_list_their_brands_with_links_to_brand_detail(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $client = Client::factory()->create(['name' => 'Agentur Nord']);
+        $brandA = Brand::factory()->create(['client_id' => $client->id, 'name' => 'Brand Aurora']);
+        $brandB = Brand::factory()->create(['client_id' => $client->id, 'name' => 'Brand Borealis']);
+
+        Livewire::test(ClientsIndex::class)
+            ->assertSee('Brand Aurora')
+            ->assertSee('Brand Borealis')
+            ->assertSee(route('crm.brands.show', $brandA), false)
+            ->assertSee(route('crm.brands.show', $brandB), false);
+    }
+
+    public function test_brandless_client_shows_an_inline_no_brands_line(): void
+    {
+        $this->actingAsCrmStaff();
+
+        Client::factory()->create(['name' => 'Agentur Nord']);
+
+        Livewire::test(ClientsIndex::class)
+            ->assertSee('No brands yet');
+    }
+
+    public function test_the_page_title_is_clients_and_brands(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $this->get('/crm/clients')->assertOk()->assertSee('Clients & Brands');
+    }
+
     public function test_mutating_actions_require_crm_manage_not_just_crm_view(): void
     {
         $this->seedRoles();

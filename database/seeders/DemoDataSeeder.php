@@ -830,6 +830,10 @@ class DemoDataSeeder extends Seeder
                     ->reject(fn (Creator $c) => in_array(mb_strtolower($brand->name), $this->restrictedBrands[$c->id] ?? [], true))
                     ->random(mt_rand(8, 20));
 
+                // F03: shipment recipients must be on the run's roster —
+                // the panel guard and the recipient dropdown both read it.
+                $seeding->creators()->syncWithoutDetaching($recipients->pluck('id')->all());
+
                 foreach ($recipients as $creator) {
                     $roll = mt_rand(1, 100);
                     $shipStatus = match (true) {

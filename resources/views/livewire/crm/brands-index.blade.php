@@ -24,9 +24,21 @@
         </x-slot:header>
 
         @if ($brands->isEmpty())
-            <x-states.empty title="No brands yet">
-                A brand belongs to a client and is what campaigns, seeding, and products attach to.
-            </x-states.empty>
+            @if ($search !== '')
+                <x-states.empty title="No brands match your search">
+                    Try a different search term.
+                </x-states.empty>
+            @else
+                <x-states.empty title="No brands yet">
+                    A brand belongs to a client; campaigns, products, and seeding runs all attach
+                    to a brand. Create the client first if you haven’t.
+                    <x-slot:action>
+                        @can('create', \App\Modules\CRM\Models\Brand::class)
+                            <x-ui.button size="sm" wire:click="create">New brand</x-ui.button>
+                        @endcan
+                    </x-slot:action>
+                </x-states.empty>
+            @endif
         @else
             <table class="w-full min-w-[800px]">
                 <thead>
@@ -43,11 +55,13 @@
                     class="divide-y divide-gray-100 transition-opacity dark:divide-gray-800">
                     @foreach ($brands as $brand)
                         <tr wire:key="brand-{{ $brand->id }}">
-                            <td class="px-5 py-4 text-sm font-medium text-gray-800 dark:text-white/90">{{ $brand->name }}</td>
+                            <td class="px-5 py-4">
+                                <a href="{{ route('crm.brands.show', $brand) }}" class="text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">{{ $brand->name }}</a>
+                            </td>
                             <td class="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{{ $brand->client->name }}</td>
                             <td class="px-5 py-4">
                                 @if ($brand->sector)
-                                    <x-ui.badge color="light">{{ $brand->sector->value }}</x-ui.badge>
+                                    <x-ui.badge color="light">{{ $brand->sector->label() }}</x-ui.badge>
                                 @else
                                     <span class="text-sm text-gray-400">&mdash;</span>
                                 @endif
@@ -110,7 +124,7 @@
                     <x-form.select id="brand_sector" wire:model="brand_sector" :error="$errors->has('brand_sector')">
                         <option value="">No sector</option>
                         @foreach ($sectors as $sectorOption)
-                            <option value="{{ $sectorOption->value }}">{{ $sectorOption->value }}</option>
+                            <option value="{{ $sectorOption->value }}">{{ $sectorOption->label() }}</option>
                         @endforeach
                     </x-form.select>
                     <x-form.error for="brand_sector" />

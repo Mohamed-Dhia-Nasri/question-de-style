@@ -172,9 +172,9 @@ return [
         // Lifetime of signed URLs granting access to archived media.
         'signed_url_ttl_minutes' => (int) env('QDS_MEDIA_SIGNED_URL_TTL_MINUTES', 10),
 
-        // Archived story media retention (media storage lifecycle, DP-005).
-        // Files older than this are deleted from the media disk and the
-        // story keeps only its metadata. 0 disables pruning entirely.
+        // Archived story media retention DEFAULT (media storage lifecycle,
+        // DP-005, ADR-0025): the fallback for tenants that never saved
+        // Settings → Monitoring. 0 disables pruning for such tenants.
         'media_retention_days' => (int) env('QDS_MEDIA_RETENTION_DAYS', 180),
 
         // Quarantined-record retention (redacted payloads, DP-005).
@@ -237,16 +237,18 @@ return [
     |--------------------------------------------------------------------------
     | SVC-EnrichmentAI (L3) — classification, sentiment, recognition, EMV
     |--------------------------------------------------------------------------
-    | Runtime toggles for the enrichment pipeline. Enrichment cadence is NOT
-    | canonically decided (same flagged missing decision as ingestion) —
-    | configurable here until an ADR fixes it. Recognition providers are the
-    | frozen SRC-google-* contracts; a provider with no credentials is
-    | skipped and its outputs stay unavailable (never fabricated).
+    | Runtime toggles for the enrichment pipeline. Enrichment is dispatched
+    | per data pull (ADR-0023); the recurring sweep below is the recovery
+    | BACKSTOP for crashed/reaped runs, not the primary trigger. Recognition
+    | providers are the frozen SRC-google-* contracts; a provider with no
+    | credentials is skipped and its outputs stay unavailable (never fabricated).
     */
     'enrichment' => [
         'enabled' => env('QDS_ENRICHMENT_ENABLED', false),
 
-        // Recurring sweep over recently ingested, not-yet-enriched content.
+        // Recovery backstop sweep (ADR-0023): re-collects targets whose
+        // per-pull run crashed or was reaped; a no-op for anything already
+        // RUNNING/COMPLETED.
         'sweep_cron' => env('QDS_ENRICHMENT_SWEEP_CRON', '15 */6 * * *'),
 
         // Max targets picked up per sweep (cost control).
@@ -254,6 +256,11 @@ return [
 
         // Content published within this window is eligible for enrichment.
         'content_window_days' => (int) env('QDS_ENRICHMENT_CONTENT_WINDOW_DAYS', 30),
+
+        // Rolling window N for the engagement trend (ADR-0024): compares
+        // the last N days with the N days before. Config default; each
+        // tenant can override it on Settings → Monitoring (ADR-0025).
+        'engagement_trend_window_days' => (int) env('QDS_ENRICHMENT_TREND_WINDOW_DAYS', 30),
 
         // A run still RUNNING after this long was hard-killed (worker died
         // mid-run): the data-quality monitor reaps it as FAILED so its
@@ -269,10 +276,9 @@ return [
             'max_seconds' => (int) env('QDS_ENRICHMENT_AUDIO_MAX_SECONDS', 60),
         ],
 
-        // Numeric provider score → ENUM-ConfidenceLevel bucketing. The
-        // cut-points are NOT canonically decided (flagged missing decision;
-        // DP-004 only says LOW routes to review) — configurable until an
-        // ADR fixes them. score >= high → HIGH; >= medium → MEDIUM; else LOW.
+        // Numeric provider score → ENUM-ConfidenceLevel bucketing
+        // (ADR-0026): score >= high → HIGH; >= medium → MEDIUM; else LOW
+        // (LOW routes to review per DP-004). Env-tunable calibration.
         'confidence' => [
             'high' => (float) env('QDS_ENRICHMENT_CONFIDENCE_HIGH', 0.85),
             'medium' => (float) env('QDS_ENRICHMENT_CONFIDENCE_MEDIUM', 0.60),
@@ -281,8 +287,8 @@ return [
         'attribution' => [
             // A shipment supports SEEDED attribution only when the content
             // was published within this many days after delivery/shipping.
-            // NOT canonically decided (flagged) — configurable until an
-            // ADR fixes it.
+            // DEFAULT for tenants without a Settings → Monitoring row
+            // (ADR-0025 — per-tenant via MonitoringSettingsResolver).
             'shipment_window_days' => (int) env('QDS_ENRICHMENT_SHIPMENT_WINDOW_DAYS', 60),
         ],
 
@@ -388,9 +394,9 @@ return [
     |--------------------------------------------------------------------------
     | Data-subject export/erasure run on demand (qds:gdpr-export-creator /
     | qds:gdpr-erase-creator); retention enforcement runs daily. The
-    | communication-log retention period is NOT canonically decided (same
-    | flagged class as the cadences) — 0 disables it until an ADR fixes the
-    | policy. GDPR export files always expire with qds.exports.ttl_hours.
+    | communication-log retention DEFAULT is the fallback for tenants that
+    | never saved Settings → Monitoring (ADR-0025) — 0 keeps history forever
+    | for such tenants. GDPR export files always expire with qds.exports.ttl_hours.
     */
     'gdpr' => [
         'communication_log_retention_days' => (int) env('QDS_GDPR_COMMS_RETENTION_DAYS', 0),

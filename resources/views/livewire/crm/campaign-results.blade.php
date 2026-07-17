@@ -2,9 +2,9 @@
     <div class="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
         <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Results</h3>
         <p class="mt-0.5 text-theme-xs text-gray-500 dark:text-gray-400">
-            Rollup-backed campaign results (REQ-M3-009, ADR-0010) — every figure carries its
-            metric tier and estimates are never presented as fact (DP-001).
+            Results for this campaign.
         </p>
+        <x-metric.tier-legend class="mt-1" />
     </div>
 
     <div class="p-6">
@@ -61,15 +61,15 @@
                         <span class="text-lg font-semibold text-gray-800 dark:text-white/90">{{ number_format((float) $totals->total_estimated_reach) }}</span>
                         <x-metric.tier-badge tier="ESTIMATED" />
                     @else
-                        <x-states.unavailable reason="No estimated reach for this campaign yet — reach is computed from observed metrics once an active reach configuration exists (REQ-M1-006); never fabricated." />
+                        <x-states.unavailable reason="No estimated reach yet — reach needs an active reach setting (Settings → Reach)." />
                     @endif
                 </div>
             </div>
             <div class="rounded-xl border border-gray-100 p-3 dark:border-gray-800">
-                <p class="text-theme-xs uppercase text-gray-400">Spend</p>
+                <p class="text-theme-xs uppercase text-gray-400">Spend ({{ app(\App\Shared\Support\TenantCurrency::class)->code() }})</p>
                 <div class="mt-1">
                     <x-metric.value :metric="$campaign->spend" :decimals="2"
-                        reason="Requires agency-entered spend (AC-M3-015) — no spend is recorded for this campaign." />
+                        reason="No spend entered for this campaign yet — add it when editing the campaign." />
                 </div>
             </div>
         </div>
@@ -77,13 +77,13 @@
         {{-- AC-M3-015: EMV (ESTIMATED, model disclosed) + display-time CPE/CPM (DERIVED, D4) --}}
         <div class="mt-4 grid gap-3 sm:grid-cols-3">
             <div class="rounded-xl border border-gray-100 p-3 dark:border-gray-800">
-                <p class="text-theme-xs uppercase text-gray-400">EMV</p>
+                <p class="text-theme-xs uppercase text-gray-400">EMV ({{ app(\App\Shared\Support\TenantCurrency::class)->code() }})</p>
                 <div class="mt-1">
                     @if ($totals->total_emv !== null)
                         <span class="text-lg font-semibold text-gray-800 dark:text-white/90">{{ number_format((float) $totals->total_emv, 2) }}</span>
                         <x-metric.tier-badge tier="ESTIMATED" />
                     @else
-                        <x-states.unavailable reason="EMV requires an active, user-managed EMV configuration (REQ-M1-011) and calculated results." />
+                        <x-states.unavailable reason="No EMV yet — EMV needs rates set up under Settings → EMV." />
                     @endif
                 </div>
             </div>
@@ -154,7 +154,7 @@
                                     @if ($run_totals->total_emv !== null)
                                         {{ number_format((float) $run_totals->total_emv, 2) }} <x-metric.tier-badge tier="ESTIMATED" />
                                     @else
-                                        <x-states.unavailable reason="EMV requires an active configuration and calculated results (REQ-M1-011)." />
+                                        <x-states.unavailable reason="No EMV yet — EMV needs rates set up under Settings → EMV." />
                                     @endif
                                 </td>
                             </tr>
@@ -165,7 +165,7 @@
         @endif
 
         <p class="mt-4 text-theme-xs text-gray-400 dark:text-gray-500">
-            Rollups refreshed {{ $rollupsRefreshedAt?->diffForHumans() ?? 'never' }}.
+            Data refreshed {{ $rollupsRefreshedAt?->diffForHumans() ?? 'never' }}.
         </p>
     </div>
 </div>

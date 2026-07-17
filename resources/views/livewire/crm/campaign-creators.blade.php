@@ -3,7 +3,8 @@
         <div>
             <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Participating creators</h3>
             <p class="mt-0.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                Brand restrictions are enforced as hard filters on join (AC-M3-007).
+                The creators taking part in this campaign. Creators who refuse this brand are
+                blocked automatically.
             </p>
         </div>
 
@@ -26,7 +27,8 @@
 
     @if ($attached->isEmpty())
         <x-states.empty title="No creators on this campaign yet">
-            Add the participating creators — restricted creators are blocked before commit.
+            Add the creators taking part in this campaign — pick them in the box above. Creators
+            who refuse this brand are blocked automatically.
         </x-states.empty>
     @else
         <ul class="divide-y divide-gray-100 dark:divide-gray-800">

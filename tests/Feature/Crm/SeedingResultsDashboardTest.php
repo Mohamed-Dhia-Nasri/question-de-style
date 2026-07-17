@@ -148,14 +148,16 @@ class SeedingResultsDashboardTest extends TestCase
             ->assertSee('Silk Serum')
             ->assertSee('100.0%')  // post_rate 1/1, DERIVED at the rollup grain
             ->assertSee('500')     // views [PUBLIC]
-            ->assertSee('PUBLIC')
-            ->assertSee('DERIVED')
+            ->assertSee('From platform')
+            ->assertSee('Calculated')
             // reach honesty — no estimated reach computed for this slice
             // yet, never a fabricated number, and never DEF-003 (that's
             // CONFIRMED-reach only, retired from this ESTIMATED surface).
-            ->assertSee('No estimated reach for this slice yet')
-            ->assertSee('REQ-M1-006')
-            ->assertDontSee('DEF-003');
+            ->assertSee('No estimated reach yet')
+            ->assertSee('Settings → Reach')
+            ->assertDontSee('DEF-003')
+            // Product name is a link back to its record (Stage B Task 8).
+            ->assertSee(route('crm.products.index', ['q' => 'Silk Serum']), false);
     }
 
     public function test_an_unknown_grain_falls_back_to_month(): void
@@ -177,11 +179,11 @@ class SeedingResultsDashboardTest extends TestCase
             ->set('brandId', $this->brand->id)
             ->assertSee('Silk Serum')
             ->set('brandId', Brand::factory()->create()->id)
-            ->assertSee('No seeding results in the rollups yet');
+            ->assertSee('No seeding results yet');
 
         Livewire::test(SeedingResultsDashboard::class)
             ->set('productId', Product::factory()->create()->id)
-            ->assertSee('No seeding results in the rollups yet');
+            ->assertSee('No seeding results yet');
     }
 
     public function test_a_platform_slice_switches_to_content_side_measures_with_a_caption(): void
@@ -193,7 +195,7 @@ class SeedingResultsDashboardTest extends TestCase
         // explained away (shipments carry no platform dimension).
         Livewire::test(SeedingResultsDashboard::class)
             ->set('platform', 'INSTAGRAM')
-            ->assertSee('Slice active')
+            ->assertSee('Filtered view')
             ->assertSee('Silk Serum')
             ->assertSee('500')
             ->assertDontSee('Post rate');
@@ -201,7 +203,7 @@ class SeedingResultsDashboardTest extends TestCase
         // Non-matching slice: honest empty state, never zeros.
         Livewire::test(SeedingResultsDashboard::class)
             ->set('platform', 'TIKTOK')
-            ->assertSee('No seeding results in the rollups yet');
+            ->assertSee('No seeding results yet');
     }
 
     public function test_a_content_type_slice_filters_rows(): void
@@ -211,12 +213,12 @@ class SeedingResultsDashboardTest extends TestCase
 
         Livewire::test(SeedingResultsDashboard::class)
             ->set('contentType', 'REEL')
-            ->assertSee('Slice active')
+            ->assertSee('Filtered view')
             ->assertSee('Silk Serum');
 
         Livewire::test(SeedingResultsDashboard::class)
             ->set('contentType', 'VIDEO')
-            ->assertSee('No seeding results in the rollups yet');
+            ->assertSee('No seeding results yet');
     }
 
     public function test_country_slices_are_unavailable_until_module_2(): void
@@ -227,8 +229,8 @@ class SeedingResultsDashboardTest extends TestCase
         // DIM-Geo is empty until Module 2 — a country slice matches nothing.
         Livewire::test(SeedingResultsDashboard::class)
             ->set('country', 'FR')
-            ->assertSee('Slice active')
-            ->assertSee('No seeding results in the rollups yet');
+            ->assertSee('Filtered view')
+            ->assertSee('No seeding results yet');
 
         // Malformed country input is ignored server-side (no slice), never
         // passed through to SQL.
@@ -245,7 +247,7 @@ class SeedingResultsDashboardTest extends TestCase
         $this->seedResults();
 
         Livewire::test(SeedingResultsDashboard::class)
-            ->assertSee('no EMV has been computed');
+            ->assertSee('No EMV yet');
 
         $producing = EmvConfiguration::factory()->create(['name' => 'Benchmark 2026']);
         EmvResult::create([
@@ -338,7 +340,7 @@ class SeedingResultsDashboardTest extends TestCase
         $this->actingAsCrmStaff();
 
         Livewire::test(SeedingResultsDashboard::class)
-            ->assertSee('No seeding results in the rollups yet')
-            ->assertSee('Rollups refreshed');
+            ->assertSee('No seeding results yet')
+            ->assertSee('Data refreshed');
     }
 }

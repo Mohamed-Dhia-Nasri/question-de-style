@@ -2,6 +2,7 @@
 
 namespace App\Shared\Tenancy;
 
+use App\Shared\Support\TenantCurrency;
 use Illuminate\Queue\Events\JobExceptionOccurred;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
@@ -17,6 +18,10 @@ use WeakMap;
  * - TenantContext is a SCOPED binding: one instance per request / per job,
  *   flushed by the framework between lifecycles (no cross-request or
  *   cross-job leakage on long-running workers).
+ * - TenantCurrency is likewise SCOPED: it memoizes the resolved display
+ *   currency for the lifecycle (the underlying query is already
+ *   tenant-scoped by EmvConfiguration's global TenantScope), flushed the
+ *   same way between Octane requests and queue jobs.
  * - Every queued job payload records the dispatcher's tenant id; workers
  *   restore it before handle() runs and restore the previous context after
  *   (push/pop, so inline sync-queue dispatch cannot clobber the request's
@@ -33,6 +38,7 @@ class TenancyServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->scoped(TenantContext::class);
+        $this->app->scoped(TenantCurrency::class);
     }
 
     public function boot(): void

@@ -3,16 +3,11 @@
         <div>
             <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Contacts</h3>
             <p class="mt-0.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                Manual entry only (REQ-M3-002). Deleting a contact is the GDPR erasure path (DP-005).
+                Contact details are entered by hand. Deleting a contact permanently erases the
+                personal data (GDPR).
             </p>
         </div>
         <div class="flex items-center gap-3">
-            {{-- DEF-002 / AC-M3-005: the auto-extraction affordance renders the
-                 literal "unavailable" — never empty, never a working auto-fill. --}}
-            <span class="flex items-center gap-2 text-theme-xs text-gray-500 dark:text-gray-400">
-                Auto-extract email/phone:
-                <x-states.unavailable reason="Contact auto-extraction is deferred (DEF-002, ADR-0005) — enter contact details manually." />
-            </span>
             @can('create', \App\Modules\CRM\Models\Contact::class)
                 <x-ui.button size="sm" wire:click="add">Add contact</x-ui.button>
             @endcan
@@ -20,8 +15,13 @@
     </div>
 
     @if ($contacts->isEmpty())
-        <x-states.empty title="No contacts yet">
-            Contact details are entered manually — auto-extraction is not part of v1 (DEF-002).
+        <x-states.empty title="No contact details yet">
+            Add an email, phone number, or address for this creator.
+            <x-slot:action>
+                @can('create', \App\Modules\CRM\Models\Contact::class)
+                    <x-ui.button size="sm" wire:click="add">Add contact</x-ui.button>
+                @endcan
+            </x-slot:action>
         </x-states.empty>
     @else
         <div class="overflow-x-auto">
@@ -117,8 +117,8 @@
     @if ($confirmingDeleteId !== null)
         <x-ui.confirm-modal title="Delete contact?" confirm-action="delete" cancel-action="cancelDelete"
             confirm-label="Delete contact">
-            This permanently and irreversibly erases the contact's personal data (GDPR erasure,
-            DP-005). Only the deletion event — no personal data — is recorded in the audit log.
+            This permanently and irreversibly erases the contact’s personal data (GDPR erasure).
+            Only the deletion event — no personal data — is kept in the audit log.
         </x-ui.confirm-modal>
     @endif
 </div>

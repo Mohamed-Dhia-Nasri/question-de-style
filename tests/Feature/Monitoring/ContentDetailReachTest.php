@@ -71,7 +71,7 @@ class ContentDetailReachTest extends TestCase
             ->assertOk()
             ->assertSee('48,213')
             ->assertDontSee('method: qds-estimated-reach v0')
-            ->assertSee('ESTIMATED')
+            ->assertSee('Estimate')
             ->assertSee('method: qds-estimated-reach v1');
     }
 

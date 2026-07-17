@@ -73,6 +73,13 @@
             'can' => 'settings.view',
             'icon' => '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 6H3.75M10.5 6a1.5 1.5 0 1 0 3 0m-3 0a1.5 1.5 0 1 1 3 0M13.5 6h6.75m-6.75 6H3.75m9.75 0a1.5 1.5 0 1 0 3 0m-3 0a1.5 1.5 0 1 1 3 0m3 0h.75m-9 6H3.75m9.75 0a1.5 1.5 0 1 0 3 0m-3 0a1.5 1.5 0 1 1 3 0m3 0h.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
         ],
+        [
+            'name' => 'Monitoring',
+            'route' => 'settings.monitoring',
+            'active' => request()->routeIs('settings.monitoring'),
+            'can' => 'settings.view',
+            'icon' => '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 6H3.75M10.5 6a1.5 1.5 0 1 0 3 0m-3 0a1.5 1.5 0 1 1 3 0M13.5 6h6.75m-6.75 6H3.75m9.75 0a1.5 1.5 0 1 0 3 0m-3 0a1.5 1.5 0 1 1 3 0m3 0h.75m-9 6H3.75m9.75 0a1.5 1.5 0 1 0 3 0m-3 0a1.5 1.5 0 1 1 3 0m3 0h.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+        ],
     ];
 
     $adminItems = [

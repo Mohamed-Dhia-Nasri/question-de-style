@@ -16,6 +16,7 @@ use App\Modules\Monitoring\Livewire\Operations\MonitoringPlanSettings;
 use App\Modules\Monitoring\Livewire\Operations\OperationsDashboard;
 use App\Modules\Monitoring\Livewire\Reach\ReachSettings;
 use App\Modules\Monitoring\Livewire\Review\ReviewQueueIndex;
+use App\Modules\Monitoring\Livewire\Settings\MonitoringSettings;
 use App\Modules\Monitoring\Models\Comment;
 use App\Modules\Monitoring\Models\ContentHashtag;
 use App\Modules\Monitoring\Models\ContentItem;
@@ -103,6 +104,7 @@ class MonitoringServiceProvider extends ServiceProvider
         Livewire::component('monitoring.review-queue-index', ReviewQueueIndex::class);
         Livewire::component('monitoring.emv-settings', EmvSettings::class);
         Livewire::component('monitoring.reach-settings', ReachSettings::class);
+        Livewire::component('monitoring.monitoring-settings', MonitoringSettings::class);
         Livewire::component('monitoring.hashtag-lists-index', HashtagListsIndex::class);
         Livewire::component('monitoring.monitoring-overview', MonitoringOverview::class);
         Livewire::component('monitoring.home-overview', HomeOverview::class);

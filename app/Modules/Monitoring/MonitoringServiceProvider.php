@@ -25,6 +25,7 @@ use App\Modules\Monitoring\Models\HashtagList;
 use App\Modules\Monitoring\Models\Mention;
 use App\Modules\Monitoring\Models\MetricSnapshot;
 use App\Modules\Monitoring\Models\MonitoredSubject;
+use App\Modules\Monitoring\Models\MonitoringSetting;
 use App\Modules\Monitoring\Models\ReachConfiguration;
 use App\Modules\Monitoring\Models\RecognitionDetection;
 use App\Modules\Monitoring\Models\ReviewAction;
@@ -39,6 +40,7 @@ use App\Modules\Monitoring\Policies\HashtagListPolicy;
 use App\Modules\Monitoring\Policies\MentionPolicy;
 use App\Modules\Monitoring\Policies\MetricSnapshotPolicy;
 use App\Modules\Monitoring\Policies\MonitoredSubjectPolicy;
+use App\Modules\Monitoring\Policies\MonitoringSettingPolicy;
 use App\Modules\Monitoring\Policies\ReachConfigurationPolicy;
 use App\Modules\Monitoring\Policies\RecognitionDetectionPolicy;
 use App\Modules\Monitoring\Policies\ReviewActionPolicy;
@@ -96,6 +98,7 @@ class MonitoringServiceProvider extends ServiceProvider
         Gate::policy(EmvConfiguration::class, EmvConfigurationPolicy::class);
         Gate::policy(EmvResult::class, EmvResultPolicy::class);
         Gate::policy(ReachConfiguration::class, ReachConfigurationPolicy::class);
+        Gate::policy(MonitoringSetting::class, MonitoringSettingPolicy::class);
 
         Livewire::component('monitoring.review-queue-index', ReviewQueueIndex::class);
         Livewire::component('monitoring.emv-settings', EmvSettings::class);

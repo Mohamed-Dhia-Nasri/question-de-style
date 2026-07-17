@@ -456,6 +456,7 @@ class CampaignWizard extends Component
         // creators step — never run the queries on the other steps.
         $candidates = new Collection;
         $restrictedIds = [];
+        $blocklistedIds = [];
 
         if ($this->step === 4) {
             $candidates = Creator::query()
@@ -472,13 +473,13 @@ class CampaignWizard extends Component
                 ->limit(51)
                 ->get();
 
+            $candidateIds = $candidates->pluck('id')->map(fn ($id) => (int) $id)->all();
+
             $brandName = $this->currentBrandName();
             $restrictedIds = $brandName !== ''
-                ? $guard->restrictedCreatorIdsForName(
-                    $candidates->pluck('id')->map(fn ($id) => (int) $id)->all(),
-                    $brandName
-                )
+                ? $guard->restrictedCreatorIdsForName($candidateIds, $brandName)
                 : [];
+            $blocklistedIds = $guard->blocklistedCreatorIds($candidateIds);
         }
 
         return view('livewire.crm.campaign-wizard', [
@@ -487,6 +488,7 @@ class CampaignWizard extends Component
             'products' => $products,
             'candidates' => $candidates,
             'restrictedIds' => $restrictedIds,
+            'blocklistedIds' => $blocklistedIds,
             'countries' => Country::cases(),
             'seedingTypes' => SeedingType::cases(),
             'typeDescriptions' => collect(SeedingType::cases())

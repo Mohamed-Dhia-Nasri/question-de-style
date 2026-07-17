@@ -179,7 +179,11 @@ class BlocklistEnforcementTest extends TestCase
             ->set('selected_creator_ids', [(string) $ok->id, (string) $blocked->id])->call('next')
             ->call('finish')
             ->assertSet('finished', true)
-            ->assertSee('Nora NoContact');
+            ->assertSee('Nora NoContact')
+            // The Done-screen heading must not claim a brand no-go list when
+            // the only reason a name is on it is the blocklist.
+            ->assertSee('These creators were not added')
+            ->assertDontSee('no-go list includes this brand');
 
         $campaign = Campaign::query()->where('name', 'Creator Week')->firstOrFail();
         $this->assertTrue($campaign->creators()->whereKey($ok->id)->exists());

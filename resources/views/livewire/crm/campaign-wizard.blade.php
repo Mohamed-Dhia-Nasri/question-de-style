@@ -36,7 +36,7 @@
                     @if ($skippedCreators !== [])
                         <div class="mt-6 rounded-xl border border-warning-500/40 bg-warning-50 p-4 dark:border-warning-500/30 dark:bg-warning-500/10">
                             <p class="text-sm font-medium text-warning-600 dark:text-warning-400">
-                                Skipped (their no-go list includes this brand):
+                                These creators were not added:
                             </p>
                             <ul class="mt-1.5 list-inside list-disc text-sm text-gray-600 dark:text-gray-300">
                                 @foreach ($skippedCreators as $name)
@@ -304,7 +304,9 @@
                                                         @endforeach
                                                     </span>
                                                 @endif
-                                                @if (in_array((int) $creator->id, $restrictedIds, true))
+                                                @if (in_array((int) $creator->id, $blocklistedIds, true))
+                                                    <span class="mt-0.5 block text-xs font-medium text-warning-500">Marked ‘do not contact or book’ — will be skipped.</span>
+                                                @elseif (in_array((int) $creator->id, $restrictedIds, true))
                                                     <span class="mt-0.5 block text-xs font-medium text-warning-500">On their no-go list for {{ $currentBrandName }} — will be skipped.</span>
                                                 @endif
                                             </span>

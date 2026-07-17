@@ -28,6 +28,7 @@ use App\Modules\CRM\Livewire\Results\SeedingResultsDashboard;
 use App\Modules\CRM\Livewire\Results\SeedingResultsPanel;
 use App\Modules\CRM\Livewire\Seeding\SeedingCampaignsIndex;
 use App\Modules\CRM\Livewire\Seeding\SeedingCreatorsPanel;
+use App\Modules\CRM\Livewire\Seeding\SeedingRunCreatePanel;
 use App\Modules\CRM\Livewire\Seeding\ShipmentsPanel;
 use App\Modules\CRM\Livewire\Tasks\TasksIndex;
 use App\Modules\CRM\Livewire\Tasks\TasksPanel;
@@ -134,6 +135,7 @@ class CrmServiceProvider extends ServiceProvider
         Livewire::component('crm.seeding-campaigns-index', SeedingCampaignsIndex::class);
         Livewire::component('crm.seeding-creators', SeedingCreatorsPanel::class);
         Livewire::component('crm.seeding-shipments', ShipmentsPanel::class);
+        Livewire::component('crm.seeding-run-create', SeedingRunCreatePanel::class);
 
         // Step 4 — results & reporting (REQ-M3-009/013): rollup-backed
         // read panels on the detail pages plus the cross-influencer

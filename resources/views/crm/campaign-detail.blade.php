@@ -96,15 +96,13 @@
 
             <div x-show="tab === 'seeding'" x-cloak>
                 <div class="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
-                    <div class="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
+                    <div class="flex items-center justify-between border-b border-gray-200 px-6 py-4 dark:border-gray-800">
                         <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Seeding runs</h3>
+                        @livewire('crm.seeding-run-create', ['campaign' => $campaign])
                     </div>
                     @if ($campaign->seedingCampaigns->isEmpty())
                         <x-states.empty title="No seeding runs yet">
-                            Seeding runs under this campaign send its brand’s products to creators.
-                            <x-slot:action>
-                                <a href="{{ route('crm.seeding.index') }}" class="text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">Go to Seeding runs →</a>
-                            </x-slot:action>
+                            Seeding runs under this campaign send its brand’s products to creators. Create the first one right here.
                         </x-states.empty>
                     @else
                         <ul class="divide-y divide-gray-100 dark:divide-gray-800">

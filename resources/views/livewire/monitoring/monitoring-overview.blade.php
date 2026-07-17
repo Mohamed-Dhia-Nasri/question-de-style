@@ -1,6 +1,6 @@
 <div>
     {{-- Server-side filters (validated in the component; state kept small) --}}
-    <div class="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <div class="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <div>
             <x-form.label for="overview-platform">Platform</x-form.label>
             <x-form.select id="overview-platform" wire:model.live="platform">
@@ -21,13 +21,25 @@
         </div>
         <div>
             <x-form.label for="overview-from">From</x-form.label>
-            <x-form.input id="overview-from" type="date" wire:model.live="from" />
+            <x-form.input id="overview-from" type="date" wire:model.blur="from" />
         </div>
         <div>
             <x-form.label for="overview-to">To</x-form.label>
-            <x-form.input id="overview-to" type="date" wire:model.live="to" />
+            <x-form.input id="overview-to" type="date" wire:model.blur="to" />
+        </div>
+        <div>
+            <x-form.label for="overview-seeding">Seeding</x-form.label>
+            <div class="mt-2.5">
+                <x-form.toggle id="overview-seeding" wire:model.live="activeSeedingOnly" label="Active seeding only" />
+            </div>
         </div>
     </div>
+
+    @if ($activeSeedingOnly && $seedingSetEmpty)
+        <div class="mb-4 rounded-2xl border border-gray-200 bg-white p-4 text-sm text-gray-600 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">
+            No creators are currently in an active seeding.
+        </div>
+    @endif
 
     {{-- KPI cards --}}
     <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -78,7 +90,9 @@
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
             <p class="text-sm text-gray-500 dark:text-gray-400">Estimated reach (period)</p>
             <div class="mt-2">
-                @if ($mentionTotals->total_estimated_reach !== null)
+                @if ($activeSeedingOnly)
+                    <x-states.unavailable reason="Aggregated by brand — not available for the seeding filter." />
+                @elseif ($mentionTotals->total_estimated_reach !== null)
                     <span class="text-2xl font-semibold text-gray-800 dark:text-white/90">{{ number_format((float) $mentionTotals->total_estimated_reach) }}</span>
                     <x-metric.tier-badge tier="ESTIMATED" />
                 @else
@@ -89,7 +103,9 @@
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
             <p class="text-sm text-gray-500 dark:text-gray-400">EMV (period)</p>
             <div class="mt-2">
-                @if ($mentionTotals->total_emv !== null)
+                @if ($activeSeedingOnly)
+                    <x-states.unavailable reason="Aggregated by brand — not available for the seeding filter." />
+                @elseif ($mentionTotals->total_emv !== null)
                     <span class="text-2xl font-semibold text-gray-800 dark:text-white/90">{{ number_format((float) $mentionTotals->total_emv, 2) }}</span>
                     <x-metric.tier-badge tier="ESTIMATED" />
                 @else

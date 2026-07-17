@@ -146,6 +146,41 @@ class MonitoringSeedingFilterTest extends TestCase
             ->assertViewHas('rosterCount', 1);
     }
 
+    public function test_page_renders_toggle_and_scoped_view_with_brand_only_reach_state(): void
+    {
+        $this->seedWorld();
+
+        Livewire::test(MonitoringOverview::class)
+            ->assertSee('Active seeding only')
+            ->assertDontSee('Aggregated by brand — not available for the seeding filter.')
+            ->set('activeSeedingOnly', true)
+            // Reach/EMV: message only, no brand-wide number, distinct from
+            // the generic rollup-unavailable copy.
+            ->assertSee('Aggregated by brand — not available for the seeding filter.')
+            ->assertDontSee('No estimated reach in the rollups for this period yet');
+    }
+
+    public function test_empty_set_notice_shows_only_when_toggled_on_with_no_active_seeding(): void
+    {
+        $this->seedWorld();
+
+        $component = Livewire::test(MonitoringOverview::class)
+            ->assertDontSee('No creators are currently in an active seeding.');
+
+        // Enrolled creators exist → no notice even when counts are zeroed
+        // by a restrictive date range.
+        $component->set('activeSeedingOnly', true)
+            ->set('from', '2030-01-01')
+            ->set('to', '2030-01-02')
+            ->assertDontSee('No creators are currently in an active seeding.');
+
+        SeedingCampaign::query()->update(['status' => SeedingCampaignStatus::Completed->value]);
+
+        Livewire::test(MonitoringOverview::class)
+            ->set('activeSeedingOnly', true)
+            ->assertSee('No creators are currently in an active seeding.');
+    }
+
     public function test_cross_tenant_active_seeding_never_leaks_into_this_tenants_page(): void
     {
         // Tenant B: fully active seeding world.

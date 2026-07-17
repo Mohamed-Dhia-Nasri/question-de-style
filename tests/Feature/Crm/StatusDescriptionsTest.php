@@ -10,8 +10,10 @@ use App\Modules\CRM\Livewire\Seeding\SeedingCampaignsIndex;
 use App\Modules\CRM\Livewire\Seeding\ShipmentsPanel;
 use App\Modules\CRM\Livewire\Tasks\TasksIndex;
 use App\Modules\CRM\Models\Brand;
+use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\SeedingCampaign;
+use App\Shared\Enums\CampaignStatus;
 use App\Shared\Enums\RelationshipStatus;
 use App\Shared\Enums\RoleName;
 use App\Shared\Enums\SeedingType;
@@ -45,11 +47,15 @@ class StatusDescriptionsTest extends TestCase
     {
         $this->actingAsCrmStaff();
 
-        // @js() JSON-encodes the map, which \u escapes the em dash and
-        // quotes — assert the plain-ASCII tail of the description instead
-        // of the full string (per the brief's documented fallback).
+        // Status only appears on edit (Task 1: create forces Draft and
+        // hides the field) — @js() JSON-encodes the map, which \u escapes
+        // the em dash and quotes, so assert the plain-ASCII tail of the
+        // description instead of the full string (per the brief's
+        // documented fallback).
+        $campaign = Campaign::factory()->create(['status' => CampaignStatus::Draft]);
+
         Livewire::test(CampaignsIndex::class)
-            ->call('create')
+            ->call('edit', $campaign->id)
             ->assertSee('not counted in results yet', false);
     }
 

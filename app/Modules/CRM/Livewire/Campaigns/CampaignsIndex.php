@@ -144,14 +144,27 @@ class CampaignsIndex extends Component
 
         $this->authorize($editing ? 'update' : 'create', $campaign ?? Campaign::class);
 
-        $validated = $this->validate([
+        $creating = ! $editing;
+
+        $rules = [
             'campaign_name' => ['required', 'string', 'max:255'],
             'campaign_brand_id' => ['required', 'integer', TenantRule::exists('brands', 'id')],
-            'campaign_status' => ['required', Rule::in(array_column(CampaignStatus::cases(), 'value'))],
             'campaign_start_at' => ['nullable', 'date'],
             'campaign_end_at' => ['nullable', 'date', 'after_or_equal:campaign_start_at'],
-            'campaign_spend' => ['nullable', 'numeric', 'min:0'],
-        ]);
+        ];
+
+        if (! $creating) {
+            $rules['campaign_status'] = ['required', Rule::in(array_column(CampaignStatus::cases(), 'value'))];
+            $rules['campaign_spend'] = ['nullable', 'numeric', 'min:0'];
+        }
+
+        $validated = $this->validate($rules);
+
+        if ($creating) {
+            // Never read the client-tamperable props on create.
+            $validated['campaign_status'] = CampaignStatus::Draft->value;
+            $validated['campaign_spend'] = '';
+        }
 
         $previousStatus = $campaign?->status;
 

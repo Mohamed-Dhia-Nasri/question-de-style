@@ -127,17 +127,19 @@
                         <x-form.error for="campaign_brand_id" />
                     </div>
 
-                    <div x-data="{ s: @js($campaign_status), map: @js($statusDescriptions) }">
-                        <x-form.label for="campaign_status" required>Status</x-form.label>
-                        <x-form.select id="campaign_status" wire:model="campaign_status"
-                            x-on:change="s = $event.target.value" :error="$errors->has('campaign_status')">
-                            @foreach ($statuses as $statusOption)
-                                <option value="{{ $statusOption->value }}">{{ $statusOption->label() }}</option>
-                            @endforeach
-                        </x-form.select>
-                        <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
-                        <x-form.error for="campaign_status" />
-                    </div>
+                    @if ($editingCampaignId !== null)
+                        <div x-data="{ s: @js($campaign_status), map: @js($statusDescriptions) }">
+                            <x-form.label for="campaign_status" required>Status</x-form.label>
+                            <x-form.select id="campaign_status" wire:model="campaign_status"
+                                x-on:change="s = $event.target.value" :error="$errors->has('campaign_status')">
+                                @foreach ($statuses as $statusOption)
+                                    <option value="{{ $statusOption->value }}">{{ $statusOption->label() }}</option>
+                                @endforeach
+                            </x-form.select>
+                            <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
+                            <x-form.error for="campaign_status" />
+                        </div>
+                    @endif
                 </div>
 
                 <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
@@ -156,15 +158,19 @@
                     </div>
                 </div>
 
-                <div>
-                    <x-form.label for="campaign_spend">Spend ({{ app(\App\Shared\Support\TenantCurrency::class)->code() }})</x-form.label>
-                    <x-form.input id="campaign_spend" wire:model="campaign_spend" type="number" step="0.01" min="0"
-                        :error="$errors->has('campaign_spend')" />
-                    <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                        What you actually paid — used for the cost-per-result numbers on Results.
-                    </p>
-                    <x-form.error for="campaign_spend" />
-                </div>
+                @if ($editingCampaignId !== null)
+                    <div>
+                        <x-form.label for="campaign_spend">Spend ({{ app(\App\Shared\Support\TenantCurrency::class)->code() }})</x-form.label>
+                        <x-form.input id="campaign_spend" wire:model="campaign_spend" type="number" step="0.01" min="0"
+                            :error="$errors->has('campaign_spend')" />
+                        <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
+                            What you actually paid — used for the cost-per-result numbers on Results.
+                        </p>
+                        <x-form.error for="campaign_spend" />
+                    </div>
+                @else
+                    <p class="text-xs text-gray-500 dark:text-gray-400">New campaigns start as a draft — you can change the status and record spend once it’s set up.</p>
+                @endif
             </form>
 
             <x-slot:footer>

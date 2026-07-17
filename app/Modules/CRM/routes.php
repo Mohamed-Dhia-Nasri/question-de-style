@@ -34,8 +34,9 @@ Route::middleware(['web', 'auth', 'can:'.PermissionsCatalog::CRM_VIEW, 'subscrib
             'campaign' => $campaign->load('brand.client')->loadCount(['creators', 'seedingCampaigns']),
         ]))->name('campaigns.show');
         Route::view('/seeding', 'crm.seeding')->name('seeding.index');
-        Route::get('/seeding/{seedingCampaign}', fn (SeedingCampaign $seedingCampaign) => view('crm.seeding-detail', ['seedingCampaign' => $seedingCampaign]))
-            ->name('seeding.show');
+        Route::get('/seeding/{seedingCampaign}', fn (SeedingCampaign $seedingCampaign) => view('crm.seeding-detail', [
+            'seedingCampaign' => $seedingCampaign->load(['brand.client', 'campaign', 'product'])->loadCount(['creators', 'shipments']),
+        ]))->name('seeding.show');
 
         // Step 4 — the cross-influencer product results dashboard
         // (REQ-M3-013, AC-M3-019). Results are rollup reads (ADR-0010):

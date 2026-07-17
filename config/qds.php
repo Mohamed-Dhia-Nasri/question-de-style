@@ -255,6 +255,11 @@ return [
         // Content published within this window is eligible for enrichment.
         'content_window_days' => (int) env('QDS_ENRICHMENT_CONTENT_WINDOW_DAYS', 30),
 
+        // Rolling window N for the engagement trend (ADR-0024): compares
+        // the last N days with the N days before. Config default; each
+        // tenant can override it on Settings → Monitoring (ADR-0025).
+        'engagement_trend_window_days' => (int) env('QDS_ENRICHMENT_TREND_WINDOW_DAYS', 30),
+
         // A run still RUNNING after this long was hard-killed (worker died
         // mid-run): the data-quality monitor reaps it as FAILED so its
         // target becomes sweep-eligible again (P4 hardening; mirrors the

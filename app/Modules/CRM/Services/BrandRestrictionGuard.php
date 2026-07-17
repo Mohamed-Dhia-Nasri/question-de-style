@@ -76,6 +76,21 @@ class BrandRestrictionGuard
     }
 
     /**
+     * True if a brand's needle set (name + aliases, folded) intersects an
+     * already-folded name list. Exposed for read-only "does this brand
+     * match" checks outside the throw/bulk paths (item 5c: re-checking a
+     * creator's existing rosters when a restriction is newly added) —
+     * folds the SAME way as assertNotRestricted/restrictedCreatorIds so
+     * the three cannot diverge.
+     *
+     * @param  list<string>  $foldedNames  already mb_strtolower(trim())'d
+     */
+    public function matchesAnyNeedle(Brand $brand, array $foldedNames): bool
+    {
+        return collect($this->needlesForBrand($brand))->intersect($foldedNames)->isNotEmpty();
+    }
+
+    /**
      * The typed-name matcher for the wizard: the brand a manager types may
      * not exist yet, so it carries no aliases — match the name only.
      *

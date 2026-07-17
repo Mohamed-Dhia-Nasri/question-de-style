@@ -75,8 +75,8 @@
                 </x-states.empty>
             @else
                 <x-states.empty title="No tasks yet">
-                    Deadlines and follow-ups — link them to a creator or campaign and you'll get a
-                    reminder before they're due.
+                    Deadlines and follow-ups — link them to a creator or campaign and you’ll get a
+                    reminder before they’re due.
                     <x-slot:action>
                         @can('create', \App\Modules\CRM\Models\Task::class)
                             <x-ui.button size="sm" wire:click="create">New task</x-ui.button>

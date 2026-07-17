@@ -15,7 +15,7 @@
 
     @if ($shipments->isEmpty())
         <x-states.empty title="No shipments yet">
-            A shipment sends one product to one creator on this run's roster.
+            A shipment sends one product to one creator on this run’s roster.
             <x-slot:action>
                 @can('create', \App\Modules\CRM\Models\Shipment::class)
                     <x-ui.button size="sm" wire:click="create">New shipment</x-ui.button>

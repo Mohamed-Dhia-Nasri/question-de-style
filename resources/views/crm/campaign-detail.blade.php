@@ -29,7 +29,7 @@
             </div>
             @if ($campaign->seedingCampaigns->isEmpty())
                 <x-states.empty title="No seeding runs yet">
-                    Seeding runs under this campaign send its brand's products to creators.
+                    Seeding runs under this campaign send its brand’s products to creators.
                     <x-slot:action>
                         <a href="{{ route('crm.seeding.index') }}" class="text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">Go to Seeding runs →</a>
                     </x-slot:action>

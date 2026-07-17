@@ -17,7 +17,7 @@
 
     @if ($accounts->isEmpty())
         <x-states.empty title="No platform accounts yet">
-            Link this creator's Instagram, TikTok, or YouTube account — monitoring starts from
+            Link this creator’s Instagram, TikTok, or YouTube account — monitoring starts from
             here.
             <x-slot:action>
                 @can('create', \App\Modules\CRM\Models\PlatformAccount::class)

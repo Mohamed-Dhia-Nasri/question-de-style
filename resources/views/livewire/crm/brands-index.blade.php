@@ -31,7 +31,7 @@
             @else
                 <x-states.empty title="No brands yet">
                     A brand belongs to a client; campaigns, products, and seeding runs all attach
-                    to a brand. Create the client first if you haven't.
+                    to a brand. Create the client first if you haven’t.
                     <x-slot:action>
                         @can('create', \App\Modules\CRM\Models\Brand::class)
                             <x-ui.button size="sm" wire:click="create">New brand</x-ui.button>

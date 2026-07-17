@@ -125,7 +125,7 @@
 
         @if ($rows->isEmpty())
             <x-states.empty title="No seeding results yet">
-                Results appear after shipments are shipped and creators' content is matched — the
+                Results appear after shipments are shipped and creators’ content is matched — the
                 next data refresh fills this in.
             </x-states.empty>
         @elseif ($sliceActive)

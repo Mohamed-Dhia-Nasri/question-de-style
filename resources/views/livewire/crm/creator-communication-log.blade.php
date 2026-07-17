@@ -102,6 +102,32 @@
                         :error="$errors->has('log_summary')" placeholder="What happened" />
                     <x-form.error for="log_summary" />
                 </div>
+
+                <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                    <div>
+                        <x-form.label for="log_campaign_id">Campaign (optional)</x-form.label>
+                        <x-form.select id="log_campaign_id" wire:model="log_campaign_id"
+                            :error="$errors->has('log_campaign_id')">
+                            <option value="">No campaign</option>
+                            @foreach ($campaigns as $campaignOption)
+                                <option value="{{ $campaignOption->id }}">{{ $campaignOption->name }}</option>
+                            @endforeach
+                        </x-form.select>
+                        <x-form.error for="log_campaign_id" />
+                    </div>
+
+                    <div>
+                        <x-form.label for="log_seeding_campaign_id">Seeding run (optional)</x-form.label>
+                        <x-form.select id="log_seeding_campaign_id" wire:model="log_seeding_campaign_id"
+                            :error="$errors->has('log_seeding_campaign_id')">
+                            <option value="">No seeding run</option>
+                            @foreach ($seedingRuns as $seedingRunOption)
+                                <option value="{{ $seedingRunOption->id }}">{{ $seedingRunOption->name }}</option>
+                            @endforeach
+                        </x-form.select>
+                        <x-form.error for="log_seeding_campaign_id" />
+                    </div>
+                </div>
             </form>
 
             <x-slot:footer>

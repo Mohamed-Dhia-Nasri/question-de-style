@@ -9,7 +9,7 @@ depends_on:
   - docs/30-data-model/00-data-model.md
   - docs/20-cross-cutting/01-deferred-register.md
   - docs/40-integrations/00-data-source-matrix.md
-last_reviewed: 2026-07-12
+last_reviewed: 2026-07-17
 ---
 
 # Decision Log (ADR Ledger)

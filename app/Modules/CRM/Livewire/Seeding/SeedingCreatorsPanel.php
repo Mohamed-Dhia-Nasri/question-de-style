@@ -91,7 +91,9 @@ class SeedingCreatorsPanel extends Component
         $candidateIds = array_values(array_diff($sourceIds, $attachedIds));
 
         $restrictedIds = $guard->restrictedCreatorIds($candidateIds, $this->seedingCampaign->brand);
-        $allowedIds = array_values(array_diff($candidateIds, $restrictedIds));
+        $blocklistedIds = $guard->blocklistedCreatorIds($candidateIds);
+        $excludedIds = array_values(array_unique(array_merge($restrictedIds, $blocklistedIds)));
+        $allowedIds = array_values(array_diff($candidateIds, $excludedIds));
 
         if ($allowedIds !== []) {
             $result = $this->seedingCampaign->creators()->syncWithoutDetaching($allowedIds);
@@ -113,8 +115,17 @@ class SeedingCreatorsPanel extends Component
             $parts[] = $alreadyCount.' already on this run';
         }
 
-        if ($restrictedIds !== []) {
-            $parts[] = count($restrictedIds).' skipped (brand restrictions)';
+        // Report each skip reason once. A creator that is both restricted and
+        // blocklisted counts only under "do not contact" so the parts never
+        // double-count a single creator.
+        $restrictedOnlyCount = count(array_diff($restrictedIds, $blocklistedIds));
+
+        if ($restrictedOnlyCount > 0) {
+            $parts[] = $restrictedOnlyCount.' skipped (brand restrictions)';
+        }
+
+        if ($blocklistedIds !== []) {
+            $parts[] = count($blocklistedIds).' skipped (marked do not contact)';
         }
 
         $summary = $parts === [] ? 'nothing to copy' : implode(', ', $parts);

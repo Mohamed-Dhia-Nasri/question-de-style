@@ -100,13 +100,26 @@ trait ManagesCreatorRoster
 
         $brand = $this->rosterBrand();
         $restrictedIds = $guard->restrictedCreatorIds($ids, $brand);
+        $blocklistedIds = $guard->blocklistedCreatorIds($ids);
 
         $allowedIds = [];
-        $skippedNames = [];
+        $restrictedNames = [];
+        $blocklistedNames = [];
 
         foreach ($creators as $creator) {
-            if (in_array((int) $creator->id, $restrictedIds, true)) {
-                $skippedNames[] = $creator->display_name;
+            $creatorId = (int) $creator->id;
+
+            // "Do not contact or book" is an absolute skip, checked before any
+            // brand restriction so a blocklisted creator never lands on a
+            // roster regardless of brand — and is reported under its own reason.
+            if (in_array($creatorId, $blocklistedIds, true)) {
+                $blocklistedNames[] = $creator->display_name;
+
+                continue;
+            }
+
+            if (in_array($creatorId, $restrictedIds, true)) {
+                $restrictedNames[] = $creator->display_name;
 
                 continue;
             }
@@ -116,9 +129,9 @@ trait ManagesCreatorRoster
                 // the authority, so a late-appearing restriction the bulk
                 // match missed still demotes into the skipped list.
                 $guard->assertNotRestricted($creator, $brand);
-                $allowedIds[] = (int) $creator->id;
+                $allowedIds[] = $creatorId;
             } catch (BrandRestrictionViolation) {
-                $skippedNames[] = $creator->display_name;
+                $restrictedNames[] = $creator->display_name;
             }
         }
 
@@ -134,7 +147,7 @@ trait ManagesCreatorRoster
         $this->selectedCreatorIds = [];
         $this->showPicker = false;
 
-        $skippedNotice = $this->skippedNotice($skippedNames);
+        $skippedNotice = $this->skippedNotice($restrictedNames, $blocklistedNames);
 
         if ($allowedIds === []) {
             $this->dispatch('notify', type: 'error', message: 'No creators added.'.$skippedNotice);
@@ -262,23 +275,37 @@ trait ManagesCreatorRoster
     }
 
     /**
-     * The " Skipped M with brand restrictions: NameA, NameB and K more."
-     * suffix — empty when nothing was skipped. Leading space so it appends
-     * cleanly after the outcome sentence.
+     * The skipped-creators suffix, composed of up to two independent reasons
+     * (brand restrictions, then "do not contact") — only the non-empty parts
+     * appear, so a batch skipped for a single reason reads cleanly. Each
+     * leading space lets a part append after the outcome sentence.
      *
-     * @param  list<string>  $skippedNames
+     * @param  list<string>  $restrictedNames
+     * @param  list<string>  $blocklistedNames
      */
-    private function skippedNotice(array $skippedNames): string
+    private function skippedNotice(array $restrictedNames, array $blocklistedNames): string
     {
-        if ($skippedNames === []) {
+        return $this->skippedReason('with brand restrictions', $restrictedNames)
+            .$this->skippedReason('marked do not contact', $blocklistedNames);
+    }
+
+    /**
+     * One " Skipped M <reason>: NameA, NameB and K more." clause — empty when
+     * this reason skipped nobody.
+     *
+     * @param  list<string>  $names
+     */
+    private function skippedReason(string $reason, array $names): string
+    {
+        if ($names === []) {
             return '';
         }
 
-        $count = count($skippedNames);
-        $shown = collect($skippedNames)->take(3)->implode(', ');
+        $count = count($names);
+        $shown = collect($names)->take(3)->implode(', ');
         $remaining = $count - min(3, $count);
 
-        return ' Skipped '.$count.' with brand restrictions: '.$shown
+        return ' Skipped '.$count.' '.$reason.': '.$shown
             .($remaining > 0 ? ' and '.$remaining.' more' : '').'.';
     }
 }

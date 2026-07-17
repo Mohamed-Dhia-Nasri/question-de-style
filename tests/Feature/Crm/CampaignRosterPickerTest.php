@@ -111,19 +111,32 @@ class CampaignRosterPickerTest extends TestCase
             ->assertSee('0 selected');
     }
 
-    public function test_a_blocklisted_candidate_is_marked_but_still_selectable(): void
+    public function test_a_blocklisted_candidate_is_skipped_at_attach(): void
     {
         $this->actingAsCrmStaff();
         $campaign = $this->campaignForBrand('Aurelia Cosmetics');
-        Creator::factory()->create([
+        $blocked = Creator::factory()->create([
             'display_name' => 'Blocklisted Bea',
             'relationship_status' => RelationshipStatus::Blocklisted,
         ]);
 
+        // Still shown and selectable in the picker (the checkbox row renders),
+        // and flagged with its "do not contact" note…
         Livewire::test(CampaignCreatorsPanel::class, ['campaign' => $campaign])
             ->call('openPicker')
             ->assertSee('Blocklisted Bea')
-            ->assertSee('do not contact or book');
+            ->assertSee('do not contact or book')
+            ->assertSeeHtml('wire:key="picker-'.$blocked->id.'"')
+            // …but selecting and adding it skips it with a "do not contact"
+            // notice — item 5b flips F06 from flag-only to enforced.
+            ->set('selectedCreatorIds', [(string) $blocked->id])
+            ->call('attachSelected')
+            ->assertDispatched(
+                'notify',
+                fn (string $event, array $params) => str_contains($params['message'], 'do not contact'),
+            );
+
+        $this->assertFalse($campaign->creators()->whereKey($blocked->id)->exists());
     }
 
     public function test_search_narrows_the_candidate_list(): void

@@ -389,9 +389,14 @@ class CampaignWizard extends Component
             if ($withExtras && $this->selected_creator_ids !== []) {
                 $ids = array_values(array_unique(array_map('intval', $this->selected_creator_ids)));
                 // Brand exists by now, so the Brand overload is safe here.
+                // A "do not contact or book" creator is skipped just like a
+                // restricted one; both feed the single skipped-names list the
+                // Done screen reports.
                 $restricted = $guard->restrictedCreatorIds($ids, $brand);
-                $allowed = array_values(array_diff($ids, $restricted));
-                $this->skippedCreators = Creator::query()->whereIn('id', $restricted)->pluck('display_name')->all();
+                $blocklisted = $guard->blocklistedCreatorIds($ids);
+                $skipped = array_values(array_unique(array_merge($restricted, $blocklisted)));
+                $allowed = array_values(array_diff($ids, $skipped));
+                $this->skippedCreators = Creator::query()->whereIn('id', $skipped)->pluck('display_name')->all();
 
                 if ($allowed !== []) {
                     $attached = $campaign->creators()->syncWithoutDetaching($allowed);

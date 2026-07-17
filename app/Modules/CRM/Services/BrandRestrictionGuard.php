@@ -6,6 +6,7 @@ use App\Modules\CRM\Exceptions\BrandRestrictionViolation;
 use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\BrandPreference;
 use App\Modules\CRM\Models\Creator;
+use App\Shared\Enums\RelationshipStatus;
 
 /**
  * AC-M3-007: ENT-BrandPreference restrictions/blocklists act as HARD
@@ -46,6 +47,32 @@ class BrandRestrictionGuard
     public function restrictedCreatorIds(array $creatorIds, Brand $brand): array
     {
         return $this->restrictedCreatorIdsForNeedles($creatorIds, $this->needlesForBrand($brand));
+    }
+
+    /**
+     * Bulk companion for the "do not contact or book" status (item 5b): which
+     * of these candidates carry RelationshipStatus::Blocklisted? Lives next to
+     * the restriction matchers because it is the same join-time guard, applied
+     * at every attach path. Tenant-scoped automatically (Creator uses
+     * BelongsToTenant); relationship_status is nullable, so the equality filter
+     * is null-safe (a NULL status simply never matches). Independent of any
+     * brand — a blocklisted creator is off-limits everywhere.
+     *
+     * @param  list<int>  $creatorIds
+     * @return list<int>
+     */
+    public function blocklistedCreatorIds(array $creatorIds): array
+    {
+        if ($creatorIds === []) {
+            return [];
+        }
+
+        return Creator::query()
+            ->whereIn('id', $creatorIds)
+            ->where('relationship_status', RelationshipStatus::Blocklisted)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
     }
 
     /**

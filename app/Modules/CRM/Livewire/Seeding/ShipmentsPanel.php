@@ -215,6 +215,17 @@ class ShipmentsPanel extends Component
         $creatorId = (int) $validated['shipment_creator_id'];
         $productId = (int) $validated['shipment_product_id'];
 
+        // "Do not contact or book" hard-blocks a shipment recipient outright —
+        // the single-recipient counterpart to the bulk roster paths' soft-skip
+        // (item 5b). Runs before the transaction so nothing is written, and
+        // applies whether or not the recipient is already on the roster
+        // (a creator blocklisted after joining must still not receive parcels).
+        if (app(BrandRestrictionGuard::class)->blocklistedCreatorIds([$creatorId]) !== []) {
+            throw ValidationException::withMessages([
+                'shipment_creator_id' => 'This creator is marked ‘do not contact or book’ and cannot receive a shipment.',
+            ]);
+        }
+
         // F03 self-heal: a shipment recipient belongs on the roster. For new
         // shipments the dropdown only offers roster creators, so this path is
         // legacy rows (pre-backfill) and non-UI writes — attach instead of

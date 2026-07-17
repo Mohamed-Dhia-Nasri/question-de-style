@@ -70,6 +70,10 @@ class SeedingRosterRepairTest extends TestCase
 
         $this->assertTrue($this->seeding->creators()->whereKey($this->creator->id)->exists());
         $this->assertSame(ShipmentStatus::Shipped, $shipment->fresh()->status);
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'seeding_campaign_creator.attached',
+            'subject_id' => $this->seeding->id,
+        ]);
     }
 
     public function test_auto_attach_stamps_the_tenant_on_the_pivot_row(): void

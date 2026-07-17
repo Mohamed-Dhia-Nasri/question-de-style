@@ -4,6 +4,7 @@ namespace App\Shared\Support;
 
 use App\Modules\Monitoring\Models\EmvConfiguration;
 use App\Platform\Enrichment\Support\EmvConfigurationStatus;
+use App\Shared\Tenancy\TenantContext;
 
 /**
  * The tenant's display currency — the active EMV rate card's ISO code
@@ -19,6 +20,10 @@ class TenantCurrency
 
     public function code(): string
     {
+        if (app(TenantContext::class)->id() === null) {
+            return 'EUR';
+        }
+
         return $this->cached ??= (string) (EmvConfiguration::query()
             ->where('status', EmvConfigurationStatus::Active)
             ->value('currency') ?? 'EUR');

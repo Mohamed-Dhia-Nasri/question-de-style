@@ -54,8 +54,8 @@
     @if ($confirmingDetachId !== null)
         <x-ui.confirm-modal title="Remove creator from seeding run?" confirm-action="detach" cancel-action="cancelDetach"
             confirm-label="Remove creator">
-            Existing shipments to this creator keep their history. The action is recorded in the
-            audit log.
+            Creators with shipments on this run can’t be removed — delete their shipments first.
+            The action is recorded in the audit log.
         </x-ui.confirm-modal>
     @endif
 </div>

@@ -286,8 +286,8 @@ return [
         'attribution' => [
             // A shipment supports SEEDED attribution only when the content
             // was published within this many days after delivery/shipping.
-            // NOT canonically decided (flagged) — configurable until an
-            // ADR fixes it.
+            // DEFAULT for tenants without a Settings → Monitoring row
+            // (ADR-0025 — per-tenant via MonitoringSettingsResolver).
             'shipment_window_days' => (int) env('QDS_ENRICHMENT_SHIPMENT_WINDOW_DAYS', 60),
         ],
 

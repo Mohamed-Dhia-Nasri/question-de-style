@@ -37,6 +37,13 @@ class CreatorWriter
      */
     private const MANUAL_ENTRY_SURFACE = 'crm-ui-v1';
 
+    /**
+     * Entry surface for creators/accounts brought in through the CRM's CSV
+     * import (F10): a manual-entry origin distinct from the single-account
+     * operator panel, so a bulk-imported row stays traceable to that surface.
+     */
+    public const CSV_IMPORT_SURFACE = 'crm-csv-import-v1';
+
     public function __construct(private readonly RosterEnrollment $roster) {}
 
     /**
@@ -157,6 +164,11 @@ class CreatorWriter
      * spec's operator-editable field set is platform + handle + bio +
      * external links; observed counts arrive via profile sync.
      *
+     * The $surface names the entry point stamped into the provenance's
+     * sourceVersion — the single-account panel keeps the default, CSV import
+     * passes self::CSV_IMPORT_SURFACE. Optional and trailing, so existing
+     * callers are unaffected.
+     *
      * @param  list<string>  $externalLinks
      *
      * @throws PlatformAccountConflict
@@ -167,12 +179,13 @@ class CreatorWriter
         string $handle,
         ?string $bio = null,
         array $externalLinks = [],
+        string $surface = self::MANUAL_ENTRY_SURFACE,
     ): PlatformAccount {
         return $this->addPlatformAccount(
             $creator,
             $platform,
             $handle,
-            $this->manualEntryProvenance(),
+            $this->manualEntryProvenance($surface),
             $bio,
             $externalLinks,
         );
@@ -242,12 +255,12 @@ class CreatorWriter
         });
     }
 
-    private function manualEntryProvenance(): Provenance
+    private function manualEntryProvenance(string $surface = self::MANUAL_ENTRY_SURFACE): Provenance
     {
         return new Provenance(
             SourceRegistry::AGENCY_MANUAL_ENTRY,
             CarbonImmutable::now(),
-            self::MANUAL_ENTRY_SURFACE,
+            $surface,
         );
     }
 

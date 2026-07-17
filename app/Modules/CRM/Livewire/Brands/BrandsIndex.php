@@ -2,6 +2,7 @@
 
 namespace App\Modules\CRM\Livewire\Brands;
 
+use App\Modules\CRM\Livewire\Concerns\WithInlineCreate;
 use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Client;
 use App\Shared\Audit\AuditLogger;
@@ -23,6 +24,7 @@ use Livewire\Component;
 class BrandsIndex extends Component
 {
     use WithDataTable;
+    use WithInlineCreate;
 
     // --- create/edit form state ---
     public bool $showForm = false;
@@ -47,6 +49,12 @@ class BrandsIndex extends Component
 
         if ($this->sortField === '') {
             $this->sortField = 'name';
+        }
+
+        // Overview quick-action deep link (F02) — the can() guard keeps a
+        // crm.view-only visitor on a working page instead of a 403.
+        if (request()->boolean('create') && auth()->user()->can('create', Brand::class)) {
+            $this->create();
         }
     }
 
@@ -101,12 +109,23 @@ class BrandsIndex extends Component
     /** @return array<string, string> */
     protected function validationAttributes(): array
     {
-        return [
+        return array_merge([
             'brand_client_id' => 'client',
             'brand_name' => 'name',
             'brand_sector' => 'sector',
             'brand_aliases' => 'aliases',
-        ];
+        ], $this->inlineValidationAttributes());
+    }
+
+    /** @return list<string> */
+    protected function inlineCreateTypes(): array
+    {
+        return ['client'];
+    }
+
+    protected function inlineCreated(string $type, int $id): void
+    {
+        $this->brand_client_id = (string) $id;
     }
 
     public function save(AuditLogger $audit): void
@@ -145,6 +164,12 @@ class BrandsIndex extends Component
 
     public function cancelForm(): void
     {
+        if ($this->inlineCreate !== null) {
+            $this->cancelInlineCreate();
+
+            return;
+        }
+
         $this->showForm = false;
         $this->resetForm();
     }

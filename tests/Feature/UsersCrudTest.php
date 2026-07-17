@@ -210,15 +210,19 @@ class UsersCrudTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'user.deleted', 'subject_id' => $user->id]);
     }
 
-    public function test_admins_cannot_demote_or_deactivate_themselves(): void
+    public function test_admins_cannot_be_pointed_at_client_viewer_or_deactivate_themselves(): void
     {
         $admin = $this->actingAsAdmin();
 
+        // CLIENT_VIEWER isn't an assignable role at all now (ADR-0016, Task
+        // 12) — this fails the allow-list before the self-lockout guard
+        // below ever runs. Self-demotion between staff roles is covered
+        // separately in test_admins_cannot_demote_themselves_to_another_staff_role().
         Livewire::test(UsersIndex::class)
             ->call('edit', $admin->id)
             ->set('role', RoleName::ClientViewer->value)
             ->call('save')
-            ->assertHasErrors(['role']);
+            ->assertHasErrors(['role' => 'in']);
 
         Livewire::test(UsersIndex::class)
             ->call('edit', $admin->id)
@@ -229,6 +233,19 @@ class UsersCrudTest extends TestCase
         $admin->refresh();
         $this->assertSame(RoleName::Admin, $admin->roleName());
         $this->assertTrue($admin->active);
+    }
+
+    public function test_admins_cannot_demote_themselves_to_another_staff_role(): void
+    {
+        $admin = $this->actingAsAdmin();
+
+        Livewire::test(UsersIndex::class)
+            ->call('edit', $admin->id)
+            ->set('role', RoleName::Analyst->value)
+            ->call('save')
+            ->assertHasErrors(['role']);
+
+        $this->assertSame(RoleName::Admin, $admin->fresh()->roleName());
     }
 
     public function test_audit_context_preserves_the_actor_id(): void

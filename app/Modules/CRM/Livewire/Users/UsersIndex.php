@@ -149,7 +149,7 @@ class UsersIndex extends Component
         $validated = $this->validate([
             'display_name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', Rule::unique('users', 'email')->ignore($this->editingUserId)],
-            'role' => ['required', Rule::in(array_column(RoleName::cases(), 'value'))],
+            'role' => ['required', Rule::in(array_column($this->allowedRoles(), 'value'))],
             'active' => ['boolean'],
             'password' => $editing ? ['nullable', 'string', 'min:12'] : ['required', 'string', 'min:12'],
         ]);
@@ -316,6 +316,29 @@ class UsersIndex extends Component
 
     // -------------------------------------------------------------------------
 
+    /**
+     * ADR-0016: no client accounts are created on any path — staff roles
+     * only, matching the invitation panel (TeamInvitationsPanel::invite). An
+     * existing CLIENT_VIEWER user stays editable (their current role remains
+     * valid for them), but nobody new can be pointed at the empty shell.
+     *
+     * @return list<RoleName>
+     */
+    protected function allowedRoles(): array
+    {
+        $roles = RoleName::staff();
+
+        if ($this->editingUserId !== null) {
+            $current = User::query()->findOrFail($this->editingUserId)->roleName();
+
+            if ($current !== null && ! in_array($current, $roles, true)) {
+                $roles[] = $current;
+            }
+        }
+
+        return $roles;
+    }
+
     protected function resetForm(): void
     {
         $this->resetValidation();
@@ -331,7 +354,7 @@ class UsersIndex extends Component
     {
         return view('livewire.crm.users-index', [
             'users' => $this->usersQuery()->paginate($this->perPage()),
-            'roles' => RoleName::cases(),
+            'roles' => $this->allowedRoles(),
         ]);
     }
 }

@@ -124,6 +124,21 @@
                     <x-form.error for="seeding_name" />
                 </div>
 
+                <div>
+                    <x-form.label for="seeding_brand_id" required>Brand</x-form.label>
+                    <x-form.select id="seeding_brand_id" wire:model.live="seeding_brand_id" :error="$errors->has('seeding_brand_id')">
+                        <option value="">Select a brand…</option>
+                        @foreach ($brands as $brandOption)
+                            <option value="{{ $brandOption->id }}">{{ $brandOption->name }}</option>
+                        @endforeach
+                    </x-form.select>
+                    <x-form.error for="seeding_brand_id" />
+                    @can('create', \App\Modules\CRM\Models\Brand::class)
+                        <button type="button" wire:click="openInlineCreate('brand')"
+                            class="mt-1.5 text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">+ New brand</button>
+                    @endcan
+                </div>
+
                 <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
                     <div x-data="{ s: @js($seeding_type), map: @js($typeDescriptions) }">
                         <x-form.label for="seeding_type" required>Seeding type</x-form.label>
@@ -138,35 +153,27 @@
                         <x-form.error for="seeding_type" />
                     </div>
 
-                    <div x-data="{ s: @js($seeding_status), map: @js($statusDescriptions) }">
-                        <x-form.label for="seeding_status" required>Status</x-form.label>
-                        <x-form.select id="seeding_status" wire:model="seeding_status" x-on:change="s = $event.target.value"
-                            :error="$errors->has('seeding_status')">
-                            @foreach ($statuses as $statusOption)
-                                <option value="{{ $statusOption->value }}">{{ $statusOption->label() }}</option>
-                            @endforeach
-                        </x-form.select>
-                        <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
-                        <x-form.error for="seeding_status" />
-                    </div>
+                    @if ($editingSeedingId !== null)
+                        <div x-data="{ s: @js($seeding_status), map: @js($statusDescriptions) }">
+                            <x-form.label for="seeding_status" required>Status</x-form.label>
+                            <x-form.select id="seeding_status" wire:model="seeding_status" x-on:change="s = $event.target.value"
+                                :error="$errors->has('seeding_status')">
+                                @foreach ($statuses as $statusOption)
+                                    <option value="{{ $statusOption->value }}">{{ $statusOption->label() }}</option>
+                                @endforeach
+                            </x-form.select>
+                            <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
+                            <x-form.error for="seeding_status" />
+                        </div>
+                    @endif
                 </div>
 
                 <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
                     <div>
-                        <x-form.label for="seeding_brand_id" required>Brand</x-form.label>
-                        <x-form.select id="seeding_brand_id" wire:model="seeding_brand_id" :error="$errors->has('seeding_brand_id')">
-                            <option value="">Select a brand…</option>
-                            @foreach ($brands as $brandOption)
-                                <option value="{{ $brandOption->id }}">{{ $brandOption->name }}</option>
-                            @endforeach
-                        </x-form.select>
-                        <x-form.error for="seeding_brand_id" />
-                    </div>
-
-                    <div>
                         <x-form.label for="seeding_product_id">Primary product</x-form.label>
-                        <x-form.select id="seeding_product_id" wire:model="seeding_product_id" :error="$errors->has('seeding_product_id')">
-                            <option value="">No primary product</option>
+                        <x-form.select id="seeding_product_id" wire:model="seeding_product_id"
+                            :error="$errors->has('seeding_product_id')" :disabled="$seeding_brand_id === ''">
+                            <option value="">{{ $seeding_brand_id === '' ? 'Choose a brand first' : 'No primary product' }}</option>
                             @foreach ($products as $productOption)
                                 <option value="{{ $productOption->id }}">{{ $productOption->name }}</option>
                             @endforeach
@@ -175,29 +182,46 @@
                             Optional default — each shipment picks its own product.
                         </p>
                         <x-form.error for="seeding_product_id" />
+                        @if ($seeding_brand_id !== '')
+                            @can('create', \App\Modules\CRM\Models\Product::class)
+                                <button type="button" wire:click="openInlineCreate('product')"
+                                    class="mt-1.5 text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">+ New product</button>
+                            @endcan
+                        @endif
+                    </div>
+
+                    <div>
+                        <x-form.label for="seeding_campaign_id">Parent campaign</x-form.label>
+                        <x-form.select id="seeding_campaign_id" wire:model="seeding_campaign_id"
+                            :error="$errors->has('seeding_campaign_id')" :disabled="$seeding_brand_id === ''">
+                            <option value="">{{ $seeding_brand_id === '' ? 'Choose a brand first' : 'No parent campaign' }}</option>
+                            @foreach ($campaigns as $campaignOption)
+                                <option value="{{ $campaignOption->id }}">{{ $campaignOption->name }}</option>
+                            @endforeach
+                        </x-form.select>
+                        <x-form.error for="seeding_campaign_id" />
+                        @if ($seeding_brand_id !== '')
+                            @can('create', \App\Modules\CRM\Models\Campaign::class)
+                                <button type="button" wire:click="openInlineCreate('campaign')"
+                                    class="mt-1.5 text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">+ New campaign</button>
+                            @endcan
+                        @endif
                     </div>
                 </div>
 
-                <div>
-                    <x-form.label for="seeding_campaign_id">Parent campaign</x-form.label>
-                    <x-form.select id="seeding_campaign_id" wire:model="seeding_campaign_id" :error="$errors->has('seeding_campaign_id')">
-                        <option value="">No parent campaign</option>
-                        @foreach ($campaigns as $campaignOption)
-                            <option value="{{ $campaignOption->id }}">{{ $campaignOption->name }}</option>
-                        @endforeach
-                    </x-form.select>
-                    <x-form.error for="seeding_campaign_id" />
-                </div>
-
-                <div>
-                    <x-form.label for="seeding_spend">Spend ({{ app(\App\Shared\Support\TenantCurrency::class)->code() }})</x-form.label>
-                    <x-form.input id="seeding_spend" wire:model="seeding_spend" type="number" step="0.01" min="0"
-                        :error="$errors->has('seeding_spend')" />
-                    <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                        What you actually paid — used for the cost-per-result numbers on Results.
-                    </p>
-                    <x-form.error for="seeding_spend" />
-                </div>
+                @if ($editingSeedingId !== null)
+                    <div>
+                        <x-form.label for="seeding_spend">Spend ({{ app(\App\Shared\Support\TenantCurrency::class)->code() }})</x-form.label>
+                        <x-form.input id="seeding_spend" wire:model="seeding_spend" type="number" step="0.01" min="0"
+                            :error="$errors->has('seeding_spend')" />
+                        <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
+                            What you actually paid — used for the cost-per-result numbers on Results.
+                        </p>
+                        <x-form.error for="seeding_spend" />
+                    </div>
+                @else
+                    <p class="text-xs text-gray-500 dark:text-gray-400">New seeding runs start as a draft — status and spend move to editing once it exists.</p>
+                @endif
             </form>
 
             <x-slot:footer>
@@ -209,6 +233,10 @@
             </x-slot:footer>
         </x-ui.modal>
     @endif
+
+    <x-crm.inline-create :type="$inlineCreate"
+        :clients="$clients ?? \App\Modules\CRM\Models\Client::orderBy('name')->get()"
+        :new-client="$inline_new_client" />
 
     @if ($confirmingDeleteId !== null)
         <x-ui.confirm-modal title="Delete seeding run?" confirm-action="delete" cancel-action="cancelDelete"

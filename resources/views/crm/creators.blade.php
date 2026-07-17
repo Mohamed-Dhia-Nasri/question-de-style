@@ -6,4 +6,6 @@
     ]" />
 
     @livewire('crm.creators-index')
+
+    @livewire('crm.creator-csv-import')
 </x-layouts.app>

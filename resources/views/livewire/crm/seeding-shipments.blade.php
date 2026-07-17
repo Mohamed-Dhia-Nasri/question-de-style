@@ -146,45 +146,58 @@
                             @endforeach
                         </x-form.select>
                         <x-form.error for="shipment_product_id" />
+                        @can('create', \App\Modules\CRM\Models\Product::class)
+                            <button type="button" wire:click="openInlineCreate('product')"
+                                class="mt-1.5 text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">+ New product</button>
+                        @endcan
                     </div>
                 </div>
 
                 <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
                     <div x-data="{ s: @js($shipment_status), map: @js($statusDescriptions) }">
                         <x-form.label for="shipment_status" required>Status</x-form.label>
-                        <x-form.select id="shipment_status" wire:model="shipment_status" x-on:change="s = $event.target.value"
+                        <x-form.select id="shipment_status" wire:model.live="shipment_status" x-on:change="s = $event.target.value"
                             :error="$errors->has('shipment_status')">
                             @foreach ($statuses as $statusOption)
                                 <option value="{{ $statusOption->value }}">{{ $statusOption->label() }}</option>
                             @endforeach
                         </x-form.select>
                         <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">More fields appear once the parcel is on its way.</p>
                         <x-form.error for="shipment_status" />
                     </div>
 
-                    <div>
-                        <x-form.label for="shipment_tracking_number">Tracking number</x-form.label>
-                        <x-form.input id="shipment_tracking_number" wire:model="shipment_tracking_number"
-                            :error="$errors->has('shipment_tracking_number')" />
-                        <x-form.error for="shipment_tracking_number" />
-                    </div>
+                    @if ($this->showsTrackingFields())
+                        <div>
+                            <x-form.label for="shipment_tracking_number">Tracking number</x-form.label>
+                            <x-form.input id="shipment_tracking_number" wire:model="shipment_tracking_number"
+                                :error="$errors->has('shipment_tracking_number')" />
+                            <x-form.error for="shipment_tracking_number" />
+                        </div>
+                    @endif
                 </div>
 
-                <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                    <div>
-                        <x-form.label for="shipment_shipped_at">Shipped at</x-form.label>
-                        <x-form.input id="shipment_shipped_at" wire:model="shipment_shipped_at" type="datetime-local"
-                            :error="$errors->has('shipment_shipped_at')" />
-                        <x-form.error for="shipment_shipped_at" />
-                    </div>
+                @if ($this->showsTrackingFields() || $this->showsDeliveryFields())
+                    <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                        @if ($this->showsTrackingFields())
+                            <div>
+                                <x-form.label for="shipment_shipped_at">Shipped at</x-form.label>
+                                <x-form.input id="shipment_shipped_at" wire:model="shipment_shipped_at" type="datetime-local"
+                                    :error="$errors->has('shipment_shipped_at')" />
+                                <x-form.error for="shipment_shipped_at" />
+                            </div>
+                        @endif
 
-                    <div>
-                        <x-form.label for="shipment_delivered_at">Delivered at</x-form.label>
-                        <x-form.input id="shipment_delivered_at" wire:model="shipment_delivered_at" type="datetime-local"
-                            :error="$errors->has('shipment_delivered_at')" />
-                        <x-form.error for="shipment_delivered_at" />
+                        @if ($this->showsDeliveryFields())
+                            <div>
+                                <x-form.label for="shipment_delivered_at">Delivered at</x-form.label>
+                                <x-form.input id="shipment_delivered_at" wire:model="shipment_delivered_at" type="datetime-local"
+                                    :error="$errors->has('shipment_delivered_at')" />
+                                <x-form.error for="shipment_delivered_at" />
+                            </div>
+                        @endif
                     </div>
-                </div>
+                @endif
 
                 <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
                     <div>
@@ -217,6 +230,8 @@
             </x-slot:footer>
         </x-ui.modal>
     @endif
+
+    <x-crm.inline-create :type="$inlineCreate" />
 
     {{-- Manual content link (XMC-002 confirm) --}}
     @if ($linkingShipmentId !== null)

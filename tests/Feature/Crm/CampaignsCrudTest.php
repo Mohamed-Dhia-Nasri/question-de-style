@@ -63,26 +63,37 @@ class CampaignsCrudTest extends TestCase
             ->assertDontSee('Frühjahr Launch');
     }
 
-    public function test_create_validates_the_closed_status_set_and_date_order(): void
+    public function test_create_validates_required_fields_and_date_order(): void
     {
         $this->actingAsCrmStaff();
 
         Livewire::test(CampaignsIndex::class)
             ->call('create')
             ->set('campaign_name', '')
-            ->set('campaign_status', 'LAUNCHED')
             ->set('campaign_start_at', '2026-07-10T10:00')
             ->set('campaign_end_at', '2026-07-01T10:00')
             ->call('save')
             ->assertHasErrors([
                 'campaign_name' => 'required',
                 'campaign_brand_id' => 'required',
-                'campaign_status' => 'in',
                 'campaign_end_at' => 'after_or_equal',
             ]);
     }
 
-    public function test_create_persists_with_an_audit_event(): void
+    public function test_edit_validates_the_closed_status_set(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $campaign = Campaign::factory()->create();
+
+        Livewire::test(CampaignsIndex::class)
+            ->call('edit', $campaign->id)
+            ->set('campaign_status', 'LAUNCHED')
+            ->call('save')
+            ->assertHasErrors(['campaign_status' => 'in']);
+    }
+
+    public function test_create_persists_as_a_draft_with_an_audit_event(): void
     {
         $this->actingAsCrmStaff();
 
@@ -92,12 +103,11 @@ class CampaignsCrudTest extends TestCase
             ->call('create')
             ->set('campaign_name', 'Sommer Kampagne')
             ->set('campaign_brand_id', (string) $brand->id)
-            ->set('campaign_status', CampaignStatus::Planned->value)
             ->call('save')
             ->assertHasNoErrors();
 
         $campaign = Campaign::where('name', 'Sommer Kampagne')->firstOrFail();
-        $this->assertSame(CampaignStatus::Planned, $campaign->status);
+        $this->assertSame(CampaignStatus::Draft, $campaign->status);
         $this->assertDatabaseHas('audit_logs', ['action' => 'campaign.created', 'subject_id' => $campaign->id]);
     }
 
@@ -105,23 +115,20 @@ class CampaignsCrudTest extends TestCase
     {
         $this->actingAsCrmStaff();
 
-        $brand = Brand::factory()->create();
+        $campaign = Campaign::factory()->create();
 
         Livewire::test(CampaignsIndex::class)
-            ->call('create')
-            ->set('campaign_name', 'Spend Kampagne')
-            ->set('campaign_brand_id', (string) $brand->id)
-            ->set('campaign_status', CampaignStatus::Active->value)
+            ->call('edit', $campaign->id)
             ->set('campaign_spend', '1500.50')
             ->call('save')
             ->assertHasNoErrors();
 
-        $campaign = Campaign::where('name', 'Spend Kampagne')->firstOrFail();
+        $fresh = $campaign->fresh();
         // AC-M3-015 input: agency-entered spend rides the envelope at tier CONFIRMED.
-        $this->assertInstanceOf(MetricValue::class, $campaign->spend);
-        $this->assertSame(1500.50, $campaign->spend->amount);
-        $this->assertSame(MetricTier::Confirmed, $campaign->spend->tier);
-        $this->assertSame('spend', $campaign->spend->metric);
+        $this->assertInstanceOf(MetricValue::class, $fresh->spend);
+        $this->assertSame(1500.50, $fresh->spend->amount);
+        $this->assertSame(MetricTier::Confirmed, $fresh->spend->tier);
+        $this->assertSame('spend', $fresh->spend->metric);
     }
 
     public function test_blank_spend_clears_the_stored_value(): void

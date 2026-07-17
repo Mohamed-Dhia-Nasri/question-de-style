@@ -52,19 +52,6 @@ class TasksIndexTest extends TestCase
         $this->get('/crm/tasks')->assertOk()->assertSeeLivewire('crm.tasks-index');
     }
 
-    public function test_the_landing_card_shows_the_open_task_count(): void
-    {
-        $this->actingAsCrmStaff();
-
-        // Open = OPEN/IN_PROGRESS/BLOCKED; DONE/CANCELLED do not count.
-        Task::factory()->create(['status' => TaskStatus::Open]);
-        Task::factory()->create(['status' => TaskStatus::Blocked]);
-        Task::factory()->create(['status' => TaskStatus::Done]);
-        Task::factory()->create(['status' => TaskStatus::Cancelled]);
-
-        $this->get('/crm')->assertOk()->assertSee('2 open');
-    }
-
     public function test_a_task_is_created_with_all_fields_and_audited(): void
     {
         $this->actingAsCrmStaff();

@@ -2,7 +2,9 @@
 
 namespace App\Modules\CRM\Livewire\Products;
 
+use App\Modules\CRM\Livewire\Concerns\WithInlineCreate;
 use App\Modules\CRM\Models\Brand;
+use App\Modules\CRM\Models\Client;
 use App\Modules\CRM\Models\Product;
 use App\Shared\Audit\AuditLogger;
 use App\Shared\Enums\MetricTier;
@@ -26,6 +28,7 @@ use Livewire\Component;
 class ProductsIndex extends Component
 {
     use WithDataTable;
+    use WithInlineCreate;
 
     // --- create/edit form state ---
     public bool $showForm = false;
@@ -111,14 +114,25 @@ class ProductsIndex extends Component
     /** @return array<string, string> */
     protected function validationAttributes(): array
     {
-        return [
+        return array_merge([
             'product_brand_id' => 'brand',
             'product_name' => 'name',
             'product_sku' => 'SKU',
             'product_variant' => 'product variant',
             'product_unit_value' => 'unit value',
             'product_category' => 'sector',
-        ];
+        ], $this->inlineValidationAttributes());
+    }
+
+    /** @return list<string> */
+    protected function inlineCreateTypes(): array
+    {
+        return ['brand'];
+    }
+
+    protected function inlineCreated(string $type, int $id): void
+    {
+        $this->product_brand_id = (string) $id;
     }
 
     public function save(AuditLogger $audit): void
@@ -164,6 +178,12 @@ class ProductsIndex extends Component
 
     public function cancelForm(): void
     {
+        if ($this->inlineCreate !== null) {
+            $this->cancelInlineCreate();
+
+            return;
+        }
+
         $this->showForm = false;
         $this->resetForm();
     }
@@ -237,6 +257,7 @@ class ProductsIndex extends Component
         return view('livewire.crm.products-index', [
             'products' => $this->productsQuery()->paginate($this->perPage()),
             'brands' => Brand::orderBy('name')->get(),
+            'clients' => Client::orderBy('name')->get(),
             'categories' => SectorLabel::cases(),
         ]);
     }

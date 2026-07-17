@@ -128,17 +128,6 @@ class SeedingResultsDashboardTest extends TestCase
         Livewire::test(SeedingResultsDashboard::class)->assertForbidden();
     }
 
-    public function test_the_crm_landing_card_links_to_the_results_page(): void
-    {
-        $this->actingAsCrmStaff();
-
-        $this->get('/crm')
-            ->assertOk()
-            // Static blade markup carries the raw ampersand — skip escaping.
-            ->assertSee('Results & Reporting', false)
-            ->assertSee(route('crm.results'));
-    }
-
     public function test_product_totals_render_with_tier_badges_and_derived_post_rate(): void
     {
         $this->actingAsCrmStaff();

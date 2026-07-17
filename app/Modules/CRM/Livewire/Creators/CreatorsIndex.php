@@ -13,6 +13,7 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\QueryException;
 use Illuminate\Validation\Rule;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
@@ -59,6 +60,12 @@ class CreatorsIndex extends Component
 
         if ($this->sortField === '') {
             $this->sortField = 'display_name';
+        }
+
+        // Overview quick-action deep link (F02) — the can() guard keeps a
+        // crm.view-only visitor on a working page instead of a 403.
+        if (request()->boolean('create') && auth()->user()->can('create', Creator::class)) {
+            $this->create();
         }
     }
 
@@ -180,6 +187,14 @@ class CreatorsIndex extends Component
         $this->showForm = false;
         $this->resetForm();
     }
+
+    /**
+     * After the CSV import writes new creators, re-render so the freshly
+     * imported rows appear without a manual reload. The import itself is done
+     * by the sibling CreatorCsvImport component; this is only a refresh hook.
+     */
+    #[On('creators-imported')]
+    public function refreshAfterImport(): void {}
 
     // --- delete (the ADR-0014 stray-duplicate lever) -------------------------
 

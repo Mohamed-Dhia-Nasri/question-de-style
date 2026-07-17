@@ -2,27 +2,33 @@
 
 namespace App\Modules\CRM\Livewire\Seeding;
 
-use App\Modules\CRM\Exceptions\BrandRestrictionViolation;
+use App\Modules\CRM\Livewire\Concerns\ManagesCreatorRoster;
+use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\SeedingCampaign;
 use App\Modules\CRM\Services\BrandRestrictionGuard;
 use App\Shared\Audit\AuditLogger;
-use App\Shared\Tenancy\TenantRule;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Validation\ValidationException;
 use Livewire\Component;
 
 /**
- * Seeding creators panel — the seeding_campaign_creator pivot. Same
- * AC-M3-007 hard filter as campaigns: a creator with a brand restriction
- * against the run's brand is blocked from joining. Shipments can only be
- * created for creators attached here (spec D5).
+ * Seeding creators panel — the seeding_campaign_creator pivot. Adding
+ * creators is the shared multi-select roster picker (ManagesCreatorRoster),
+ * the same AC-M3-007 hard filter as campaigns applied against the run's
+ * brand, plus a one-click "copy the parent campaign's roster" shortcut for
+ * runs spawned from a campaign. Detach stays shipment-guarded here — a
+ * creator with shipments on the run can't be removed until those shipments
+ * are gone (the asymmetry with campaigns is intentional; shipments can only
+ * be created for creators attached here, spec D5).
  */
 class SeedingCreatorsPanel extends Component
 {
-    public SeedingCampaign $seedingCampaign;
+    use ManagesCreatorRoster;
 
-    public string $attach_creator_id = '';
+    public SeedingCampaign $seedingCampaign;
 
     public ?int $confirmingDetachId = null;
 
@@ -33,41 +39,87 @@ class SeedingCreatorsPanel extends Component
         $this->seedingCampaign = $seedingCampaign;
     }
 
-    /** @return array<string, string> */
-    protected function validationAttributes(): array
+    protected function rosterOwner(): Model
     {
-        return [
-            'attach_creator_id' => 'creator',
-        ];
+        return $this->seedingCampaign;
     }
 
-    public function attach(BrandRestrictionGuard $guard, AuditLogger $audit): void
+    protected function rosterBrand(): Brand
+    {
+        return $this->seedingCampaign->brand;
+    }
+
+    /** @return BelongsToMany<Creator, SeedingCampaign> */
+    protected function rosterRelation(): BelongsToMany
+    {
+        return $this->seedingCampaign->creators();
+    }
+
+    protected function rosterAuditEvent(): string
+    {
+        return 'seeding_campaign_creator.attached';
+    }
+
+    /**
+     * One-click shortcut for runs spawned from a campaign: attach every
+     * creator on the parent campaign's roster that isn't already on this
+     * run, skipping any the run's brand restricts. A single
+     * syncWithoutDetaching keeps the write atomic; the bulk restriction
+     * check is the same non-throwing companion the picker uses.
+     */
+    public function copyCampaignRoster(BrandRestrictionGuard $guard, AuditLogger $audit): void
     {
         $this->authorize('update', $this->seedingCampaign);
 
-        $validated = $this->validate([
-            'attach_creator_id' => ['required', 'integer', TenantRule::exists('creators', 'id')],
-        ]);
+        if ($this->seedingCampaign->campaign_id === null) {
+            $this->dispatch('notify', type: 'error', message: 'This run has no parent campaign.');
 
-        $creator = Creator::findOrFail((int) $validated['attach_creator_id']);
-
-        try {
-            // AC-M3-007 hard filter against the seeding run's brand.
-            $guard->assertNotRestricted($creator, $this->seedingCampaign->brand);
-        } catch (BrandRestrictionViolation $violation) {
-            throw ValidationException::withMessages(['attach_creator_id' => $violation->getMessage()]);
+            return;
         }
 
-        $result = $this->seedingCampaign->creators()->syncWithoutDetaching([$creator->id]);
+        $sourceIds = $this->seedingCampaign->campaign->creators()
+            ->pluck('creators.id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
 
-        if ($result['attached'] !== []) {
-            $audit->record('seeding_campaign_creator.attached', $this->seedingCampaign, ['creator_id' => $creator->id]);
+        $attachedIds = $this->seedingCampaign->creators()
+            ->pluck('creators.id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $alreadyCount = count(array_intersect($sourceIds, $attachedIds));
+        $candidateIds = array_values(array_diff($sourceIds, $attachedIds));
+
+        $restrictedIds = $guard->restrictedCreatorIds($candidateIds, $this->seedingCampaign->brand);
+        $allowedIds = array_values(array_diff($candidateIds, $restrictedIds));
+
+        if ($allowedIds !== []) {
+            $result = $this->seedingCampaign->creators()->syncWithoutDetaching($allowedIds);
+
+            foreach ($result['attached'] as $attachedId) {
+                $audit->record('seeding_campaign_creator.attached', $this->seedingCampaign, ['creator_id' => (int) $attachedId]);
+            }
         }
 
         $this->seedingCampaign->refresh();
-        $this->attach_creator_id = '';
-        $this->resetValidation();
-        $this->dispatch('notify', type: 'success', message: 'Creator added to the seeding run.');
+
+        $parts = [];
+
+        if ($allowedIds !== []) {
+            $parts[] = count($allowedIds).' added';
+        }
+
+        if ($alreadyCount > 0) {
+            $parts[] = $alreadyCount.' already on this run';
+        }
+
+        if ($restrictedIds !== []) {
+            $parts[] = count($restrictedIds).' skipped (brand restrictions)';
+        }
+
+        $summary = $parts === [] ? 'nothing to copy' : implode(', ', $parts);
+
+        $this->dispatch('notify', type: 'success', message: 'Copied the campaign roster: '.$summary.'.');
     }
 
     public function confirmDetach(int $creatorId): void
@@ -111,16 +163,11 @@ class SeedingCreatorsPanel extends Component
         $this->confirmingDetachId = null;
     }
 
-    public function render(): View
+    public function render(BrandRestrictionGuard $guard): View
     {
-        $attached = $this->seedingCampaign->creators()->orderBy('display_name')->get();
-
-        return view('livewire.crm.seeding-creators', [
-            'attached' => $attached,
-            'available' => Creator::query()
-                ->whereNotIn('id', $attached->pluck('id'))
-                ->orderBy('display_name')
-                ->get(),
-        ]);
+        return view('livewire.crm.seeding-creators', array_merge(
+            $this->pickerViewData($guard),
+            ['parentRosterCount' => $this->seedingCampaign->campaign?->creators()->count() ?? 0],
+        ));
     }
 }

@@ -27,6 +27,10 @@
                 <div class="grow"></div>
 
                 @can('create', \App\Modules\CRM\Models\Campaign::class)
+                    <a href="{{ route('crm.campaigns.create') }}"
+                        class="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-5 py-3 text-sm font-medium text-gray-700 ring-1 ring-inset ring-gray-300 transition hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-400 dark:ring-gray-700 dark:hover:bg-white/[0.03] dark:hover:text-gray-300">
+                        Guided setup
+                    </a>
                     <x-ui.button wire:click="create">New campaign</x-ui.button>
                 @endcan
             </div>
@@ -125,19 +129,25 @@
                             @endforeach
                         </x-form.select>
                         <x-form.error for="campaign_brand_id" />
+                        @can('create', \App\Modules\CRM\Models\Brand::class)
+                            <button type="button" wire:click="openInlineCreate('brand')"
+                                class="mt-1.5 text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">+ New brand</button>
+                        @endcan
                     </div>
 
-                    <div x-data="{ s: @js($campaign_status), map: @js($statusDescriptions) }">
-                        <x-form.label for="campaign_status" required>Status</x-form.label>
-                        <x-form.select id="campaign_status" wire:model="campaign_status"
-                            x-on:change="s = $event.target.value" :error="$errors->has('campaign_status')">
-                            @foreach ($statuses as $statusOption)
-                                <option value="{{ $statusOption->value }}">{{ $statusOption->label() }}</option>
-                            @endforeach
-                        </x-form.select>
-                        <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
-                        <x-form.error for="campaign_status" />
-                    </div>
+                    @if ($editingCampaignId !== null)
+                        <div x-data="{ s: @js($campaign_status), map: @js($statusDescriptions) }">
+                            <x-form.label for="campaign_status" required>Status</x-form.label>
+                            <x-form.select id="campaign_status" wire:model="campaign_status"
+                                x-on:change="s = $event.target.value" :error="$errors->has('campaign_status')">
+                                @foreach ($statuses as $statusOption)
+                                    <option value="{{ $statusOption->value }}">{{ $statusOption->label() }}</option>
+                                @endforeach
+                            </x-form.select>
+                            <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
+                            <x-form.error for="campaign_status" />
+                        </div>
+                    @endif
                 </div>
 
                 <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
@@ -156,15 +166,19 @@
                     </div>
                 </div>
 
-                <div>
-                    <x-form.label for="campaign_spend">Spend ({{ app(\App\Shared\Support\TenantCurrency::class)->code() }})</x-form.label>
-                    <x-form.input id="campaign_spend" wire:model="campaign_spend" type="number" step="0.01" min="0"
-                        :error="$errors->has('campaign_spend')" />
-                    <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                        What you actually paid — used for the cost-per-result numbers on Results.
-                    </p>
-                    <x-form.error for="campaign_spend" />
-                </div>
+                @if ($editingCampaignId !== null)
+                    <div>
+                        <x-form.label for="campaign_spend">Spend ({{ app(\App\Shared\Support\TenantCurrency::class)->code() }})</x-form.label>
+                        <x-form.input id="campaign_spend" wire:model="campaign_spend" type="number" step="0.01" min="0"
+                            :error="$errors->has('campaign_spend')" />
+                        <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
+                            What you actually paid — used for the cost-per-result numbers on Results.
+                        </p>
+                        <x-form.error for="campaign_spend" />
+                    </div>
+                @else
+                    <p class="text-xs text-gray-500 dark:text-gray-400">New campaigns start as a draft — you can change the status and record spend once it’s set up.</p>
+                @endif
             </form>
 
             <x-slot:footer>
@@ -176,6 +190,10 @@
             </x-slot:footer>
         </x-ui.modal>
     @endif
+
+    <x-crm.inline-create :type="$inlineCreate"
+        :clients="$clients ?? \App\Modules\CRM\Models\Client::orderBy('name')->get()"
+        :new-client="$inline_new_client" />
 
     @if ($confirmingDeleteId !== null)
         <x-ui.confirm-modal title="Delete campaign?" confirm-action="delete" cancel-action="cancelDelete"

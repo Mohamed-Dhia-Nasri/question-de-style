@@ -10,10 +10,13 @@ use App\Modules\CRM\Livewire\Seeding\SeedingCampaignsIndex;
 use App\Modules\CRM\Livewire\Seeding\ShipmentsPanel;
 use App\Modules\CRM\Livewire\Tasks\TasksIndex;
 use App\Modules\CRM\Models\Brand;
+use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\SeedingCampaign;
+use App\Shared\Enums\CampaignStatus;
 use App\Shared\Enums\RelationshipStatus;
 use App\Shared\Enums\RoleName;
+use App\Shared\Enums\SeedingCampaignStatus;
 use App\Shared\Enums\SeedingType;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -45,11 +48,15 @@ class StatusDescriptionsTest extends TestCase
     {
         $this->actingAsCrmStaff();
 
-        // @js() JSON-encodes the map, which \u escapes the em dash and
-        // quotes — assert the plain-ASCII tail of the description instead
-        // of the full string (per the brief's documented fallback).
+        // Status only appears on edit (Task 1: create forces Draft and
+        // hides the field) — @js() JSON-encodes the map, which \u escapes
+        // the em dash and quotes, so assert the plain-ASCII tail of the
+        // description instead of the full string (per the brief's
+        // documented fallback).
+        $campaign = Campaign::factory()->create(['status' => CampaignStatus::Draft]);
+
         Livewire::test(CampaignsIndex::class)
-            ->call('create')
+            ->call('edit', $campaign->id)
             ->assertSee('not counted in results yet', false);
     }
 
@@ -57,13 +64,20 @@ class StatusDescriptionsTest extends TestCase
     {
         $this->actingAsCrmStaff();
 
+        // seeding_type starts unselected on create; picking one flips the
+        // map key live.
         Livewire::test(SeedingCampaignsIndex::class)
             ->call('create')
-            // Default seeding_status on create() is DRAFT.
-            ->assertSee('add creators and a product first', false)
-            // seeding_type starts unselected; picking one flips the map key live.
             ->set('seeding_type', SeedingType::Gifting->value)
             ->assertSee('Free product, no posting agreement', false);
+
+        // Status only appears on edit (Task 2: create forces Draft and
+        // hides the field).
+        $seeding = SeedingCampaign::factory()->create(['status' => SeedingCampaignStatus::Draft]);
+
+        Livewire::test(SeedingCampaignsIndex::class)
+            ->call('edit', $seeding->id)
+            ->assertSee('add creators and a product first', false);
     }
 
     public function test_shipment_status_select_carries_meaning_map(): void

@@ -17,6 +17,10 @@
 
                 <div class="grow"></div>
 
+                @can('create', \App\Modules\CRM\Models\Brand::class)
+                    <x-ui.button variant="outline" wire:click="openInlineCreate('brand')">New brand</x-ui.button>
+                @endcan
+
                 @can('create', \App\Modules\CRM\Models\Client::class)
                     <x-ui.button wire:click="create">New client</x-ui.button>
                 @endcan
@@ -81,9 +85,15 @@
                         <tr x-show="open" x-cloak>
                             <td colspan="5" class="bg-gray-50 px-5 py-3 dark:bg-white/[0.02]">
                                 @if ($client->brands->isEmpty())
-                                    <p class="text-sm text-gray-500 dark:text-gray-400">No brands yet — create one on the <a href="{{ route('crm.brands.index') }}" class="font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">Brands page</a>.</p>
+                                    <div class="flex flex-wrap items-center gap-3">
+                                        <p class="text-sm text-gray-500 dark:text-gray-400">No brands yet.</p>
+                                        @can('create', \App\Modules\CRM\Models\Brand::class)
+                                            <button type="button" wire:click="addBrandForClient({{ $client->id }})"
+                                                class="text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">＋ Add brand</button>
+                                        @endcan
+                                    </div>
                                 @else
-                                    <ul class="flex flex-wrap gap-x-6 gap-y-1.5">
+                                    <ul class="flex flex-wrap items-center gap-x-6 gap-y-1.5">
                                         @foreach ($client->brands as $brand)
                                             <li>
                                                 <a href="{{ route('crm.brands.show', $brand) }}" class="text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">{{ $brand->name }}</a>
@@ -92,6 +102,12 @@
                                                 @endif
                                             </li>
                                         @endforeach
+                                        @can('create', \App\Modules\CRM\Models\Brand::class)
+                                            <li>
+                                                <button type="button" wire:click="addBrandForClient({{ $client->id }})"
+                                                    class="text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">＋ Add brand</button>
+                                            </li>
+                                        @endcan
                                     </ul>
                                 @endif
                             </td>
@@ -141,6 +157,8 @@
             </x-slot:footer>
         </x-ui.modal>
     @endif
+
+    <x-crm.inline-create :type="$inlineCreate" :clients="$allClients" :new-client="$inline_new_client" />
 
     @if ($confirmingDeleteId !== null)
         <x-ui.confirm-modal title="Delete client?" confirm-action="delete" cancel-action="cancelDelete"

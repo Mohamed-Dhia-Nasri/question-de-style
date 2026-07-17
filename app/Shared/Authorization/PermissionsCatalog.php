@@ -83,6 +83,12 @@ final class PermissionsCatalog
     public const REACH_MANAGE = 'reach.manage';
 
     /**
+     * Save the per-tenant monitoring settings (gift-link window, trend
+     * window, retention periods — ADR-0025). ADMIN only.
+     */
+    public const MONITORING_SETTINGS_MANAGE = 'monitoring-settings.manage';
+
+    /**
      * Request/download rollup-backed report exports (REQ-M1-012). Staff
      * only — CLIENT_VIEWER never exports internal reports; its surface is
      * the approved-reports area (REQ-M3-012, P3).
@@ -114,6 +120,7 @@ final class PermissionsCatalog
             self::EMV_MANAGE,
             self::SETTINGS_VIEW,
             self::REACH_MANAGE,
+            self::MONITORING_SETTINGS_MANAGE,
             self::EXPORTS_CREATE,
             self::OPERATIONS_VIEW,
         ];

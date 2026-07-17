@@ -151,7 +151,7 @@
     </div>
 
     {{-- Average / median performance (DERIVED, never PUBLIC) --}}
-    <div class="mt-4 grid gap-4 sm:grid-cols-2">
+    <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
             <p class="text-sm text-gray-500 dark:text-gray-400">Average views (recent content)</p>
             <div class="mt-2">
@@ -162,6 +162,25 @@
             <p class="text-sm text-gray-500 dark:text-gray-400">Median views (recent content)</p>
             <div class="mt-2">
                 <x-metric.value :metric="$medianPerformance" reason="No observed views on the listed content." />
+            </div>
+        </div>
+        <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
+            <p class="text-sm text-gray-500 dark:text-gray-400">Engagement trend (last {{ $trendWindowDays }} days)</p>
+            <div class="mt-2">
+                @if ($engagementTrend !== null)
+                    <div class="flex items-center gap-2">
+                        <span class="text-lg font-semibold text-gray-800 dark:text-white/90">
+                            {{ $engagementTrend->percentChange >= 0 ? '+' : '' }}{{ $engagementTrend->percentChange }}%
+                        </span>
+                        <x-metric.tier-badge tier="DERIVED" />
+                    </div>
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Average likes + comments per post vs the {{ $trendWindowDays }} days before
+                        ({{ $engagementTrend->currentCount }} vs {{ $engagementTrend->previousCount }} posts).
+                    </p>
+                @else
+                    <x-states.unavailable reason="Not enough posts in the two comparison windows yet." />
+                @endif
             </div>
         </div>
     </div>

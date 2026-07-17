@@ -2,7 +2,9 @@
 
 namespace App\Modules\CRM\Console;
 
+use App\Models\Tenant;
 use App\Modules\CRM\Models\CommunicationLog;
+use App\Shared\Settings\MonitoringSettingsResolver;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
@@ -11,9 +13,9 @@ use Illuminate\Support\Facades\Storage;
  * GDPR retention enforcement (P4 hardening, DP-005 retention limits):
  *
  *  - communication logs (free-form correspondence — the longest-lived PII
- *    the CRM accumulates) are deleted past their retention window. The
- *    period is NOT canonically decided (same flagged class as the other
- *    cadences) — 0 disables it until an ADR fixes the policy;
+ *    the CRM accumulates) are deleted past their retention window, resolved
+ *    PER TENANT (ADR-0025) — config default of 0 keeps history forever for
+ *    tenants that never saved Settings → Monitoring;
  *  - finished GDPR export files (gdpr/ on the exports disk) are deleted
  *    past the standard export TTL — they contain the FULL data-subject
  *    dossier and must not accumulate.
@@ -24,9 +26,9 @@ class GdprEnforceRetentionCommand extends Command
 
     protected $description = 'Enforce GDPR retention limits: old communication logs and leftover GDPR export files (DP-005)';
 
-    public function handle(): int
+    public function handle(MonitoringSettingsResolver $settings): int
     {
-        $logs = $this->pruneCommunicationLogs();
+        $logs = $this->pruneCommunicationLogs($settings);
         $files = $this->pruneGdprExportFiles();
 
         $this->info("Pruned {$logs} communication logs and {$files} GDPR export files.");
@@ -34,17 +36,26 @@ class GdprEnforceRetentionCommand extends Command
         return self::SUCCESS;
     }
 
-    private function pruneCommunicationLogs(): int
+    private function pruneCommunicationLogs(MonitoringSettingsResolver $settings): int
     {
-        $retentionDays = (int) config('qds.gdpr.communication_log_retention_days');
+        $pruned = 0;
 
-        if ($retentionDays <= 0) {
-            return 0; // disabled until a retention ADR fixes the period
+        // ADR-0025: per-tenant keep-time; 0 = keep forever for that tenant.
+        foreach (Tenant::query()->pluck('id') as $tenantId) {
+            $retentionDays = $settings->communicationRetentionDaysFor((int) $tenantId);
+
+            if ($retentionDays <= 0) {
+                continue;
+            }
+
+            $pruned += CommunicationLog::query()
+                ->withoutGlobalScopes()
+                ->where('tenant_id', $tenantId)
+                ->where('occurred_at', '<', CarbonImmutable::now()->subDays($retentionDays))
+                ->delete();
         }
 
-        return CommunicationLog::query()
-            ->where('occurred_at', '<', CarbonImmutable::now()->subDays($retentionDays))
-            ->delete();
+        return $pruned;
     }
 
     private function pruneGdprExportFiles(): int

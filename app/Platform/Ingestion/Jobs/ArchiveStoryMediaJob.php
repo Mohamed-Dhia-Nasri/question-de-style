@@ -3,6 +3,7 @@
 namespace App\Platform\Ingestion\Jobs;
 
 use App\Modules\Monitoring\Models\Story;
+use App\Platform\Enrichment\PerPullEnrichmentDispatcher;
 use App\Platform\Ingestion\Jobs\Concerns\IngestionJobBehaviour;
 use App\Platform\Ingestion\Models\ProviderCall;
 use App\Platform\Ingestion\SourceRegistry;
@@ -110,6 +111,11 @@ class ArchiveStoryMediaJob implements ShouldQueue
         $story->update(['media_url' => $path]);
 
         $this->recordArchival($story, $startedAt, $startedMono, CallOutcome::Success, null, strlen($response->body()));
+
+        // ADR-0023: story enrichment follows the successful archive —
+        // recognition needs the stored media file.
+        app(PerPullEnrichmentDispatcher::class)
+            ->dispatchForStory((int) $story->id, $this->correlationId);
     }
 
     private function recordArchival(

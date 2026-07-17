@@ -18,5 +18,7 @@ final readonly class PersistenceResult
         public int $skipped = 0,
         public float $persistenceMs = 0.0,
         public float $mediaMs = 0.0,
+        /** @var list<int> Ids of newly created ContentItem rows (ADR-0023 per-pull enrichment). */
+        public array $createdIds = [],
     ) {}
 }

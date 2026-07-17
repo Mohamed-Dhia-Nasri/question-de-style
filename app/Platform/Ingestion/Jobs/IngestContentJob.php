@@ -3,6 +3,7 @@
 namespace App\Platform\Ingestion\Jobs;
 
 use App\Modules\CRM\Models\PlatformAccount;
+use App\Platform\Enrichment\PerPullEnrichmentDispatcher;
 use App\Platform\Ingestion\Contracts\PlatformAccountProfileSync;
 use App\Platform\Ingestion\Contracts\ProvidesProfileFromContent;
 use App\Platform\Ingestion\DTO\ContentData;
@@ -142,6 +143,11 @@ class IngestContentJob implements ShouldQueue
             $result = $persister->persist($account, $items);
 
             $recorder->recordCompletion($context, $batch, $result);
+
+            // ADR-0023: the AI check follows the pull — newly created rows
+            // only (refreshed duplicates never re-enrich).
+            app(PerPullEnrichmentDispatcher::class)
+                ->dispatchForContent($result->createdIds, $this->correlationId);
 
             if ($provider instanceof ProvidesProfileFromContent
                 && ($profile = $provider->profileFromLastFetch()) !== null) {

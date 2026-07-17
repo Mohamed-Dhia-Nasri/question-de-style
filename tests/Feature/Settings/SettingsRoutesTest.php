@@ -21,6 +21,7 @@ class SettingsRoutesTest extends TestCase
         $analyst = $this->makeUser(RoleName::Analyst);
         $this->actingAs($analyst)->get('/settings/emv')->assertOk();
         $this->actingAs($analyst)->get('/settings/reach')->assertOk();
+        $this->actingAs($analyst)->get('/settings/monitoring')->assertOk();
     }
 
     public function test_client_viewer_is_forbidden_from_settings(): void
@@ -28,6 +29,7 @@ class SettingsRoutesTest extends TestCase
         $client = $this->makeUser(RoleName::ClientViewer);
         $this->actingAs($client)->get('/settings/emv')->assertForbidden();
         $this->actingAs($client)->get('/settings/reach')->assertForbidden();
+        $this->actingAs($client)->get('/settings/monitoring')->assertForbidden();
     }
 
     public function test_old_monitoring_emv_route_is_gone(): void

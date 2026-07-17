@@ -10,6 +10,7 @@ use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\Client;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\SeedingCampaign;
+use App\Modules\Monitoring\Models\MonitoredSubject;
 use App\Shared\Authorization\PermissionsCatalog;
 use App\Shared\Enums\CampaignStatus;
 use App\Shared\Enums\RoleName;
@@ -163,6 +164,59 @@ class CampaignWizardTest extends TestCase
             ->call('next')
             ->assertSet('step', 4)
             ->assertSee('no-go');
+    }
+
+    public function test_creating_a_creator_inline_on_the_creators_step_enrolls_preselects_and_attaches_on_finish(): void
+    {
+        $this->actingAsCrmStaff();
+        $client = Client::factory()->create();
+        $brand = Brand::factory()->create(['client_id' => $client->id]);
+
+        $component = Livewire::test(CampaignWizard::class)
+            ->set('wizard_client_id', (string) $client->id)
+            ->set('wizard_brand_id', (string) $brand->id)
+            ->call('next')
+            ->set('campaign_name', 'Roster Grow')
+            ->call('next')
+            ->call('next')
+            ->assertSet('step', 4)
+            ->set('showNewCreatorForm', true)
+            ->set('new_creator_name', 'Ines Inline')
+            ->set('new_creator_language', 'de')
+            ->call('createCreator')
+            ->assertHasNoErrors();
+
+        $creator = Creator::query()->where('display_name', 'Ines Inline')->firstOrFail();
+
+        $component->assertSet('showNewCreatorForm', false)
+            ->assertSet('new_creator_name', '')
+            ->assertSet('new_creator_language', '')
+            ->assertSet('selected_creator_ids', [(string) $creator->id])
+            ->assertDispatched('notify', type: 'success');
+
+        // createCreator routes through CreatorWriter, so monitoring
+        // enrollment happens in the same transaction as csv import / the
+        // roster picker's createAndAttachCreator.
+        $this->assertTrue(MonitoredSubject::query()->where('creator_id', $creator->id)->exists());
+        $this->assertDatabaseHas('audit_logs', ['action' => 'creator.created', 'subject_id' => $creator->id]);
+
+        $component->call('finish')->assertSet('finished', true);
+
+        $campaign = Campaign::query()->where('name', 'Roster Grow')->firstOrFail();
+        $this->assertTrue($campaign->creators()->whereKey($creator->id)->exists());
+    }
+
+    public function test_creating_a_creator_inline_requires_a_name(): void
+    {
+        $this->actingAsCrmStaff();
+
+        Livewire::test(CampaignWizard::class)
+            ->set('showNewCreatorForm', true)
+            ->set('new_creator_name', '')
+            ->call('createCreator')
+            ->assertHasErrors('new_creator_name');
+
+        $this->assertSame(0, Creator::query()->count());
     }
 
     public function test_view_only_users_cannot_create_via_finish(): void

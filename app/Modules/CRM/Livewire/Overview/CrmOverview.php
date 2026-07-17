@@ -52,30 +52,39 @@ class CrmOverview extends Component
                 'label' => 'Create your first client',
                 'hint' => 'The company you work for.',
                 'url' => route('crm.clients.index').'?create=1',
+                'can' => true,
             ],
             [
                 'done' => $counts['brands'] > 0,
                 'label' => 'Add a brand',
                 'hint' => 'Brands belong to a client and own campaigns and products.',
                 'url' => route('crm.brands.index').'?create=1',
+                'can' => true,
             ],
             [
                 'done' => $counts['creators'] > 0,
                 'label' => 'Add creators',
                 'hint' => 'One by one or from a CSV file — new creators are monitored automatically.',
                 'url' => route('crm.creators.index').'?create=1',
+                'can' => true,
             ],
             [
                 'done' => $counts['campaigns'] > 0,
                 'label' => 'Create your first campaign',
                 'hint' => 'Plan and measure work for one brand.',
                 'url' => route('crm.campaigns.create'),
+                // The wizard's mount() authorizes create at the route level
+                // (a hard 403, not a graceful degrade like the ?create=1
+                // rows above) — only linkify it when the viewer can actually
+                // pass that gate.
+                'can' => auth()->user()->can('create', Campaign::class),
             ],
             [
                 'done' => $counts['runs'] > 0,
                 'label' => 'Launch a seeding run',
                 'hint' => 'Send products to creators and track what they post.',
                 'url' => route('crm.seeding.index').'?create=1',
+                'can' => true,
             ],
         ];
         $setupComplete = collect($checklist)->every(fn ($s) => $s['done']);

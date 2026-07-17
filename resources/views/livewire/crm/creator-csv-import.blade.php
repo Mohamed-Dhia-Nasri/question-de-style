@@ -107,7 +107,7 @@
                     </x-ui.button>
                     <x-ui.button wire:click="import" wire:target="import" wire:loading.attr="disabled"
                         :disabled="$readyCount === 0">
-                        <span wire:loading.remove wire:target="import">Import {{ $readyCount }} creators</span>
+                        <span wire:loading.remove wire:target="import">Import {{ $readyCount }} {{ \Illuminate\Support\Str::plural('creator', $readyCount) }}</span>
                         <span wire:loading wire:target="import">Importing…</span>
                     </x-ui.button>
                 @else

@@ -12,7 +12,11 @@
                             <span>{{ $step['label'] }}</span>
                         @else
                             <span>
-                                <a href="{{ $step['url'] }}" class="font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">{{ $step['label'] }}</a>
+                                @if ($step['can'])
+                                    <a href="{{ $step['url'] }}" class="font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">{{ $step['label'] }}</a>
+                                @else
+                                    <span class="font-medium text-gray-700 dark:text-gray-300">{{ $step['label'] }}</span>
+                                @endif
                                 <span class="text-gray-400">— {{ $step['hint'] }}</span>
                             </span>
                         @endif

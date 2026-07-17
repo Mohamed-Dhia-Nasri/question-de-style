@@ -62,6 +62,24 @@ class CreatorCsvImportTest extends TestCase
         $this->assertSame(1, Creator::query()->count());
     }
 
+    public function test_the_import_button_pluralizes_by_ready_count(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $single = "name\nSolo Sam\n";
+        Livewire::test(CreatorCsvImport::class)
+            ->call('open')
+            ->set('upload', $this->upload($single, 'single.csv'))
+            ->assertSee('Import 1 creator')
+            ->assertDontSee('Import 1 creators');
+
+        $multiple = "name\nDuo Dana\nDuo Deb\n";
+        Livewire::test(CreatorCsvImport::class)
+            ->call('open')
+            ->set('upload', $this->upload($multiple, 'multi.csv'))
+            ->assertSee('Import 2 creators');
+    }
+
     public function test_imported_creators_are_enrolled_into_monitoring(): void
     {
         $this->actingAsCrmStaff();

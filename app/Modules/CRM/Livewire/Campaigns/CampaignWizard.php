@@ -9,6 +9,7 @@ use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\Product;
 use App\Modules\CRM\Models\SeedingCampaign;
 use App\Modules\CRM\Services\BrandRestrictionGuard;
+use App\Modules\CRM\Services\CreatorWriter;
 use App\Shared\Audit\AuditLogger;
 use App\Shared\Enums\CampaignStatus;
 use App\Shared\Enums\Country;
@@ -81,6 +82,12 @@ class CampaignWizard extends Component
 
     /** @var list<string> */
     public array $selected_creator_ids = [];
+
+    public bool $showNewCreatorForm = false;
+
+    public string $new_creator_name = '';
+
+    public string $new_creator_language = '';
 
     // --- Results ---
     public ?int $createdCampaignId = null;
@@ -260,6 +267,44 @@ class CampaignWizard extends Component
             'selected_creator_ids' => ['array'],
             'selected_creator_ids.*' => ['integer', TenantRule::exists('creators', 'id')],
         ];
+    }
+
+    /**
+     * Inline "+ New creator" on the creators step (Stage C review polish):
+     * every other prerequisite in the wizard — client, brand, seeding run —
+     * is create-in-place, so a brand-new tenant should not have to abandon
+     * the wizard just to make a first creator. A wizard-local parallel of
+     * ManagesCreatorRoster::createAndAttachCreator; the wizard is not a
+     * roster-picker host, so it does not pull in that trait or partial.
+     *
+     * A freshly created creator has no brand preferences yet, so no
+     * restriction check applies here — the existing restricted-flag logic
+     * in commit() still runs over every selected id at finish().
+     */
+    public function createCreator(CreatorWriter $writer, AuditLogger $audit): void
+    {
+        $this->authorize('create', Creator::class);
+
+        $validated = $this->validate([
+            'new_creator_name' => ['required', 'string', 'max:255'],
+            'new_creator_language' => ['nullable', 'string', 'max:10'],
+        ]);
+
+        // Through the sanctioned write path: createCreator auto-enrolls the
+        // new creator into monitoring in the same transaction.
+        $creator = $writer->createCreator(
+            $validated['new_creator_name'],
+            ($validated['new_creator_language'] ?? '') !== '' ? $validated['new_creator_language'] : null,
+        );
+
+        $audit->record('creator.created', $creator, ['display_name' => $creator->display_name]);
+
+        $this->selected_creator_ids[] = (string) $creator->id;
+
+        $this->reset('showNewCreatorForm', 'new_creator_name', 'new_creator_language');
+        $this->resetValidation();
+
+        $this->dispatch('notify', type: 'success', message: 'Creator created and added.');
     }
 
     // --- Finishing ---------------------------------------------------------

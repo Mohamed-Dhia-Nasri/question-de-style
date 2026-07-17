@@ -84,6 +84,30 @@ class CrmOverviewTest extends TestCase
         $this->get('/crm')->assertForbidden();
     }
 
+    public function test_a_view_only_user_on_an_empty_tenant_sees_the_campaign_step_as_plain_text_not_a_link(): void
+    {
+        $this->seedRoles();
+
+        $viewer = User::factory()->create();
+        $viewer->givePermissionTo(PermissionsCatalog::CRM_VIEW);
+        $this->actingAs($viewer);
+
+        // A view-only user cannot create a campaign (CampaignPolicy::create
+        // requires crm.manage), so the checklist row must not link to the
+        // wizard — the wizard's mount() would 403 it. The label still shows.
+        $this->get('/crm')->assertOk()
+            ->assertSee('Create your first campaign')
+            ->assertDontSee(route('crm.campaigns.create'));
+    }
+
+    public function test_crm_staff_sees_the_campaign_step_as_a_link_to_the_wizard(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $this->get('/crm')->assertOk()
+            ->assertSee(route('crm.campaigns.create'));
+    }
+
     public function test_quick_action_query_param_opens_the_create_modal(): void
     {
         $this->actingAsCrmStaff();

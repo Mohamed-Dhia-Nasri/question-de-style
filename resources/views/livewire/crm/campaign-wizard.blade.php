@@ -318,6 +318,38 @@
                         @endif
                     @endif
 
+                    {{-- Inline "new creator" --}}
+                    <div class="border-t border-gray-200 pt-4 dark:border-gray-800">
+                        @if ($showNewCreatorForm)
+                            <div class="space-y-3 rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                                <div>
+                                    <x-form.label for="new_creator_name" required>Name</x-form.label>
+                                    <x-form.input id="new_creator_name" wire:model="new_creator_name" placeholder="Creator name"
+                                        :error="$errors->has('new_creator_name')" />
+                                    <x-form.error for="new_creator_name" />
+                                </div>
+                                <div>
+                                    <x-form.label for="new_creator_language">Main language</x-form.label>
+                                    <x-form.input id="new_creator_language" wire:model="new_creator_language" placeholder="e.g. de"
+                                        :error="$errors->has('new_creator_language')" />
+                                    <x-form.error for="new_creator_language" />
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <x-ui.button size="sm" wire:click="createCreator" wire:loading.attr="disabled"
+                                        wire:target="createCreator">Add creator</x-ui.button>
+                                    <x-ui.button size="sm" variant="outline" wire:click="$set('showNewCreatorForm', false)">Cancel</x-ui.button>
+                                </div>
+                            </div>
+                        @else
+                            @can('create', \App\Modules\CRM\Models\Creator::class)
+                                <button type="button" wire:click="$set('showNewCreatorForm', true)"
+                                    class="text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">
+                                    + New creator
+                                </button>
+                            @endcan
+                        @endif
+                    </div>
+
                     <p class="text-sm text-gray-500 dark:text-gray-400">{{ count($selected_creator_ids) }} selected</p>
                 </div>
             @endif

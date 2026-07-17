@@ -5,6 +5,7 @@ namespace App\Modules\CRM\Livewire\Tasks;
 use App\Modules\CRM\Livewire\Tasks\Concerns\PresentsTaskStatus;
 use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\Creator;
+use App\Modules\CRM\Models\SeedingCampaign;
 use App\Modules\CRM\Models\Task;
 use App\Shared\Audit\AuditLogger;
 use App\Shared\Enums\TaskStatus;
@@ -16,9 +17,10 @@ use Livewire\Component;
 
 /**
  * Compact tasks panel (REQ-M3-011, AC-M3-017) — the anchored task list on
- * the creator profile and campaign detail (same reusable-parent pattern
- * as the documents panel): list + quick add + status flip. The full CRUD
- * surface (assignee, links, delete) lives on /crm/tasks (TasksIndex).
+ * the creator profile, campaign detail, and seeding run detail (same
+ * reusable-parent pattern as the documents panel): list + quick add +
+ * status flip. The full CRUD surface (assignee, links, delete) lives on
+ * /crm/tasks (TasksIndex).
  *
  * Overdue / Due-soon badges are the in-app reminder channel (spec D9);
  * status flips stay inside ENUM-TaskStatus and are audited from→to
@@ -31,6 +33,8 @@ class TasksPanel extends Component
     public ?Creator $creator = null;
 
     public ?Campaign $campaign = null;
+
+    public ?SeedingCampaign $seedingCampaign = null;
 
     // --- quick-add form state ---
     public string $quick_title = '';
@@ -45,11 +49,11 @@ class TasksPanel extends Component
      */
     public function mount(): void
     {
-        $parents = array_filter([$this->creator, $this->campaign]);
+        $parents = array_filter([$this->creator, $this->campaign, $this->seedingCampaign]);
 
         if (count($parents) !== 1) {
             throw new InvalidArgumentException(
-                'TasksPanel must be mounted with exactly one parent (creator or campaign).',
+                'TasksPanel must be mounted with exactly one parent (creator, campaign, or seedingCampaign).',
             );
         }
 
@@ -82,6 +86,7 @@ class TasksPanel extends Component
             'due_at' => ($validated['quick_due_at'] ?? '') !== '' ? $validated['quick_due_at'] : null,
             'creator_id' => $this->creator?->id,
             'campaign_id' => $this->campaign?->id,
+            'seeding_campaign_id' => $this->seedingCampaign?->id,
         ]);
 
         $audit->record('task.created', $task, [
@@ -136,7 +141,8 @@ class TasksPanel extends Component
     {
         return Task::query()
             ->when($this->creator !== null, fn (Builder $query) => $query->where('creator_id', $this->creator->id))
-            ->when($this->campaign !== null, fn (Builder $query) => $query->where('campaign_id', $this->campaign->id));
+            ->when($this->campaign !== null, fn (Builder $query) => $query->where('campaign_id', $this->campaign->id))
+            ->when($this->seedingCampaign !== null, fn (Builder $query) => $query->where('seeding_campaign_id', $this->seedingCampaign->id));
     }
 
     public function render(): View

@@ -133,7 +133,13 @@
                                         {{ $task->campaign->name }}
                                     </a>
                                 @endif
-                                @if (! $task->creator && ! $task->campaign)
+                                @if ($task->seedingCampaign)
+                                    <a href="{{ route('crm.seeding.show', $task->seedingCampaign) }}"
+                                        class="font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">
+                                        {{ $task->seedingCampaign->name }}
+                                    </a>
+                                @endif
+                                @if (! $task->creator && ! $task->campaign && ! $task->seedingCampaign)
                                     &mdash;
                                 @endif
                             </td>
@@ -234,6 +240,18 @@
                         </x-form.select>
                         <x-form.error for="task_campaign_id" />
                     </div>
+                </div>
+
+                <div>
+                    <x-form.label for="task_seeding_campaign_id">Seeding run (optional)</x-form.label>
+                    <x-form.select id="task_seeding_campaign_id" wire:model="task_seeding_campaign_id"
+                        :error="$errors->has('task_seeding_campaign_id')">
+                        <option value="">No seeding run link</option>
+                        @foreach ($seedingCampaigns as $seedingCampaignOption)
+                            <option value="{{ $seedingCampaignOption->id }}">{{ $seedingCampaignOption->name }}</option>
+                        @endforeach
+                    </x-form.select>
+                    <x-form.error for="task_seeding_campaign_id" />
                 </div>
             </form>
 

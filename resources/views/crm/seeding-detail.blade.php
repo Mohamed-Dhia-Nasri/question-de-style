@@ -109,6 +109,7 @@
 
             <div x-show="tab === 'docs'" x-cloak class="space-y-6">
                 @livewire('crm.documents-panel', ['seedingCampaign' => $seedingCampaign])
+                @livewire('crm.tasks-panel', ['seedingCampaign' => $seedingCampaign])
             </div>
         </div>
     </div>

@@ -78,6 +78,22 @@
                     </div>
                 @endif
 
+                @if ($seedingCampaign->shipments_count > 0)
+                    @php
+                        $expectedPosts = $seedingCampaign->expected_posts_count ?: $seedingCampaign->shipments_count;
+                        $deliveredPct = (int) round($seedingCampaign->delivered_count / $seedingCampaign->shipments_count * 100);
+                    @endphp
+                    <div class="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-white/[0.03]">
+                        <p class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Roster {{ $seedingCampaign->creators_count }} · Shipped {{ $seedingCampaign->shipped_count }}/{{ $seedingCampaign->shipments_count }} · Delivered {{ $seedingCampaign->delivered_count }}/{{ $seedingCampaign->shipments_count }} · Posted {{ $seedingCampaign->posted_count }}/{{ $expectedPosts }}
+                        </p>
+                        <div class="mt-3 h-2.5 rounded-full bg-gray-100 dark:bg-white/5">
+                            <div class="h-2.5 rounded-full bg-brand-500" style="width: {{ $deliveredPct }}%"></div>
+                        </div>
+                        <p class="mt-2 text-theme-xs text-gray-500 dark:text-gray-400">Posted updates after monitoring matches the content.</p>
+                    </div>
+                @endif
+
                 <div class="grid grid-cols-1 gap-6 sm:grid-cols-3">
                     <div class="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-white/[0.03]">
                         <p class="text-sm text-gray-500 dark:text-gray-400">Creators</p>

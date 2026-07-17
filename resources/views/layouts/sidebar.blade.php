@@ -1,3 +1,4 @@
+{{-- ClientViewer intentionally sees no menu: its login redirect lands on /reports, its only page (ADR-0016). --}}
 @php
     $menuItems = [
         [
@@ -106,7 +107,7 @@
         :class="(!$store.sidebar.isExpanded && !$store.sidebar.isHovered && !$store.sidebar.isMobileOpen) ?
             'xl:justify-center' :
             'justify-start'">
-        <a href="{{ route('dashboard') }}" class="flex items-center gap-3">
+        <a href="{{ auth()->user()?->isClientViewer() ? route('reports.index') : route('dashboard') }}" class="flex items-center gap-3">
             <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500 text-sm font-bold text-white">
                 QDS
             </span>

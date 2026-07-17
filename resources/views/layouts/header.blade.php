@@ -42,7 +42,7 @@
             </button>
 
             {{-- Logo (mobile only) --}}
-            <a href="{{ route('dashboard') }}" class="flex items-center gap-2 xl:hidden">
+            <a href="{{ auth()->user()?->isClientViewer() ? route('reports.index') : route('dashboard') }}" class="flex items-center gap-2 xl:hidden">
                 <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-500 text-xs font-bold text-white">QDS</span>
                 <span class="text-sm font-semibold text-gray-800 dark:text-white/90">Question de Style</span>
             </a>

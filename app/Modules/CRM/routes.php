@@ -30,6 +30,9 @@ Route::middleware(['web', 'auth', 'can:'.PermissionsCatalog::CRM_VIEW, 'subscrib
         ]))->name('brands.show');
         Route::view('/products', 'crm.products')->name('products.index');
         Route::view('/campaigns', 'crm.campaigns')->name('campaigns.index');
+        // Optional guided path (F01/F02). Registered BEFORE the wildcard so
+        // the literal `/new` segment wins over `{campaign}` binding.
+        Route::view('/campaigns/new', 'crm.campaign-wizard')->name('campaigns.create');
         Route::get('/campaigns/{campaign}', fn (Campaign $campaign) => view('crm.campaign-detail', [
             'campaign' => $campaign->load('brand.client')->loadCount(['creators', 'seedingCampaigns']),
         ]))->name('campaigns.show');

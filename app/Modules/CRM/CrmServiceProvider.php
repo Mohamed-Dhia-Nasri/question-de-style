@@ -12,6 +12,7 @@ use App\Modules\CRM\Livewire\Brands\BrandDetail;
 use App\Modules\CRM\Livewire\Brands\BrandsIndex;
 use App\Modules\CRM\Livewire\Campaigns\CampaignCreatorsPanel;
 use App\Modules\CRM\Livewire\Campaigns\CampaignsIndex;
+use App\Modules\CRM\Livewire\Campaigns\CampaignWizard;
 use App\Modules\CRM\Livewire\Clients\ClientsIndex;
 use App\Modules\CRM\Livewire\Creators\BrandPreferencesPanel;
 use App\Modules\CRM\Livewire\Creators\CommunicationLogPanel;
@@ -134,6 +135,7 @@ class CrmServiceProvider extends ServiceProvider
         Livewire::component('crm.products-index', ProductsIndex::class);
         Livewire::component('crm.campaigns-index', CampaignsIndex::class);
         Livewire::component('crm.campaign-creators', CampaignCreatorsPanel::class);
+        Livewire::component('crm.campaign-wizard', CampaignWizard::class);
         Livewire::component('crm.seeding-campaigns-index', SeedingCampaignsIndex::class);
         Livewire::component('crm.seeding-creators', SeedingCreatorsPanel::class);
         Livewire::component('crm.seeding-shipments', ShipmentsPanel::class);

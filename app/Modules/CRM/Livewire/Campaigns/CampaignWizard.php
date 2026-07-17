@@ -9,6 +9,7 @@ use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\Product;
 use App\Modules\CRM\Models\SeedingCampaign;
 use App\Modules\CRM\Services\BrandRestrictionGuard;
+use App\Modules\CRM\Services\CampaignWriter;
 use App\Modules\CRM\Services\CreatorWriter;
 use App\Shared\Audit\AuditLogger;
 use App\Shared\Enums\CampaignStatus;
@@ -360,14 +361,17 @@ class CampaignWizard extends Component
                 )
                 : Brand::query()->where('client_id', $client->id)->findOrFail((int) $this->wizard_brand_id);
 
-            $campaign = Campaign::create([
+            // Through the single sanctioned write path (CampaignWriter). It
+            // opens no transaction of its own, so it composes inside this one;
+            // the brand-coherence guard (F14) only fires on a brand *change*,
+            // and a wizard-created campaign is coherent by construction.
+            $campaign = app(CampaignWriter::class)->createCampaign([
                 'brand_id' => $brand->id,
                 'name' => $this->campaign_name,
                 'status' => CampaignStatus::Draft,
                 'start_at' => $this->campaign_start_at !== '' ? $this->campaign_start_at : null,
                 'end_at' => $this->campaign_end_at !== '' ? $this->campaign_end_at : null,
-            ]);
-            $audit->record('campaign.created', $campaign, ['name' => $campaign->name]);
+            ], $audit);
 
             $run = null;
             if ($withExtras && $this->with_seeding) {

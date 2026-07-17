@@ -2,27 +2,31 @@
 
 namespace App\Modules\CRM\Livewire\Campaigns;
 
-use App\Modules\CRM\Exceptions\BrandRestrictionViolation;
+use App\Modules\CRM\Livewire\Concerns\ManagesCreatorRoster;
+use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Services\BrandRestrictionGuard;
 use App\Shared\Audit\AuditLogger;
-use App\Shared\Tenancy\TenantRule;
 use Illuminate\Contracts\View\View;
-use Illuminate\Validation\ValidationException;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Livewire\Component;
 
 /**
  * Campaign creators panel — the campaign_creator pivot (ENT-Campaign
- * participating creators). AC-M3-007: attaching a creator whose
- * ENT-BrandPreference restriction list names the campaign's brand is
- * BLOCKED (hard filter, module-3 §2.3) as a caught validation error.
+ * participating creators). Adding creators is the shared multi-select roster
+ * picker (ManagesCreatorRoster): AC-M3-007 restrictions against the
+ * campaign's brand are flagged in the picker and skipped at save, and the
+ * per-creator hard filter still enforces at attach time. Detach stays
+ * unguarded here — the asymmetry with seeding (where shipments block detach)
+ * is intentional.
  */
 class CampaignCreatorsPanel extends Component
 {
-    public Campaign $campaign;
+    use ManagesCreatorRoster;
 
-    public string $attach_creator_id = '';
+    public Campaign $campaign;
 
     public ?int $confirmingDetachId = null;
 
@@ -33,41 +37,25 @@ class CampaignCreatorsPanel extends Component
         $this->campaign = $campaign;
     }
 
-    /** @return array<string, string> */
-    protected function validationAttributes(): array
+    protected function rosterOwner(): Model
     {
-        return [
-            'attach_creator_id' => 'creator',
-        ];
+        return $this->campaign;
     }
 
-    public function attach(BrandRestrictionGuard $guard, AuditLogger $audit): void
+    protected function rosterBrand(): Brand
     {
-        $this->authorize('update', $this->campaign);
+        return $this->campaign->brand;
+    }
 
-        $validated = $this->validate([
-            'attach_creator_id' => ['required', 'integer', TenantRule::exists('creators', 'id')],
-        ]);
+    /** @return BelongsToMany<Creator, Campaign> */
+    protected function rosterRelation(): BelongsToMany
+    {
+        return $this->campaign->creators();
+    }
 
-        $creator = Creator::findOrFail((int) $validated['attach_creator_id']);
-
-        try {
-            // AC-M3-007 hard filter against the campaign's brand.
-            $guard->assertNotRestricted($creator, $this->campaign->brand);
-        } catch (BrandRestrictionViolation $violation) {
-            throw ValidationException::withMessages(['attach_creator_id' => $violation->getMessage()]);
-        }
-
-        $result = $this->campaign->creators()->syncWithoutDetaching([$creator->id]);
-
-        if ($result['attached'] !== []) {
-            $audit->record('campaign_creator.attached', $this->campaign, ['creator_id' => $creator->id]);
-        }
-
-        $this->campaign->refresh();
-        $this->attach_creator_id = '';
-        $this->resetValidation();
-        $this->dispatch('notify', type: 'success', message: 'Creator added to the campaign.');
+    protected function rosterAuditEvent(): string
+    {
+        return 'campaign_creator.attached';
     }
 
     public function confirmDetach(int $creatorId): void
@@ -99,16 +87,8 @@ class CampaignCreatorsPanel extends Component
         $this->confirmingDetachId = null;
     }
 
-    public function render(): View
+    public function render(BrandRestrictionGuard $guard): View
     {
-        $attached = $this->campaign->creators()->orderBy('display_name')->get();
-
-        return view('livewire.crm.campaign-creators', [
-            'attached' => $attached,
-            'available' => Creator::query()
-                ->whereNotIn('id', $attached->pluck('id'))
-                ->orderBy('display_name')
-                ->get(),
-        ]);
+        return view('livewire.crm.campaign-creators', $this->pickerViewData($guard));
     }
 }

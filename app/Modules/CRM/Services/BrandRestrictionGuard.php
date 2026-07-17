@@ -12,22 +12,25 @@ use App\Modules\CRM\Models\Creator;
  * filters when a creator joins a campaign or seeding run (module-3 §2.3).
  *
  * Restricted brands are canonical plain-string name lists; matching is a
- * case-insensitive exact name comparison (Step-3 spec D4 — sector-level
- * restriction interpretation is not attempted in v1).
+ * case-insensitive exact comparison (Step-3 spec D4 — sector-level
+ * restriction interpretation is not attempted in v1). A restriction matches
+ * a brand's canonical name OR any of its aliases (item 5a); the throwing
+ * path and the bulk path fold the SAME needle set so they cannot diverge.
+ * The typed-name path (restrictedCreatorIdsForName) stays name-only because
+ * the wizard's brand may not exist yet and carries no aliases.
  */
 class BrandRestrictionGuard
 {
     /** @throws BrandRestrictionViolation */
     public function assertNotRestricted(Creator $creator, Brand $brand): void
     {
-        $needle = mb_strtolower(trim($brand->name));
+        $needles = $this->needlesForBrand($brand);
 
-        $restricted = $creator->brandPreferences()
+        $violated = $creator->brandPreferences()
             ->get()
-            ->flatMap(fn ($preference) => $preference->restricted_brands ?? [])
-            ->map(fn (string $name) => mb_strtolower(trim($name)));
+            ->contains(fn (BrandPreference $preference) => $this->restrictedByNeedles($preference->restricted_brands, $needles));
 
-        if ($restricted->contains($needle)) {
+        if ($violated) {
             throw BrandRestrictionViolation::restricted($creator, $brand);
         }
     }
@@ -35,41 +38,81 @@ class BrandRestrictionGuard
     /**
      * Bulk, NON-THROWING companion to assertNotRestricted for the roster
      * picker: which of these candidates does a restriction against $brand
-     * skip? Delegates on the brand's name so a single matching rule serves
-     * both overloads.
+     * skip? Folds the SAME needle set (name + aliases) as the throwing path.
      *
      * @param  list<int>  $creatorIds
      * @return list<int>
      */
     public function restrictedCreatorIds(array $creatorIds, Brand $brand): array
     {
-        return $this->restrictedCreatorIdsForName($creatorIds, $brand->name);
+        return $this->restrictedCreatorIdsForNeedles($creatorIds, $this->needlesForBrand($brand));
     }
 
     /**
-     * The matching logic, byte-identical to assertNotRestricted: one batched
-     * read of every candidate's preference rows, needle case-folded and
-     * trimmed, a creator restricted iff ANY entry of ANY of its rows folds to
-     * the needle. Case folding stays in PHP — never SQL lower(), whose
-     * unicode rules diverge from mb_strtolower.
+     * The typed-name matcher for the wizard: the brand a manager types may
+     * not exist yet, so it carries no aliases — match the name only.
      *
      * @param  list<int>  $creatorIds
      * @return list<int> unique creator ids, in first-seen order
      */
     public function restrictedCreatorIdsForName(array $creatorIds, string $brandName): array
     {
-        if ($creatorIds === []) {
+        return $this->restrictedCreatorIdsForNeedles($creatorIds, [mb_strtolower(trim($brandName))]);
+    }
+
+    /**
+     * Folded needle set for a brand: its canonical name plus every alias,
+     * lowercased and trimmed, de-duplicated, empties dropped. Case folding
+     * stays in PHP — never SQL lower(), whose unicode rules diverge from
+     * mb_strtolower.
+     *
+     * @return list<string>
+     */
+    private function needlesForBrand(Brand $brand): array
+    {
+        return collect([$brand->name, ...($brand->aliases ?? [])])
+            ->map(fn ($name) => mb_strtolower(trim((string) $name)))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * True if any entry of a restricted-brand list (folded the same way as
+     * the needles) intersects the needle set.
+     *
+     * @param  list<string>|null  $restrictedBrands
+     * @param  list<string>  $needles
+     */
+    private function restrictedByNeedles(?array $restrictedBrands, array $needles): bool
+    {
+        return collect($restrictedBrands ?? [])
+            ->map(fn ($name) => mb_strtolower(trim((string) $name)))
+            ->intersect($needles)
+            ->isNotEmpty();
+    }
+
+    /**
+     * One batched read of every candidate's preference rows; a creator is
+     * restricted iff ANY entry of ANY of its rows folds into the needle set.
+     * Shared by both the brand overload and the typed-name overload so the
+     * matching logic lives in exactly one place.
+     *
+     * @param  list<int>  $creatorIds
+     * @param  list<string>  $needles
+     * @return list<int> unique creator ids, in first-seen order
+     */
+    private function restrictedCreatorIdsForNeedles(array $creatorIds, array $needles): array
+    {
+        if ($creatorIds === [] || $needles === []) {
             return [];
         }
-
-        $needle = mb_strtolower(trim($brandName));
 
         return BrandPreference::query()
             ->whereIn('creator_id', $creatorIds)
             ->get(['creator_id', 'restricted_brands'])
-            ->filter(fn (BrandPreference $preference) => collect($preference->restricted_brands ?? [])
-                ->map(fn (string $name) => mb_strtolower(trim($name)))
-                ->contains($needle))
+            ->filter(fn (BrandPreference $preference) => $this->restrictedByNeedles($preference->restricted_brands, $needles))
             ->pluck('creator_id')
             ->map(fn ($id) => (int) $id)
             ->unique()

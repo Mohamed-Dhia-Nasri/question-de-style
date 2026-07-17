@@ -31,6 +31,14 @@ use App\Shared\Settings\MonitoringSettingsResolver;
  */
 class MentionClassifier
 {
+    /**
+     * One resolver per classifier instance: the resolver memoizes rows per
+     * tenant id and reads the ACTIVE TenantContext on every call, so reuse
+     * is tenant-safe even across runAs switches — while collapsing the
+     * per-shipment settings lookups into one query per tenant.
+     */
+    private ?MonitoringSettingsResolver $settings = null;
+
     public function classify(EvidenceBundle $evidence): ?ClassificationResult
     {
         $strongRecognitions = array_values(array_filter(
@@ -301,6 +309,8 @@ class MentionClassifier
      */
     private function shipmentWindowDays(): int
     {
-        return app(MonitoringSettingsResolver::class)->shipmentWindowDays();
+        $this->settings ??= app(MonitoringSettingsResolver::class);
+
+        return $this->settings->shipmentWindowDays();
     }
 }

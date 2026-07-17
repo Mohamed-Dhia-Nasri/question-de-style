@@ -192,7 +192,7 @@ class ProductsIndex extends Component
             DB::transaction(fn () => $product->delete());
         } catch (QueryException) {
             $this->confirmingDeleteId = null;
-            $this->dispatch('notify', type: 'error', message: 'Cannot delete: this product is referenced by seeding campaigns or shipments.');
+            $this->dispatch('notify', type: 'error', message: 'Cannot delete: this product is referenced by seeding runs or shipments.');
 
             return;
         }

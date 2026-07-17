@@ -1,7 +1,7 @@
 <x-layouts.app :title="$campaign->name">
     <x-page-header :title="$campaign->name" :breadcrumbs="[
         'Dashboard' => route('dashboard'),
-        'CRM & Seeding' => route('crm.index'),
+        'CRM' => route('crm.index'),
         'Campaigns' => route('crm.campaigns.index'),
         $campaign->name => null,
     ]" />
@@ -13,7 +13,7 @@
                     <span class="font-medium text-gray-800 dark:text-white/90">{{ $campaign->brand->name }}</span>
                 </span>
                 <span>Status: <x-ui.badge color="primary">{{ $campaign->status->label() }}</x-ui.badge></span>
-                <span>Runs:
+                <span>Dates:
                     {{ $campaign->start_at?->format('d.m.Y') ?? '—' }} – {{ $campaign->end_at?->format('d.m.Y') ?? '—' }}
                 </span>
             </div>

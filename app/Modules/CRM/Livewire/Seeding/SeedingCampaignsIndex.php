@@ -151,7 +151,7 @@ class SeedingCampaignsIndex extends Component
     {
         return [
             'seeding_name' => 'name',
-            'seeding_type' => 'type',
+            'seeding_type' => 'seeding type',
             'seeding_brand_id' => 'brand',
             'seeding_product_id' => 'product',
             'seeding_campaign_id' => 'parent campaign',
@@ -235,7 +235,7 @@ class SeedingCampaignsIndex extends Component
 
         $this->showForm = false;
         $this->resetForm();
-        $this->dispatch('notify', type: 'success', message: $editing ? 'Seeding campaign updated.' : 'Seeding campaign created.');
+        $this->dispatch('notify', type: 'success', message: $editing ? 'Seeding run updated.' : 'Seeding run created.');
     }
 
     public function cancelForm(): void
@@ -268,7 +268,7 @@ class SeedingCampaignsIndex extends Component
             DB::transaction(fn () => $seeding->delete());
         } catch (QueryException) {
             $this->confirmingDeleteId = null;
-            $this->dispatch('notify', type: 'error', message: 'Cannot delete: this seeding campaign is still referenced by shipments or documents.');
+            $this->dispatch('notify', type: 'error', message: 'Cannot delete: this seeding run is still referenced by shipments or documents.');
 
             return;
         }
@@ -278,7 +278,7 @@ class SeedingCampaignsIndex extends Component
         $this->confirmingDeleteId = null;
         $this->clearSelection();
         $this->clampPage();
-        $this->dispatch('notify', type: 'success', message: 'Seeding campaign deleted.');
+        $this->dispatch('notify', type: 'success', message: 'Seeding run deleted.');
     }
 
     public function cancelDelete(): void

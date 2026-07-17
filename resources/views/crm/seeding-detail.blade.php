@@ -1,8 +1,8 @@
 <x-layouts.app :title="$seedingCampaign->name">
     <x-page-header :title="$seedingCampaign->name" :breadcrumbs="[
         'Dashboard' => route('dashboard'),
-        'CRM & Seeding' => route('crm.index'),
-        'Seeding' => route('crm.seeding.index'),
+        'CRM' => route('crm.index'),
+        'Seeding runs' => route('crm.seeding.index'),
         $seedingCampaign->name => null,
     ]" />
 
@@ -12,7 +12,7 @@
                 <span>Brand:
                     <span class="font-medium text-gray-800 dark:text-white/90">{{ $seedingCampaign->brand->name }}</span>
                 </span>
-                <span>Variant: <x-ui.badge color="light">{{ $seedingCampaign->seeding_type->label() }}</x-ui.badge></span>
+                <span>Seeding type: <x-ui.badge color="light">{{ $seedingCampaign->seeding_type->label() }}</x-ui.badge></span>
                 <span>Status: <x-ui.badge color="primary">{{ $seedingCampaign->status->label() }}</x-ui.badge></span>
                 <span>Product:
                     <span class="font-medium text-gray-800 dark:text-white/90">{{ $seedingCampaign->product?->name ?? '—' }}</span>

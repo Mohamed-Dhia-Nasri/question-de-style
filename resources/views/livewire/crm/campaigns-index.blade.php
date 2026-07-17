@@ -43,7 +43,7 @@
                         <x-table.th field="name" :sort-field="$sortField" :sort-direction="$sortDirection">Name</x-table.th>
                         <x-table.th>Brand</x-table.th>
                         <x-table.th field="status" :sort-field="$sortField" :sort-direction="$sortDirection">Status</x-table.th>
-                        <x-table.th field="start_at" :sort-field="$sortField" :sort-direction="$sortDirection">Runs</x-table.th>
+                        <x-table.th field="start_at" :sort-field="$sortField" :sort-direction="$sortDirection">Dates</x-table.th>
                         <x-table.th>Creators</x-table.th>
                         <x-table.th><span class="sr-only">Actions</span></x-table.th>
                     </tr>

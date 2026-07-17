@@ -1,7 +1,7 @@
 <x-layouts.app :title="$creator->display_name">
     <x-page-header :title="$creator->display_name" :breadcrumbs="[
         'Dashboard' => route('dashboard'),
-        'CRM & Seeding' => route('crm.index'),
+        'CRM' => route('crm.index'),
         'Creators' => route('crm.creators.index'),
         $creator->display_name => null,
     ]" />

@@ -1,7 +1,7 @@
 <x-layouts.app title="Campaigns">
     <x-page-header title="Campaigns" :breadcrumbs="[
         'Dashboard' => route('dashboard'),
-        'CRM & Seeding' => route('crm.index'),
+        'CRM' => route('crm.index'),
         'Campaigns' => null,
     ]" />
 

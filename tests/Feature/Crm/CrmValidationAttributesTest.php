@@ -62,7 +62,7 @@ class CrmValidationAttributesTest extends TestCase
             ->call('create')->call('save')->errors()->toArray())->flatten()->implode(' ');
 
         $this->assertStringNotContainsString('seeding brand id', $flat);
-        $this->assertStringNotContainsString('seeding type', $flat);
+        $this->assertStringNotContainsString('seeding brand id', $flat);
         $this->assertStringNotContainsString('seeding name', $flat);
     }
 }

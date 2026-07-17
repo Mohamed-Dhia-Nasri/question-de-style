@@ -1,5 +1,5 @@
-<x-layouts.app title="CRM & Seeding">
-    <x-page-header title="CRM & Seeding" :breadcrumbs="['Dashboard' => route('dashboard'), 'CRM & Seeding' => null]" />
+<x-layouts.app title="CRM">
+    <x-page-header title="CRM" :breadcrumbs="['Dashboard' => route('dashboard'), 'CRM' => null]" />
 
     <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
         <a href="{{ route('crm.creators.index') }}"
@@ -28,7 +28,7 @@
         <a href="{{ route('crm.seeding.index') }}"
             class="group rounded-2xl border border-gray-200 bg-white p-6 transition-colors hover:border-brand-300 dark:border-gray-800 dark:bg-white/[0.03] dark:hover:border-brand-500/40">
             <h3 class="text-base font-semibold text-gray-800 group-hover:text-brand-500 dark:text-white/90 dark:group-hover:text-brand-400">
-                Seeding & Shipments
+                Seeding runs
             </h3>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
                 The four seeding variants, per-creator shipments, and content matched back to

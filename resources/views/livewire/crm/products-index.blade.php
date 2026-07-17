@@ -34,9 +34,9 @@
                         <x-table.th field="name" :sort-field="$sortField" :sort-direction="$sortDirection">Name</x-table.th>
                         <x-table.th>Brand</x-table.th>
                         <x-table.th field="sku" :sort-field="$sortField" :sort-direction="$sortDirection">SKU</x-table.th>
-                        <x-table.th>Variant</x-table.th>
+                        <x-table.th>Product variant</x-table.th>
                         <x-table.th>Unit value</x-table.th>
-                        <x-table.th>Category</x-table.th>
+                        <x-table.th>Sector</x-table.th>
                         <x-table.th><span class="sr-only">Actions</span></x-table.th>
                     </tr>
                 </thead>
@@ -122,9 +122,9 @@
                     </div>
 
                     <div>
-                        <x-form.label for="product_variant">Variant</x-form.label>
+                        <x-form.label for="product_variant">Product variant</x-form.label>
                         <x-form.input id="product_variant" wire:model="product_variant"
-                            :error="$errors->has('product_variant')" placeholder="Size / colour / variant" />
+                            :error="$errors->has('product_variant')" placeholder="Size or colour" />
                         <x-form.error for="product_variant" />
                     </div>
                 </div>
@@ -141,9 +141,9 @@
                     </div>
 
                     <div>
-                        <x-form.label for="product_category">Category</x-form.label>
+                        <x-form.label for="product_category">Sector</x-form.label>
                         <x-form.select id="product_category" wire:model="product_category" :error="$errors->has('product_category')">
-                            <option value="">No category</option>
+                            <option value="">No sector</option>
                             @foreach ($categories as $categoryOption)
                                 <option value="{{ $categoryOption->value }}">{{ $categoryOption->label() }}</option>
                             @endforeach
@@ -166,7 +166,7 @@
     @if ($confirmingDeleteId !== null)
         <x-ui.confirm-modal title="Delete product?" confirm-action="delete" cancel-action="cancelDelete"
             confirm-label="Delete product">
-            Products referenced by seeding campaigns or shipments cannot be deleted. The action is
+            Products referenced by seeding runs or shipments cannot be deleted. The action is
             recorded in the audit log.
         </x-ui.confirm-modal>
     @endif

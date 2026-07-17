@@ -4,12 +4,12 @@
             <div class="flex flex-wrap items-center gap-3">
                 <div class="relative grow sm:max-w-xs">
                     <x-form.input wire:model.live.debounce.300ms="search" type="search"
-                        placeholder="Search seeding runs…" aria-label="Search seeding campaigns" />
+                        placeholder="Search seeding runs…" aria-label="Search seeding runs" />
                 </div>
 
                 <div class="w-full sm:w-44">
-                    <x-form.select wire:model.live="typeFilter" aria-label="Filter by variant">
-                        <option value="">All variants</option>
+                    <x-form.select wire:model.live="typeFilter" aria-label="Filter by seeding type">
+                        <option value="">All seeding types</option>
                         @foreach ($types as $typeOption)
                             <option value="{{ $typeOption->value }}">{{ $typeOption->label() }}</option>
                         @endforeach
@@ -50,7 +50,7 @@
                 <thead>
                     <tr class="border-b border-gray-200 dark:border-gray-800">
                         <x-table.th field="name" :sort-field="$sortField" :sort-direction="$sortDirection">Name</x-table.th>
-                        <x-table.th field="seeding_type" :sort-field="$sortField" :sort-direction="$sortDirection">Variant</x-table.th>
+                        <x-table.th field="seeding_type" :sort-field="$sortField" :sort-direction="$sortDirection">Seeding type</x-table.th>
                         <x-table.th>Brand</x-table.th>
                         <x-table.th>Product</x-table.th>
                         <x-table.th field="status" :sort-field="$sortField" :sort-direction="$sortDirection">Status</x-table.th>
@@ -114,9 +114,9 @@
 
                 <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
                     <div>
-                        <x-form.label for="seeding_type" required>Variant</x-form.label>
+                        <x-form.label for="seeding_type" required>Seeding type</x-form.label>
                         <x-form.select id="seeding_type" wire:model="seeding_type" :error="$errors->has('seeding_type')">
-                            <option value="">Select a variant…</option>
+                            <option value="">Select a seeding type…</option>
                             @foreach ($types as $typeOption)
                                 <option value="{{ $typeOption->value }}">{{ $typeOption->label() }}</option>
                             @endforeach

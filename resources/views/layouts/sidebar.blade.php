@@ -15,25 +15,21 @@
             'icon' => '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3.25 12H7.1893L9.75 18.8286L14.25 5.17139L16.8107 12H20.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
         ],
         [
-            'name' => 'Discovery',
-            'route' => 'discovery.index',
-            'active' => request()->routeIs('discovery.*'),
-            'can' => 'discovery.view',
-            'icon' => '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M3.25 11.0001C3.25 6.71989 6.71979 3.25 11 3.25C15.2802 3.25 18.75 6.71989 18.75 11.0001C18.75 15.2803 15.2802 18.7501 11 18.7501C6.71979 18.7501 3.25 15.2803 3.25 11.0001ZM11 1.75C5.89137 1.75 1.75 5.89147 1.75 11.0001C1.75 16.1087 5.89137 20.2501 11 20.2501C13.3016 20.2501 15.4062 19.4095 17.0244 18.0185L20.4697 21.4637C20.7626 21.7566 21.2374 21.7566 21.5303 21.4637C21.8232 21.1708 21.8232 20.696 21.5303 20.4031L18.0851 16.9579C19.4676 15.3413 20.25 13.2417 20.25 11.0001C20.25 5.89147 16.1086 1.75 11 1.75Z" fill="currentColor"></path></svg>',
-        ],
-        [
             'name' => 'CRM',
             'route' => 'crm.index',
             'active' => request()->routeIs('crm.*'),
             'can' => 'crm.view',
             'icon' => '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M4.00002 12.0957C4.00002 7.67742 7.58174 4.0957 12 4.0957C16.4183 4.0957 20 7.67742 20 12.0957C20 16.514 16.4183 20.0957 12 20.0957H5.06068L6.34317 18.8132C6.48382 18.6726 6.56284 18.4818 6.56284 18.2829C6.56284 18.084 6.48382 17.8932 6.34317 17.7526C4.89463 16.304 4.00002 14.305 4.00002 12.0957ZM12 2.5957C6.75332 2.5957 2.50002 6.849 2.50002 12.0957C2.50002 14.4488 3.35633 16.603 4.77303 18.262L2.71969 20.3154C2.50519 20.5299 2.44103 20.8525 2.55711 21.1327C2.6732 21.413 2.94668 21.5957 3.25002 21.5957H12C17.2467 21.5957 21.5 17.3424 21.5 12.0957C21.5 6.849 17.2467 2.5957 12 2.5957ZM7.62502 10.8467C6.93467 10.8467 6.37502 11.4063 6.37502 12.0967C6.37502 12.787 6.93467 13.3467 7.62502 13.3467H7.62512C8.31548 13.3467 8.87512 12.787 8.87512 12.0967C8.87512 11.4063 8.31548 10.8467 7.62512 10.8467H7.62502ZM10.75 12.0967C10.75 11.4063 11.3097 10.8467 12 10.8467H12.0001C12.6905 10.8467 13.2501 11.4063 13.2501 12.0967C13.2501 12.787 12.6905 13.3467 12.0001 13.3467H12C11.3097 13.3467 10.75 12.787 10.75 12.0967ZM16.375 10.8467C15.6847 10.8467 15.125 11.4063 15.125 12.0967C15.125 12.787 15.6847 13.3467 16.375 13.3467H16.3751C17.0655 13.3467 17.6251 12.787 17.6251 12.0967C17.6251 11.4063 17.0655 10.8467 16.3751 10.8467H16.375Z" fill="currentColor"></path></svg>',
-        ],
-        [
-            'name' => 'Reports',
-            'route' => 'reports.index',
-            'active' => request()->routeIs('reports.*'),
-            'can' => 'reports.view-approved',
-            'icon' => '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M8.50391 4.25C8.50391 3.83579 8.83969 3.5 9.25391 3.5H15.2777C15.4766 3.5 15.6674 3.57902 15.8081 3.71967L18.2807 6.19234C18.4214 6.333 18.5004 6.52376 18.5004 6.72268V16.75C18.5004 17.1642 18.1646 17.5 17.7504 17.5H16.248V17.4993H14.748V17.5H9.25391C8.83969 17.5 8.50391 17.1642 8.50391 16.75V4.25ZM14.748 19H9.25391C8.01126 19 7.00391 17.9926 7.00391 16.75V6.49854H6.24805C5.83383 6.49854 5.49805 6.83432 5.49805 7.24854V19.75C5.49805 20.1642 5.83383 20.5 6.24805 20.5H13.998C14.4123 20.5 14.748 20.1642 14.748 19.75L14.748 19ZM7.00391 4.99854V4.25C7.00391 3.00736 8.01127 2 9.25391 2H15.2777C15.8745 2 16.4468 2.23705 16.8687 2.659L19.3414 5.13168C19.7634 5.55364 20.0004 6.12594 20.0004 6.72268V16.75C20.0004 17.9926 18.9931 19 17.7504 19H16.248L16.248 19.75C16.248 20.9926 15.2407 22 13.998 22H6.24805C5.00541 22 3.99805 20.9926 3.99805 19.75V7.24854C3.99805 6.00589 5.00541 4.99854 6.24805 4.99854H7.00391Z" fill="currentColor"></path></svg>',
+            'children' => [
+                ['name' => 'Overview', 'route' => 'crm.index', 'active' => request()->routeIs('crm.index')],
+                ['name' => 'Clients & Brands', 'route' => 'crm.clients.index', 'active' => request()->routeIs('crm.clients.*') || request()->routeIs('crm.brands.*')],
+                ['name' => 'Products', 'route' => 'crm.products.index', 'active' => request()->routeIs('crm.products.*')],
+                ['name' => 'Creators', 'route' => 'crm.creators.index', 'active' => request()->routeIs('crm.creators.*')],
+                ['name' => 'Campaigns', 'route' => 'crm.campaigns.index', 'active' => request()->routeIs('crm.campaigns.*')],
+                ['name' => 'Seeding runs', 'route' => 'crm.seeding.index', 'active' => request()->routeIs('crm.seeding.*')],
+                ['name' => 'Results', 'route' => 'crm.results', 'active' => request()->routeIs('crm.results')],
+                ['name' => 'Tasks', 'route' => 'crm.tasks.index', 'active' => request()->routeIs('crm.tasks.*')],
+            ],
         ],
     ];
 
@@ -149,6 +145,19 @@
                                             {{ $item['name'] }}
                                         </span>
                                     </a>
+                                    @if (($item['children'] ?? []) !== [] && $item['active'])
+                                        <ul class="mt-1 flex flex-col gap-0.5 pl-11"
+                                            x-show="$store.sidebar.isExpanded || $store.sidebar.isHovered || $store.sidebar.isMobileOpen">
+                                            @foreach ($item['children'] as $child)
+                                                <li>
+                                                    <a href="{{ route($child['route']) }}"
+                                                        class="menu-dropdown-item {{ $child['active'] ? 'menu-dropdown-item-active' : 'menu-dropdown-item-inactive' }}">
+                                                        {{ $child['name'] }}
+                                                    </a>
+                                                </li>
+                                            @endforeach
+                                        </ul>
+                                    @endif
                                 </li>
                             @endcan
                         @endforeach

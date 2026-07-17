@@ -69,9 +69,21 @@
         </x-slot:header>
 
         @if ($tasks->isEmpty())
-            <x-states.empty title="No tasks found">
-                Tasks track deadlines and follow-ups — optionally linked to a creator or campaign.
-            </x-states.empty>
+            @if ($search !== '' || $status !== '' || $assigneeFilter !== '' || $dueWindow !== '')
+                <x-states.empty title="No tasks match your filters">
+                    Try adjusting or clearing the search and filters above.
+                </x-states.empty>
+            @else
+                <x-states.empty title="No tasks yet">
+                    Deadlines and follow-ups — link them to a creator or campaign and you'll get a
+                    reminder before they're due.
+                    <x-slot:action>
+                        @can('create', \App\Modules\CRM\Models\Task::class)
+                            <x-ui.button size="sm" wire:click="create">New task</x-ui.button>
+                        @endcan
+                    </x-slot:action>
+                </x-states.empty>
+            @endif
         @else
             <table class="w-full min-w-[900px]">
                 <thead>

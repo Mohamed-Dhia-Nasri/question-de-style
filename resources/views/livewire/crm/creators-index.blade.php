@@ -62,14 +62,21 @@
         </x-slot:header>
 
         @if ($creators->isEmpty())
-            <x-states.empty title="No creators match your filters">
-                @if ($search !== '' || $statusFilter !== '' || $countryFilter !== '' || $cityFilter !== '')
+            @if ($search !== '' || $statusFilter !== '' || $countryFilter !== '' || $cityFilter !== '')
+                <x-states.empty title="No creators match your filters">
                     Try adjusting or clearing the search and filters above.
-                @else
-                    Create the first creator with the "New creator" button. Creators proposed by
-                    Monitoring or Discovery also appear here.
-                @endif
-            </x-states.empty>
+                </x-states.empty>
+            @else
+                <x-states.empty title="No creators yet">
+                    Creators are the influencers you work with. Adding a creator automatically
+                    starts monitoring their accounts.
+                    <x-slot:action>
+                        @can('create', \App\Modules\CRM\Models\Creator::class)
+                            <x-ui.button size="sm" wire:click="create">New creator</x-ui.button>
+                        @endcan
+                    </x-slot:action>
+                </x-states.empty>
+            @endif
         @else
             <table class="w-full min-w-[900px]">
                 <thead>

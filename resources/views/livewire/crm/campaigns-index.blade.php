@@ -33,9 +33,21 @@
         </x-slot:header>
 
         @if ($campaigns->isEmpty())
-            <x-states.empty title="No campaigns match your filters">
-                Create the first campaign with the "New campaign" button.
-            </x-states.empty>
+            @if ($search !== '' || $statusFilter !== '')
+                <x-states.empty title="No campaigns match your filters">
+                    Try adjusting or clearing the search and filters above.
+                </x-states.empty>
+            @else
+                <x-states.empty title="No campaigns yet">
+                    A campaign plans and measures work for one brand over a time period. You need
+                    a client and a brand first.
+                    <x-slot:action>
+                        @can('create', \App\Modules\CRM\Models\Campaign::class)
+                            <x-ui.button size="sm" wire:click="create">New campaign</x-ui.button>
+                        @endcan
+                    </x-slot:action>
+                </x-states.empty>
+            @endif
         @else
             <table class="w-full min-w-[900px]">
                 <thead>

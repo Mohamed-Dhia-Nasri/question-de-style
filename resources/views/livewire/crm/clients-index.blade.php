@@ -24,9 +24,21 @@
         </x-slot:header>
 
         @if ($clients->isEmpty())
-            <x-states.empty title="No clients yet">
-                Clients are the top of the client → brand → product hierarchy.
-            </x-states.empty>
+            @if ($search !== '')
+                <x-states.empty title="No clients match your search">
+                    Try a different search term.
+                </x-states.empty>
+            @else
+                <x-states.empty title="No clients yet">
+                    A client is the company your agency works for — brands, products, and campaigns
+                    all hang off a client.
+                    <x-slot:action>
+                        @can('create', \App\Modules\CRM\Models\Client::class)
+                            <x-ui.button size="sm" wire:click="create">New client</x-ui.button>
+                        @endcan
+                    </x-slot:action>
+                </x-states.empty>
+            @endif
         @else
             <table class="w-full min-w-[700px]">
                 <thead>

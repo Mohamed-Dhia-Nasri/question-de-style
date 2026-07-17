@@ -24,9 +24,20 @@
         </x-slot:header>
 
         @if ($products->isEmpty())
-            <x-states.empty title="No products yet">
-                The product is the key that aggregates seeding results across many creators.
-            </x-states.empty>
+            @if ($search !== '')
+                <x-states.empty title="No products match your search">
+                    Try a different search term.
+                </x-states.empty>
+            @else
+                <x-states.empty title="No products yet">
+                    Products are what you send to creators. Each product belongs to a brand.
+                    <x-slot:action>
+                        @can('create', \App\Modules\CRM\Models\Product::class)
+                            <x-ui.button size="sm" wire:click="create">New product</x-ui.button>
+                        @endcan
+                    </x-slot:action>
+                </x-states.empty>
+            @endif
         @else
             <table class="w-full min-w-[900px]">
                 <thead>

@@ -42,9 +42,21 @@
         </x-slot:header>
 
         @if ($seedingCampaigns->isEmpty())
-            <x-states.empty title="No seeding runs match your filters">
-                Track gifting and product placements — each run records exactly one of the four variants.
-            </x-states.empty>
+            @if ($search !== '' || $statusFilter !== '' || $typeFilter !== '')
+                <x-states.empty title="No seeding runs match your filters">
+                    Try adjusting or clearing the search and filters above.
+                </x-states.empty>
+            @else
+                <x-states.empty title="No seeding runs yet">
+                    A seeding run sends products to selected creators — on its own or as part of a
+                    campaign. You need a brand first.
+                    <x-slot:action>
+                        @can('create', \App\Modules\CRM\Models\SeedingCampaign::class)
+                            <x-ui.button size="sm" wire:click="create">New seeding run</x-ui.button>
+                        @endcan
+                    </x-slot:action>
+                </x-states.empty>
+            @endif
         @else
             <table class="w-full min-w-[900px]">
                 <thead>

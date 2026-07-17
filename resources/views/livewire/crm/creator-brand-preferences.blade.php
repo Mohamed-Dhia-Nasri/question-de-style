@@ -13,8 +13,14 @@
     </div>
 
     @if ($preferences->isEmpty())
-        <x-states.empty title="No brand preferences recorded">
-            Record which brands this creator prefers — and which they will not work with.
+        <x-states.empty title="No brand preferences yet">
+            Record brands this creator prefers — and brands they refuse. Refused brands are
+            blocked automatically.
+            <x-slot:action>
+                @can('create', \App\Modules\CRM\Models\BrandPreference::class)
+                    <x-ui.button size="sm" wire:click="add">Add preference</x-ui.button>
+                @endcan
+            </x-slot:action>
         </x-states.empty>
     @else
         <div class="divide-y divide-gray-100 dark:divide-gray-800">

@@ -27,7 +27,8 @@
 
     @if ($attached->isEmpty())
         <x-states.empty title="No creators on this campaign yet">
-            Add the participating creators — restricted creators are blocked before commit.
+            Add the creators taking part in this campaign — pick them in the box above. Creators
+            who refuse this brand are blocked automatically.
         </x-states.empty>
     @else
         <ul class="divide-y divide-gray-100 dark:divide-gray-800">

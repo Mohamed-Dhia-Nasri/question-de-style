@@ -24,9 +24,21 @@
         </x-slot:header>
 
         @if ($brands->isEmpty())
-            <x-states.empty title="No brands yet">
-                A brand belongs to a client and is what campaigns, seeding, and products attach to.
-            </x-states.empty>
+            @if ($search !== '')
+                <x-states.empty title="No brands match your search">
+                    Try a different search term.
+                </x-states.empty>
+            @else
+                <x-states.empty title="No brands yet">
+                    A brand belongs to a client; campaigns, products, and seeding runs all attach
+                    to a brand. Create the client first if you haven't.
+                    <x-slot:action>
+                        @can('create', \App\Modules\CRM\Models\Brand::class)
+                            <x-ui.button size="sm" wire:click="create">New brand</x-ui.button>
+                        @endcan
+                    </x-slot:action>
+                </x-states.empty>
+            @endif
         @else
             <table class="w-full min-w-[800px]">
                 <thead>

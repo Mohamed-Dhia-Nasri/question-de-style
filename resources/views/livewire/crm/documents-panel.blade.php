@@ -15,7 +15,12 @@
 
     @if ($documents->isEmpty())
         <x-states.empty title="No documents yet">
-            Upload a contract or brief — it stays linked to this record.
+            Contracts, briefs, and other files — stored privately and linked to this record.
+            <x-slot:action>
+                @can('create', \App\Modules\CRM\Models\DocumentAttachment::class)
+                    <x-ui.button size="sm" wire:click="openForm">Upload document</x-ui.button>
+                @endcan
+            </x-slot:action>
         </x-states.empty>
     @else
         <div class="overflow-x-auto">

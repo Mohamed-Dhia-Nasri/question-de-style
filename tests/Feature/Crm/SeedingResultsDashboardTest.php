@@ -177,11 +177,11 @@ class SeedingResultsDashboardTest extends TestCase
             ->set('brandId', $this->brand->id)
             ->assertSee('Silk Serum')
             ->set('brandId', Brand::factory()->create()->id)
-            ->assertSee('No seeding results in the rollups yet');
+            ->assertSee('No seeding results yet');
 
         Livewire::test(SeedingResultsDashboard::class)
             ->set('productId', Product::factory()->create()->id)
-            ->assertSee('No seeding results in the rollups yet');
+            ->assertSee('No seeding results yet');
     }
 
     public function test_a_platform_slice_switches_to_content_side_measures_with_a_caption(): void
@@ -201,7 +201,7 @@ class SeedingResultsDashboardTest extends TestCase
         // Non-matching slice: honest empty state, never zeros.
         Livewire::test(SeedingResultsDashboard::class)
             ->set('platform', 'TIKTOK')
-            ->assertSee('No seeding results in the rollups yet');
+            ->assertSee('No seeding results yet');
     }
 
     public function test_a_content_type_slice_filters_rows(): void
@@ -216,7 +216,7 @@ class SeedingResultsDashboardTest extends TestCase
 
         Livewire::test(SeedingResultsDashboard::class)
             ->set('contentType', 'VIDEO')
-            ->assertSee('No seeding results in the rollups yet');
+            ->assertSee('No seeding results yet');
     }
 
     public function test_country_slices_are_unavailable_until_module_2(): void
@@ -228,7 +228,7 @@ class SeedingResultsDashboardTest extends TestCase
         Livewire::test(SeedingResultsDashboard::class)
             ->set('country', 'FR')
             ->assertSee('Filtered view')
-            ->assertSee('No seeding results in the rollups yet');
+            ->assertSee('No seeding results yet');
 
         // Malformed country input is ignored server-side (no slice), never
         // passed through to SQL.
@@ -338,7 +338,7 @@ class SeedingResultsDashboardTest extends TestCase
         $this->actingAsCrmStaff();
 
         Livewire::test(SeedingResultsDashboard::class)
-            ->assertSee('No seeding results in the rollups yet')
+            ->assertSee('No seeding results yet')
             ->assertSee('Data refreshed');
     }
 }

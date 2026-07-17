@@ -15,8 +15,13 @@
     </div>
 
     @if ($contacts->isEmpty())
-        <x-states.empty title="No contacts yet">
-            Contact details are entered manually — auto-extraction is not part of v1 (DEF-002).
+        <x-states.empty title="No contact details yet">
+            Add an email, phone number, or address for this creator.
+            <x-slot:action>
+                @can('create', \App\Modules\CRM\Models\Contact::class)
+                    <x-ui.button size="sm" wire:click="add">Add contact</x-ui.button>
+                @endcan
+            </x-slot:action>
         </x-states.empty>
     @else
         <div class="overflow-x-auto">

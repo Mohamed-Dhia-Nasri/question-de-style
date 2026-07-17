@@ -17,7 +17,13 @@
 
     @if ($accounts->isEmpty())
         <x-states.empty title="No platform accounts yet">
-            Add this creator's Instagram, TikTok, or YouTube account — at most one per platform.
+            Link this creator's Instagram, TikTok, or YouTube account — monitoring starts from
+            here.
+            <x-slot:action>
+                @can('create', \App\Modules\CRM\Models\PlatformAccount::class)
+                    <x-ui.button size="sm" wire:click="add">Add account</x-ui.button>
+                @endcan
+            </x-slot:action>
         </x-states.empty>
     @else
         <div class="overflow-x-auto">
@@ -73,7 +79,7 @@
                             </td>
                             <td class="px-5 py-4">
                                 @if ($account->provenance->source === \App\Platform\Ingestion\SourceRegistry::AGENCY_MANUAL_ENTRY)
-                                    <x-ui.badge color="info" title="Follower count entered by hand by agency staff.">Manual entry</x-ui.badge>
+                                    <x-ui.badge color="info" title="Entered by hand by agency staff.">Manual entry</x-ui.badge>
                                 @else
                                     <span class="text-theme-xs text-gray-500 dark:text-gray-400"
                                         title="Fetched {{ $account->provenance->fetchedAt->format('d.m.Y H:i') }}">

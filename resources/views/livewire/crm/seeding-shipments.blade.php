@@ -15,7 +15,12 @@
 
     @if ($shipments->isEmpty())
         <x-states.empty title="No shipments yet">
-            Create a shipment for one of the seeded creators — the product is the aggregation key.
+            A shipment sends one product to one creator on this run's roster.
+            <x-slot:action>
+                @can('create', \App\Modules\CRM\Models\Shipment::class)
+                    <x-ui.button size="sm" wire:click="create">New shipment</x-ui.button>
+                @endcan
+            </x-slot:action>
         </x-states.empty>
     @else
         <div class="overflow-x-auto">

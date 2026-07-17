@@ -13,8 +13,13 @@
     </div>
 
     @if ($logs->isEmpty())
-        <x-states.empty title="No communication logged yet">
-            Log the first outreach, call, or reply to start this creator's relationship history.
+        <x-states.empty title="No conversations logged yet">
+            Keep the relationship history — outreach, replies, calls.
+            <x-slot:action>
+                @can('create', \App\Modules\CRM\Models\CommunicationLog::class)
+                    <x-ui.button size="sm" wire:click="add">Log entry</x-ui.button>
+                @endcan
+            </x-slot:action>
         </x-states.empty>
     @else
         <div class="overflow-x-auto">

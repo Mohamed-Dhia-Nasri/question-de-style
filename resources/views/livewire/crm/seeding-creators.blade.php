@@ -27,7 +27,8 @@
 
     @if ($attached->isEmpty())
         <x-states.empty title="No creators on this seeding run yet">
-            Attach the creators who receive product — restricted creators are blocked before commit.
+            Add the creators who will receive products — shipments can only go to creators on
+            this list.
         </x-states.empty>
     @else
         <ul class="divide-y divide-gray-100 dark:divide-gray-800">

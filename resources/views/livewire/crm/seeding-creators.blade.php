@@ -9,19 +9,12 @@
         </div>
 
         @can('update', $seedingCampaign)
-            <form wire:submit="attach" class="flex items-start gap-2">
-                <div class="w-64">
-                    <x-form.select wire:model="attach_creator_id" aria-label="Creator to add"
-                        :error="$errors->has('attach_creator_id')">
-                        <option value="">Add a creator…</option>
-                        @foreach ($available as $creatorOption)
-                            <option value="{{ $creatorOption->id }}">{{ $creatorOption->display_name }}</option>
-                        @endforeach
-                    </x-form.select>
-                    <x-form.error for="attach_creator_id" />
-                </div>
-                <x-ui.button size="sm" type="submit" wire:loading.attr="disabled" wire:target="attach">Add</x-ui.button>
-            </form>
+            <div class="flex items-center gap-2">
+                @if ($seedingCampaign->campaign_id !== null && $parentRosterCount > 0)
+                    <x-ui.button variant="outline" size="sm" wire:click="copyCampaignRoster">Copy campaign roster ({{ $parentRosterCount }})</x-ui.button>
+                @endif
+                <x-ui.button size="sm" wire:click="openPicker">Add creators</x-ui.button>
+            </div>
         @endcan
     </div>
 
@@ -57,5 +50,16 @@
             Creators with shipments on this run can’t be removed — delete their shipments first.
             The action is recorded in the audit log.
         </x-ui.confirm-modal>
+    @endif
+
+    @if ($showPicker)
+        <x-ui.modal :title="'Add creators'" close-action="closePicker" max-width="2xl">
+            @include('livewire.crm.partials.roster-picker', [
+                'candidates' => $candidates,
+                'restrictedIds' => $restrictedIds,
+                'blocklistedIds' => $blocklistedIds,
+                'brandName' => $seedingCampaign->brand->name,
+            ])
+        </x-ui.modal>
     @endif
 </div>

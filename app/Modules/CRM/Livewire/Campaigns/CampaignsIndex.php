@@ -2,8 +2,10 @@
 
 namespace App\Modules\CRM\Livewire\Campaigns;
 
+use App\Modules\CRM\Livewire\Concerns\WithInlineCreate;
 use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Campaign;
+use App\Modules\CRM\Models\Client;
 use App\Shared\Audit\AuditLogger;
 use App\Shared\Enums\CampaignStatus;
 use App\Shared\Enums\MetricTier;
@@ -29,6 +31,7 @@ use Livewire\Component;
 class CampaignsIndex extends Component
 {
     use WithDataTable;
+    use WithInlineCreate;
 
     #[Url(except: '')]
     public string $statusFilter = '';
@@ -127,14 +130,25 @@ class CampaignsIndex extends Component
     /** @return array<string, string> */
     protected function validationAttributes(): array
     {
-        return [
+        return array_merge([
             'campaign_name' => 'name',
             'campaign_brand_id' => 'brand',
             'campaign_status' => 'status',
             'campaign_start_at' => 'start date',
             'campaign_end_at' => 'end date',
             'campaign_spend' => 'spend',
-        ];
+        ], $this->inlineValidationAttributes());
+    }
+
+    /** @return list<string> */
+    protected function inlineCreateTypes(): array
+    {
+        return ['brand'];
+    }
+
+    protected function inlineCreated(string $type, int $id): void
+    {
+        $this->campaign_brand_id = (string) $id;
     }
 
     public function save(AuditLogger $audit): void
@@ -203,6 +217,12 @@ class CampaignsIndex extends Component
 
     public function cancelForm(): void
     {
+        if ($this->inlineCreate !== null) {
+            $this->cancelInlineCreate();
+
+            return;
+        }
+
         $this->showForm = false;
         $this->resetForm();
     }
@@ -276,6 +296,7 @@ class CampaignsIndex extends Component
         return view('livewire.crm.campaigns-index', [
             'campaigns' => $this->campaignsQuery()->paginate($this->perPage()),
             'brands' => Brand::orderBy('name')->get(),
+            'clients' => Client::orderBy('name')->get(),
             'statuses' => CampaignStatus::cases(),
             'statusDescriptions' => collect(CampaignStatus::cases())
                 ->mapWithKeys(fn ($s) => [$s->value => $s->description()])

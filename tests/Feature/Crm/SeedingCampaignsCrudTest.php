@@ -49,7 +49,7 @@ class SeedingCampaignsCrudTest extends TestCase
         Livewire::test(SeedingCampaignsIndex::class)->assertForbidden();
     }
 
-    public function test_create_validates_the_variant_and_status_closed_sets(): void
+    public function test_create_validates_the_variant_closed_set_and_required_fields(): void
     {
         $this->actingAsCrmStaff();
 
@@ -57,14 +57,25 @@ class SeedingCampaignsCrudTest extends TestCase
             ->call('create')
             ->set('seeding_name', '')
             ->set('seeding_type', 'FREEBIE')
-            ->set('seeding_status', 'RUNNING')
             ->call('save')
             ->assertHasErrors([
                 'seeding_name' => 'required',
                 'seeding_type' => 'in',
                 'seeding_brand_id' => 'required',
-                'seeding_status' => 'in',
             ]);
+    }
+
+    public function test_edit_validates_the_status_closed_set(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $seeding = SeedingCampaign::factory()->create();
+
+        Livewire::test(SeedingCampaignsIndex::class)
+            ->call('edit', $seeding->id)
+            ->set('seeding_status', 'RUNNING')
+            ->call('save')
+            ->assertHasErrors(['seeding_status' => 'in']);
     }
 
     public function test_a_product_of_another_brand_is_refused(): void
@@ -130,7 +141,6 @@ class SeedingCampaignsCrudTest extends TestCase
             ->set('seeding_brand_id', (string) $brand->id)
             ->set('seeding_product_id', (string) $product->id)
             ->set('seeding_campaign_id', (string) $campaign->id)
-            ->set('seeding_status', SeedingCampaignStatus::Planned->value)
             ->call('save')
             ->assertHasNoErrors()
             ->assertDispatched('notify', message: 'Seeding run created.');
@@ -138,7 +148,9 @@ class SeedingCampaignsCrudTest extends TestCase
         $seeding = SeedingCampaign::where('name', 'Herbst Gifting')->firstOrFail();
         // AC-M3-010: exactly one of the four variants + a closed-set status.
         $this->assertSame(SeedingType::GiftingWithPost, $seeding->seeding_type);
-        $this->assertSame(SeedingCampaignStatus::Planned, $seeding->status);
+        // Create always starts as a draft (Task 2) — status closed-set
+        // coverage for edit lives in test_edit_validates_the_status_closed_set.
+        $this->assertSame(SeedingCampaignStatus::Draft, $seeding->status);
         $this->assertSame($product->id, $seeding->product_id);
         $this->assertSame($campaign->id, $seeding->campaign_id);
         $this->assertDatabaseHas('audit_logs', ['action' => 'seeding_campaign.created', 'subject_id' => $seeding->id]);

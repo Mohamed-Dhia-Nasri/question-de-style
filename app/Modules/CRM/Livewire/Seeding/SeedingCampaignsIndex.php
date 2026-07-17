@@ -128,6 +128,12 @@ class SeedingCampaignsIndex extends Component
         $this->showForm = true;
     }
 
+    public function updatedSeedingBrandId(): void
+    {
+        $this->seeding_product_id = '';
+        $this->seeding_campaign_id = '';
+    }
+
     public function edit(int $seedingId): void
     {
         $seeding = SeedingCampaign::findOrFail($seedingId);
@@ -167,16 +173,29 @@ class SeedingCampaignsIndex extends Component
 
         $this->authorize($editing ? 'update' : 'create', $seeding ?? SeedingCampaign::class);
 
-        $validated = $this->validate([
+        $creating = $this->editingSeedingId === null;
+
+        $rules = [
             'seeding_name' => ['required', 'string', 'max:255'],
             // AC-M3-010: exactly one of the four variants.
             'seeding_type' => ['required', Rule::in(array_column(SeedingType::cases(), 'value'))],
             'seeding_brand_id' => ['required', 'integer', TenantRule::exists('brands', 'id')],
             'seeding_product_id' => ['nullable', 'integer', TenantRule::exists('products', 'id')],
             'seeding_campaign_id' => ['nullable', 'integer', TenantRule::exists('campaigns', 'id')],
-            'seeding_status' => ['required', Rule::in(array_column(SeedingCampaignStatus::cases(), 'value'))],
-            'seeding_spend' => ['nullable', 'numeric', 'min:0'],
-        ]);
+        ];
+
+        if (! $creating) {
+            $rules['seeding_status'] = ['required', Rule::in(array_column(SeedingCampaignStatus::cases(), 'value'))];
+            $rules['seeding_spend'] = ['nullable', 'numeric', 'min:0'];
+        }
+
+        $validated = $this->validate($rules);
+
+        if ($creating) {
+            // Never read the client-tamperable props on create.
+            $validated['seeding_status'] = SeedingCampaignStatus::Draft->value;
+            $validated['seeding_spend'] = '';
+        }
 
         $productId = ($validated['seeding_product_id'] ?? '') !== '' ? (int) $validated['seeding_product_id'] : null;
 
@@ -314,7 +333,12 @@ class SeedingCampaignsIndex extends Component
         return view('livewire.crm.seeding-campaigns-index', [
             'seedingCampaigns' => $this->seedingQuery()->paginate($this->perPage()),
             'brands' => Brand::orderBy('name')->get(),
-            'products' => Product::orderBy('name')->get(),
+            // Product options follow the selected brand — same reasoning as
+            // the parent-campaign filter below; save() re-enforces this
+            // server-side via the brand-coherence guard.
+            'products' => $this->seeding_brand_id !== ''
+                ? Product::query()->where('brand_id', (int) $this->seeding_brand_id)->orderBy('name')->get()
+                : Product::query()->whereRaw('false')->get(),
             // Parent-campaign options follow the selected brand (M1): a run
             // may only hang under a campaign of its own brand — save()
             // re-enforces this server-side.

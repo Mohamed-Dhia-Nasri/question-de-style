@@ -146,7 +146,7 @@
                         <x-form.input id="product_unit_value" wire:model="product_unit_value" type="number" step="0.01" min="0"
                             :error="$errors->has('product_unit_value')" />
                         <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400">
-                            Entered by you, so it's used exactly as typed.
+                            Entered by you, so it’s used exactly as typed.
                         </p>
                         <x-form.error for="product_unit_value" />
                     </div>

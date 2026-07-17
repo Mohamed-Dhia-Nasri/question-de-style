@@ -137,17 +137,20 @@ class RollupReader
     /**
      * PUBLIC-component totals across ROLLUP-CreatorByPeriod for a period
      * (views + engagement components; DERIVED rates are recomputed by the
-     * consumer, never summed).
+     * consumer, never summed), optionally narrowed to a creator set. An
+     * empty set aggregates no rows — sums come back NULL (unavailable),
+     * never zero (DP-001).
      *
+     * @param  list<int>|null  $creatorIds
      * @return object{views_sum: string|null, engagement_sum: string|null, content_count: string|null}
      */
-    public function creatorTotals(?Carbon $from = null, ?Carbon $to = null, ?int $creatorId = null): object
+    public function creatorTotals(?Carbon $from = null, ?Carbon $to = null, ?array $creatorIds = null): object
     {
         return $this->tenant(DB::table('rollup_creator_by_period'))
             ->where('grain', 'week')
             ->when($from, fn ($q) => $q->where('bucket_start', '>=', $from->startOfWeek()->toDateString()))
             ->when($to, fn ($q) => $q->where('bucket_start', '<=', $to->toDateString()))
-            ->when($creatorId !== null, fn ($q) => $q->where('creator_id', $creatorId))
+            ->when($creatorIds !== null, fn ($q) => $q->whereIn('creator_id', $creatorIds))
             ->selectRaw('sum(views_sum) as views_sum')
             ->selectRaw('sum(engagement_sum) as engagement_sum')
             ->selectRaw('sum(content_count) as content_count')

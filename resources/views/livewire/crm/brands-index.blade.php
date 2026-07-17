@@ -55,7 +55,9 @@
                     class="divide-y divide-gray-100 transition-opacity dark:divide-gray-800">
                     @foreach ($brands as $brand)
                         <tr wire:key="brand-{{ $brand->id }}">
-                            <td class="px-5 py-4 text-sm font-medium text-gray-800 dark:text-white/90">{{ $brand->name }}</td>
+                            <td class="px-5 py-4">
+                                <a href="{{ route('crm.brands.show', $brand) }}" class="text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">{{ $brand->name }}</a>
+                            </td>
                             <td class="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{{ $brand->client->name }}</td>
                             <td class="px-5 py-4">
                                 @if ($brand->sector)

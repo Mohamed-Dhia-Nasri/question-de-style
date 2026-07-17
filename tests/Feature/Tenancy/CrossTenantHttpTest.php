@@ -3,6 +3,7 @@
 namespace Tests\Feature\Tenancy;
 
 use App\Models\User;
+use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\PlatformAccount;
@@ -43,15 +44,17 @@ class CrossTenantHttpTest extends TestCase
     {
         $tenantB = $this->makeTenant('Tenant B');
 
-        [$creator, $campaign, $seeding] = $this->withTenant($tenantB, fn () => [
+        [$creator, $campaign, $seeding, $brand] = $this->withTenant($tenantB, fn () => [
             Creator::factory()->create(),
             Campaign::factory()->create(),
             SeedingCampaign::factory()->create(),
+            Brand::factory()->create(),
         ]);
 
         $this->get("/crm/creators/{$creator->id}")->assertNotFound();
         $this->get("/crm/campaigns/{$campaign->id}")->assertNotFound();
         $this->get("/crm/seeding/{$seeding->id}")->assertNotFound();
+        $this->get("/crm/brands/{$brand->id}")->assertNotFound();
     }
 
     public function test_own_tenant_crm_detail_routes_still_resolve(): void

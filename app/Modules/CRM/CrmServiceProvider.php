@@ -8,6 +8,7 @@ use App\Modules\CRM\Console\GdprEraseCreatorCommand;
 use App\Modules\CRM\Console\GdprExportCreatorCommand;
 use App\Modules\CRM\Console\SendTaskRemindersCommand;
 use App\Modules\CRM\Contracts\CreatorProposals;
+use App\Modules\CRM\Livewire\Brands\BrandDetail;
 use App\Modules\CRM\Livewire\Brands\BrandsIndex;
 use App\Modules\CRM\Livewire\Campaigns\CampaignCreatorsPanel;
 use App\Modules\CRM\Livewire\Campaigns\CampaignsIndex;
@@ -124,6 +125,7 @@ class CrmServiceProvider extends ServiceProvider
         // (REQ-M3-005/006/007 + the operator half of REQ-M3-008).
         Livewire::component('crm.clients-index', ClientsIndex::class);
         Livewire::component('crm.brands-index', BrandsIndex::class);
+        Livewire::component('crm.brand-detail', BrandDetail::class);
         Livewire::component('crm.products-index', ProductsIndex::class);
         Livewire::component('crm.campaigns-index', CampaignsIndex::class);
         Livewire::component('crm.campaign-creators', CampaignCreatorsPanel::class);

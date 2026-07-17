@@ -127,13 +127,15 @@
                         <x-form.error for="campaign_brand_id" />
                     </div>
 
-                    <div>
+                    <div x-data="{ s: @js($campaign_status), map: @js($statusDescriptions) }">
                         <x-form.label for="campaign_status" required>Status</x-form.label>
-                        <x-form.select id="campaign_status" wire:model="campaign_status" :error="$errors->has('campaign_status')">
+                        <x-form.select id="campaign_status" wire:model="campaign_status"
+                            x-on:change="s = $event.target.value" :error="$errors->has('campaign_status')">
                             @foreach ($statuses as $statusOption)
                                 <option value="{{ $statusOption->value }}">{{ $statusOption->label() }}</option>
                             @endforeach
                         </x-form.select>
+                        <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
                         <x-form.error for="campaign_status" />
                     </div>
                 </div>

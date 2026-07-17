@@ -28,15 +28,16 @@
             <x-form.error for="primary_language" />
         </div>
 
-        <div>
+        <div x-data="{ s: @js($relationship_status), map: @js($statusDescriptions) }">
             <x-form.label for="profile_relationship_status">Relationship status</x-form.label>
             <x-form.select id="profile_relationship_status" wire:model="relationship_status"
-                :error="$errors->has('relationship_status')">
-                <option value="">No status</option>
+                x-on:change="s = $event.target.value" :error="$errors->has('relationship_status')">
+                <option value="">— none —</option>
                 @foreach ($statuses as $statusOption)
                     <option value="{{ $statusOption->value }}">{{ $statusOption->label() }}</option>
                 @endforeach
             </x-form.select>
+            <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
             <x-form.error for="relationship_status" />
         </div>
 

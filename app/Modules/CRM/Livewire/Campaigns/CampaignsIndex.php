@@ -264,6 +264,9 @@ class CampaignsIndex extends Component
             'campaigns' => $this->campaignsQuery()->paginate($this->perPage()),
             'brands' => Brand::orderBy('name')->get(),
             'statuses' => CampaignStatus::cases(),
+            'statusDescriptions' => collect(CampaignStatus::cases())
+                ->mapWithKeys(fn ($s) => [$s->value => $s->description()])
+                ->all(),
         ]);
     }
 }

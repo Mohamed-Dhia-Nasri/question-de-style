@@ -440,6 +440,9 @@ class ShipmentsPanel extends Component
             'recipients' => $this->seedingCampaign->creators()->orderBy('display_name')->get(),
             'products' => $this->seedingCampaign->brand->products()->orderBy('name')->get(),
             'statuses' => ShipmentStatus::cases(),
+            'statusDescriptions' => collect(ShipmentStatus::cases())
+                ->mapWithKeys(fn ($s) => [$s->value => $s->description()])
+                ->all(),
             'linkableContent' => $linkableContent,
         ]);
     }

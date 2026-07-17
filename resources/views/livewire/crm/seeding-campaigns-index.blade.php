@@ -125,24 +125,28 @@
                 </div>
 
                 <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                    <div>
+                    <div x-data="{ s: @js($seeding_type), map: @js($typeDescriptions) }">
                         <x-form.label for="seeding_type" required>Seeding type</x-form.label>
-                        <x-form.select id="seeding_type" wire:model="seeding_type" :error="$errors->has('seeding_type')">
+                        <x-form.select id="seeding_type" wire:model="seeding_type" x-on:change="s = $event.target.value"
+                            :error="$errors->has('seeding_type')">
                             <option value="">Select a seeding type…</option>
                             @foreach ($types as $typeOption)
                                 <option value="{{ $typeOption->value }}">{{ $typeOption->label() }}</option>
                             @endforeach
                         </x-form.select>
+                        <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
                         <x-form.error for="seeding_type" />
                     </div>
 
-                    <div>
+                    <div x-data="{ s: @js($seeding_status), map: @js($statusDescriptions) }">
                         <x-form.label for="seeding_status" required>Status</x-form.label>
-                        <x-form.select id="seeding_status" wire:model="seeding_status" :error="$errors->has('seeding_status')">
+                        <x-form.select id="seeding_status" wire:model="seeding_status" x-on:change="s = $event.target.value"
+                            :error="$errors->has('seeding_status')">
                             @foreach ($statuses as $statusOption)
                                 <option value="{{ $statusOption->value }}">{{ $statusOption->label() }}</option>
                             @endforeach
                         </x-form.select>
+                        <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
                         <x-form.error for="seeding_status" />
                     </div>
                 </div>

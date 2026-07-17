@@ -250,6 +250,9 @@ class CreatorsIndex extends Component
         return view('livewire.crm.creators-index', [
             'creators' => $this->creatorsQuery()->paginate($this->perPage()),
             'statuses' => RelationshipStatus::cases(),
+            'statusDescriptions' => collect(RelationshipStatus::cases())
+                ->mapWithKeys(fn ($s) => [$s->value => $s->description()])
+                ->all(),
             'countries' => Country::cases(),
             // City options mirror what operators actually assigned (ADR-0018).
             'cities' => GeoAttribution::query()

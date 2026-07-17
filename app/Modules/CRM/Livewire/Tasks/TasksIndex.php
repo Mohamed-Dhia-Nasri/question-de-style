@@ -310,6 +310,9 @@ class TasksIndex extends Component
             'overdueCount' => $this->scopeOverdue(Task::query())->count(),
             'dueSoonCount' => $this->scopeDueSoon(Task::query())->count(),
             'statuses' => TaskStatus::cases(),
+            'statusDescriptions' => collect(TaskStatus::cases())
+                ->mapWithKeys(fn ($s) => [$s->value => $s->description()])
+                ->all(),
             'users' => User::query()->orderBy('display_name')->get(),
             'creators' => Creator::query()->orderBy('display_name')->get(),
             'campaigns' => Campaign::query()->orderBy('name')->get(),

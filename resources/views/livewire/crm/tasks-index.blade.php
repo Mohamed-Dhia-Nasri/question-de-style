@@ -175,13 +175,15 @@
                 </div>
 
                 <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                    <div>
+                    <div x-data="{ s: @js($task_status), map: @js($statusDescriptions) }">
                         <x-form.label for="task_status" required>Status</x-form.label>
-                        <x-form.select id="task_status" wire:model="task_status" :error="$errors->has('task_status')">
+                        <x-form.select id="task_status" wire:model="task_status" x-on:change="s = $event.target.value"
+                            :error="$errors->has('task_status')">
                             @foreach ($statuses as $statusOption)
                                 <option value="{{ $statusOption->value }}">{{ $this->statusLabel($statusOption) }}</option>
                             @endforeach
                         </x-form.select>
+                        <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
                         <x-form.error for="task_status" />
                     </div>
 

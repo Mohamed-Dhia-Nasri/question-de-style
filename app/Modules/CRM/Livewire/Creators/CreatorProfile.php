@@ -92,6 +92,9 @@ class CreatorProfile extends Component
     {
         return view('livewire.crm.creator-profile', [
             'statuses' => RelationshipStatus::cases(),
+            'statusDescriptions' => collect(RelationshipStatus::cases())
+                ->mapWithKeys(fn ($s) => [$s->value => $s->description()])
+                ->all(),
         ]);
     }
 }

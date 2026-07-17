@@ -323,6 +323,12 @@ class SeedingCampaignsIndex extends Component
                 : Campaign::query()->whereRaw('false')->get(),
             'types' => SeedingType::cases(),
             'statuses' => SeedingCampaignStatus::cases(),
+            'typeDescriptions' => collect(SeedingType::cases())
+                ->mapWithKeys(fn ($t) => [$t->value => $t->description()])
+                ->all(),
+            'statusDescriptions' => collect(SeedingCampaignStatus::cases())
+                ->mapWithKeys(fn ($s) => [$s->value => $s->description()])
+                ->all(),
         ]);
     }
 }

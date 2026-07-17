@@ -111,10 +111,10 @@
                                 @endif
                             </td>
                             <td class="px-5 py-4">
-                                @if ($creator->relationship_status)
-                                    <x-ui.badge color="primary">{{ $creator->relationship_status->label() }}</x-ui.badge>
+                                @if ($creator->relationship_status === null || $creator->relationship_status === \App\Shared\Enums\RelationshipStatus::None)
+                                    <span class="text-sm text-gray-400">—</span>
                                 @else
-                                    <span class="text-sm text-gray-400">&mdash;</span>
+                                    <x-ui.badge color="primary">{{ $creator->relationship_status->label() }}</x-ui.badge>
                                 @endif
                             </td>
                             <td class="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">
@@ -175,15 +175,16 @@
                     <x-form.error for="primary_language" />
                 </div>
 
-                <div>
+                <div x-data="{ s: @js($relationship_status), map: @js($statusDescriptions) }">
                     <x-form.label for="relationship_status">Relationship status</x-form.label>
                     <x-form.select id="relationship_status" wire:model="relationship_status"
-                        :error="$errors->has('relationship_status')">
-                        <option value="">No status</option>
+                        x-on:change="s = $event.target.value" :error="$errors->has('relationship_status')">
+                        <option value="">— none —</option>
                         @foreach ($statuses as $statusOption)
                             <option value="{{ $statusOption->value }}">{{ $statusOption->label() }}</option>
                         @endforeach
                     </x-form.select>
+                    <p class="mt-1.5 text-theme-xs text-gray-500 dark:text-gray-400" x-text="map[s] ?? ''"></p>
                     <x-form.error for="relationship_status" />
                 </div>
             </form>

@@ -22,6 +22,7 @@ use App\Shared\Enums\MonitoredSubjectType;
 use App\Shared\Enums\Platform;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\FakesProviderResponses;
@@ -221,5 +222,27 @@ class CostControlsTest extends TestCase
 
         Queue::assertNotPushed(IngestStoriesJob::class);
         Queue::assertPushed(IngestContentJob::class, 1);
+    }
+
+    public function test_provider_calling_jobs_are_serialized_per_account_and_operation(): void
+    {
+        // M23: on-demand + scheduled cycles for one account must not run the
+        // billable provider call twice in parallel (double-bill + unique-index
+        // churn). The overlap guard belongs on the worker jobs, keyed per
+        // account AND operation so different operations still run in parallel.
+        $account = PlatformAccount::factory()->create(['platform' => Platform::Instagram]);
+
+        $cases = [
+            [new IngestContentJob($account->id, null, 'corr'), 'qds-account-content:'.$account->id],
+            [new IngestStoriesJob($account->id, null, 'corr'), 'qds-account-stories:'.$account->id],
+            [new IngestProfileJob($account->id, null, 'corr'), 'qds-account-profile:'.$account->id],
+        ];
+
+        foreach ($cases as [$job, $expectedKey]) {
+            $overlap = collect($job->middleware())->first(fn ($m) => $m instanceof WithoutOverlapping);
+
+            $this->assertNotNull($overlap, $job::class.' must serialize provider calls per account.');
+            $this->assertSame($expectedKey, $overlap->key);
+        }
     }
 }

@@ -221,6 +221,7 @@ class IngestStoriesBatchJob implements ShouldQueue
             skipped: $skipped,
             persistenceMs: $persistenceMs,
             mediaMs: $mediaMs,
+            unattributed: $unattributed,
         );
     }
 }

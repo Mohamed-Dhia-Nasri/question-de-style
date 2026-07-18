@@ -203,8 +203,9 @@ class AttributionService
     {
         // Kill switch (Tier 0 free-signal detection, sub-project A): OFF
         // reproduces the legacy brand-level doctrine exactly (precision
-        // gate skipped, no paid label, no contextual cues, no product
-        // doctrine); ON enables the full product-aware behaviour.
+        // gate skipped, no paid label, no contextual cues, no product-id
+        // evidence, no product doctrine); ON enables the full product-aware
+        // behaviour.
         $enabled = (bool) config('qds.enrichment.text_signals.enabled');
 
         $recognitions = [];
@@ -242,8 +243,15 @@ class AttributionService
                 'type' => $detection->recognition_type->value,
                 'brand' => $detection->detected_brand,
                 'level' => $assessment->confidenceLevel,
-                'productId' => $detection->product_id,
-                'product' => $detection->detected_product,
+                // Gated behind the kill switch: with it off, no recognition
+                // carries a productId, so MentionClassifier::shipmentAligns's
+                // productId shortcut can never fire — alignment falls back
+                // to brand-name only, the true legacy behaviour. Without
+                // this gate a shipment could still align (and SEEDED at
+                // HIGH) purely on a stale/rolled-back productId even after
+                // the brand itself no longer matches.
+                'productId' => $enabled ? $detection->product_id : null,
+                'product' => $enabled ? $detection->detected_product : null,
             ];
         }
 

@@ -356,6 +356,45 @@ class AnalyticsRollupTest extends TestCase
         ];
     }
 
+    public function test_creator_and_mention_totals_can_be_filtered_by_platform(): void
+    {
+        $client = Client::factory()->create();
+        $brand = Brand::factory()->create(['client_id' => $client->id]);
+        $campaign = Campaign::factory()->create(['brand_id' => $brand->id]);
+        $creator = Creator::factory()->create();
+        $ig = PlatformAccount::factory()->create(['creator_id' => $creator->id, 'platform' => Platform::Instagram]);
+        $yt = PlatformAccount::factory()->create(['creator_id' => $creator->id, 'platform' => Platform::YouTube]);
+
+        foreach ([[$ig, Platform::Instagram, 100, 10], [$yt, Platform::YouTube, 500, 50]] as [$account, $platform, $views, $likes]) {
+            $content = ContentItem::factory()->create(['platform_account_id' => $account->id, 'platform' => $platform]);
+            $this->contentSnapshot($content, [
+                new MetricValue($views, MetricTier::Public, 'views'),
+                new MetricValue($likes, MetricTier::Public, 'likes'),
+            ], '2026-07-03 09:00:00');
+            $subject = MonitoredSubject::factory()->create(['creator_id' => $creator->id]);
+            Mention::factory()->create([
+                'monitored_subject_id' => $subject->id,
+                'content_item_id' => $content->id,
+                'story_id' => null,
+                'campaign_id' => $campaign->id,
+            ]);
+        }
+
+        app(AnalyticsService::class)->refreshRollups();
+        $reader = app(RollupReader::class);
+
+        // No platform filter → both platforms summed (unchanged behaviour).
+        $this->assertSame(600.0, (float) $reader->creatorTotals()->views_sum);
+        $this->assertSame(2, (int) $reader->mentionTotals(null, null, $brand->id)->mention_count);
+
+        // Filtered → only the requested platform.
+        $igTotals = $reader->creatorTotals(null, null, null, 'INSTAGRAM');
+        $this->assertSame(100.0, (float) $igTotals->views_sum);
+        $this->assertSame(10.0, (float) $igTotals->likes_sum);
+
+        $this->assertSame(1, (int) $reader->mentionTotals(null, null, $brand->id, 'YOUTUBE')->mention_count);
+    }
+
     public function test_creator_totals_expose_each_engagement_component_separately(): void
     {
         $creator = Creator::factory()->create();

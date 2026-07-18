@@ -68,6 +68,8 @@ class NeonAnalyticsService implements AnalyticsService
         'rollup_creator_by_period',
         'rollup_mention_by_campaign',
         'rollup_seeding_by_product_slice',
+        'rollup_creator_by_period_platform',
+        'rollup_mention_by_brand_platform',
     ];
 
     public function refreshRollups(): int

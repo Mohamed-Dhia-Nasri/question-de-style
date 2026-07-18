@@ -116,13 +116,16 @@ class RollupReader
      *
      * @return object{mention_count: int|null, total_views: string|null, total_estimated_reach: string|null, total_emv: string|null}
      */
-    public function mentionTotals(?Carbon $from = null, ?Carbon $to = null, ?int $brandId = null): object
+    public function mentionTotals(?Carbon $from = null, ?Carbon $to = null, ?int $brandId = null, ?string $platform = null): object
     {
-        $totals = $this->tenant(DB::table('rollup_mention_by_brand'))
+        // Platform-keyed rollup: summed with no filter it equals the
+        // all-platform total; filtered it narrows to one platform.
+        $totals = $this->tenant(DB::table('rollup_mention_by_brand_platform'))
             ->where('grain', 'week')
             ->when($from, fn ($q) => $q->where('bucket_start', '>=', $from->copy()->startOfWeek()->toDateString()))
             ->when($to, fn ($q) => $q->where('bucket_start', '<=', $to->toDateString()))
             ->when($brandId !== null, fn ($q) => $q->where('brand_id', $brandId))
+            ->when($platform !== null, fn ($q) => $q->where('platform', $platform))
             ->selectRaw('sum(mention_count) as mention_count')
             ->selectRaw('sum(total_views) as total_views')
             ->selectRaw('sum(total_estimated_reach) as total_estimated_reach')
@@ -153,13 +156,17 @@ class RollupReader
      * @param  list<int>|null  $creatorIds
      * @return object{views_sum: string|null, engagement_sum: string|null, likes_sum: string|null, comments_sum: string|null, shares_sum: string|null, saves_sum: string|null, content_count: string|null}
      */
-    public function creatorTotals(?Carbon $from = null, ?Carbon $to = null, ?array $creatorIds = null): object
+    public function creatorTotals(?Carbon $from = null, ?Carbon $to = null, ?array $creatorIds = null, ?string $platform = null): object
     {
-        return $this->tenant(DB::table('rollup_creator_by_period'))
+        // Reads the platform-keyed rollup: with no platform filter, summing
+        // across the platform rows equals the all-platform total; with one, it
+        // answers "…on this platform".
+        return $this->tenant(DB::table('rollup_creator_by_period_platform'))
             ->where('grain', 'week')
             ->when($from, fn ($q) => $q->where('bucket_start', '>=', $from->copy()->startOfWeek()->toDateString()))
             ->when($to, fn ($q) => $q->where('bucket_start', '<=', $to->toDateString()))
             ->when($creatorIds !== null, fn ($q) => $q->whereIn('creator_id', $creatorIds))
+            ->when($platform !== null, fn ($q) => $q->where('platform', $platform))
             ->selectRaw('sum(views_sum) as views_sum')
             ->selectRaw('sum(engagement_sum) as engagement_sum')
             ->selectRaw('sum(likes_sum) as likes_sum')

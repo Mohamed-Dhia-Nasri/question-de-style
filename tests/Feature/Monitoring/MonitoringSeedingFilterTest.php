@@ -43,6 +43,34 @@ class MonitoringSeedingFilterTest extends TestCase
         $this->actingAs($this->makeUser(RoleName::Analyst));
     }
 
+    public function test_the_platform_filter_narrows_the_kpi_totals(): void
+    {
+        $creator = Creator::factory()->create();
+        $ig = PlatformAccount::factory()->create(['creator_id' => $creator->id, 'platform' => Platform::Instagram]);
+        $yt = PlatformAccount::factory()->create(['creator_id' => $creator->id, 'platform' => Platform::YouTube]);
+
+        foreach ([[$ig, Platform::Instagram, 111], [$yt, Platform::YouTube, 777]] as [$account, $platform, $views]) {
+            $content = ContentItem::factory()->create(['platform_account_id' => $account->id, 'platform' => $platform]);
+            MetricSnapshot::create([
+                'content_item_id' => $content->id,
+                'captured_at' => now(),
+                'metrics' => [new MetricValue($views, MetricTier::Public, 'views')],
+                'provenance' => new Provenance('SRC-apify-instagram-profile-scraper', now()->toImmutable(), 'v1'),
+            ]);
+        }
+
+        app(AnalyticsService::class)->refreshRollups();
+
+        // No filter → both platforms (111 + 777).
+        Livewire::test(MonitoringOverview::class)
+            ->assertViewHas('creatorTotals', fn (object $t): bool => (int) $t->views_sum === 888);
+
+        // YouTube only.
+        Livewire::test(MonitoringOverview::class)
+            ->set('platform', Platform::YouTube->value)
+            ->assertViewHas('creatorTotals', fn (object $t): bool => (int) $t->views_sum === 777);
+    }
+
     public function test_the_overview_shows_the_engagement_breakdown_by_type(): void
     {
         $creator = Creator::factory()->create();

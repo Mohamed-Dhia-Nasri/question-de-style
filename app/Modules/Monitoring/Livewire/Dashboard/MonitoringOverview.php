@@ -117,6 +117,7 @@ class MonitoringOverview extends Component
         $rosterCount = MonitoredSubject::query()
             ->where('subject_type', MonitoredSubjectType::Creator->value)
             ->where('active', true)
+            ->when($platform, fn ($q) => $q->whereJsonContains('platforms', $platform->value))
             ->when($this->activeSeedingOnly, fn ($q) => $q->whereIn('creator_id', $seedingCreatorIds))
             ->count();
 
@@ -146,6 +147,9 @@ class MonitoringOverview extends Component
         $mentionsByType = Mention::query()
             ->when($from, fn ($q) => $q->where('created_at', '>=', $from))
             ->when($to, fn ($q) => $q->where('created_at', '<=', $to))
+            ->when($platform, fn ($q) => $q->where(fn ($w) => $w
+                ->whereHas('contentItem', fn ($c) => $c->where('platform', $platform->value))
+                ->orWhereHas('story', fn ($s) => $s->where('platform', $platform->value))))
             ->when($brandId !== null, fn ($q) => $q->whereHas(
                 'campaign',
                 fn ($c) => $c->where('brand_id', $brandId),
@@ -170,8 +174,8 @@ class MonitoringOverview extends Component
             'mentionsByType' => $mentionsByType,
             'pendingReviews' => array_sum($reviewCounts),
             'reviewCounts' => $reviewCounts,
-            'mentionTotals' => $rollups->mentionTotals($from, $to, $brandId),
-            'creatorTotals' => $rollups->creatorTotals($from, $to, $seedingCreatorIds),
+            'mentionTotals' => $rollups->mentionTotals($from, $to, $brandId, $platform?->value),
+            'creatorTotals' => $rollups->creatorTotals($from, $to, $seedingCreatorIds, $platform?->value),
             'seedingSetEmpty' => $seedingCreatorIds === [],
             'rollupsRefreshedAt' => $rollups->lastRefreshedAt(),
             'providerRows' => $providerRows,

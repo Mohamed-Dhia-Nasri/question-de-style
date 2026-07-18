@@ -10,7 +10,6 @@ use App\Platform\Ingestion\Jobs\PollMonitoredAccountJob;
 use App\Platform\Ingestion\Jobs\RunCreatorCycleJob;
 use App\Platform\Ingestion\Jobs\RunMonitoringCycleJob;
 use App\Platform\Ingestion\Models\IngestionCycle;
-use App\Platform\Ingestion\Support\AdaptiveCadence;
 use App\Platform\Ingestion\Support\CycleStatus;
 use App\Shared\Enums\Platform;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -105,7 +104,7 @@ class CreatorCycleTest extends TestCase
         Queue::fake();
 
         (new RunCreatorCycleJob($creator->id))->handle();
-        (new RunMonitoringCycleJob)->handle(app(AdaptiveCadence::class));
+        (new RunMonitoringCycleJob)->handle();
 
         // One creator-scoped cycle AND one global cycle — the on-demand run
         // must not trip the global duplicate-cycle guard.

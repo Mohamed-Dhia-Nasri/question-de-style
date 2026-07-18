@@ -7,7 +7,6 @@ use App\Platform\Ingestion\Jobs\IngestStoriesBatchJob;
 use App\Platform\Ingestion\Jobs\RunMonitoringCycleJob;
 use App\Platform\Ingestion\Models\IngestionCycle;
 use App\Platform\Ingestion\Models\MonitoringPlanSetting;
-use App\Platform\Ingestion\Support\AdaptiveCadence;
 use App\Platform\Ingestion\Support\CadenceSettings;
 use App\Platform\Ingestion\Support\CycleStatus;
 use App\Platform\Ingestion\Support\IngestionCostEstimator;
@@ -80,7 +79,7 @@ class MonitoringPlanTest extends TestCase
 
         Queue::fake();
 
-        (new RunMonitoringCycleJob(storiesOnly: true))->handle(app(AdaptiveCadence::class));
+        (new RunMonitoringCycleJob(storiesOnly: true))->handle();
 
         // 1/day plan → the 4h-old cycle blocks this slot entirely.
         $this->assertSame(1, IngestionCycle::query()->where('stories_only', true)->count());
@@ -89,7 +88,7 @@ class MonitoringPlanTest extends TestCase
         // At 6/day every slot is allowed.
         config(['qds.ingestion.stories_per_day' => 6]);
 
-        (new RunMonitoringCycleJob(storiesOnly: true))->handle(app(AdaptiveCadence::class));
+        (new RunMonitoringCycleJob(storiesOnly: true))->handle();
 
         $this->assertSame(2, IngestionCycle::query()->where('stories_only', true)->count());
     }
@@ -98,7 +97,7 @@ class MonitoringPlanTest extends TestCase
     {
         config(['qds.ingestion.stories_per_day' => 0]);
 
-        (new RunMonitoringCycleJob(storiesOnly: true))->handle(app(AdaptiveCadence::class));
+        (new RunMonitoringCycleJob(storiesOnly: true))->handle();
 
         $this->assertSame(0, IngestionCycle::query()->count());
     }

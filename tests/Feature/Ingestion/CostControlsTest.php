@@ -16,7 +16,6 @@ use App\Platform\Ingestion\Models\ProviderCall;
 use App\Platform\Ingestion\Providers\Instagram\InstagramPostAdapter;
 use App\Platform\Ingestion\Providers\TikTok\TikTokContentAdapter;
 use App\Platform\Ingestion\SourceRegistry;
-use App\Platform\Ingestion\Support\AdaptiveCadence;
 use App\Platform\Ingestion\Support\CallOutcome;
 use App\Platform\Ingestion\Support\CycleStatus;
 use App\Shared\Enums\MonitoredSubjectType;
@@ -140,7 +139,7 @@ class CostControlsTest extends TestCase
 
         Queue::fake();
 
-        (new RunMonitoringCycleJob)->handle(app(AdaptiveCadence::class));
+        (new RunMonitoringCycleJob)->handle();
 
         $first = IngestionCycle::query()->sole();
         $this->assertTrue($first->full_depth);
@@ -149,7 +148,7 @@ class CostControlsTest extends TestCase
         // Same interval: the next cycle polls windowed, not full depth.
         $first->update(['status' => CycleStatus::Completed, 'finished_at' => now()]);
 
-        (new RunMonitoringCycleJob)->handle(app(AdaptiveCadence::class));
+        (new RunMonitoringCycleJob)->handle();
 
         $second = IngestionCycle::query()->orderByDesc('id')->first();
         $this->assertFalse($second->full_depth);
@@ -184,7 +183,7 @@ class CostControlsTest extends TestCase
 
         Queue::fake();
 
-        (new RunMonitoringCycleJob)->handle(app(AdaptiveCadence::class));
+        (new RunMonitoringCycleJob)->handle();
 
         $cycle = IngestionCycle::query()->sole();
         // Content only — the planned count matches the dispatch decision.

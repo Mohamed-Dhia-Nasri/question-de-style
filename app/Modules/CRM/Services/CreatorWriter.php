@@ -137,6 +137,8 @@ class CreatorWriter
         array $externalLinks = [],
         ?MetricValue $followerCount = null,
     ): PlatformAccount {
+        $handle = $this->canonicalHandle($handle);
+
         $this->assertPlatformFree($creator, $platform);
         $this->assertHandleFree($platform, $handle, $creator->tenant_id);
 
@@ -212,6 +214,7 @@ class CreatorWriter
         ?string $bio = null,
         array $externalLinks = [],
     ): PlatformAccount {
+        $handle = $this->canonicalHandle($handle);
         $creator = $account->creator;
 
         if ($creator !== null && $platform !== $account->platform) {
@@ -276,6 +279,24 @@ class CreatorWriter
         }
 
         return $e;
+    }
+
+    /**
+     * Canonical form of a platform handle (M02): platform handles are
+     * case-insensitive and an optional leading '@' is cosmetic, so the same
+     * real account can arrive as '@Nike', 'nike' or 'NIKE'. Fold them to one
+     * value on every write path (panel + CSV import both route through here)
+     * so per-tenant (platform, handle) uniqueness actually holds.
+     */
+    private function canonicalHandle(string $handle): string
+    {
+        $handle = trim($handle);
+
+        if (str_starts_with($handle, '@')) {
+            $handle = substr($handle, 1);
+        }
+
+        return mb_strtolower(trim($handle));
     }
 
     /** @throws PlatformAccountConflict */

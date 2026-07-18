@@ -11,6 +11,7 @@ use App\Shared\Audit\AuditLog;
 use App\Shared\Authorization\PermissionsCatalog;
 use App\Shared\Enums\RoleName;
 use App\Shared\Enums\TaskStatus;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -25,6 +26,44 @@ use Tests\TestCase;
 class TasksIndexTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_rescheduling_the_deadline_re_arms_the_one_time_reminder(): void
+    {
+        $this->actingAsCrmStaff();
+        $task = Task::factory()->create([
+            'status' => TaskStatus::Open,
+            'due_at' => CarbonImmutable::parse('2026-08-01 09:00:00'),
+            'reminder_sent_at' => now()->subHour(),
+        ]);
+
+        Livewire::test(TasksIndex::class)
+            ->call('edit', $task->id)
+            ->set('task_due_at', '2026-09-15T09:00')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        // Moving the deadline re-arms the per-deadline reminder stamp (M10).
+        $this->assertNull($task->refresh()->reminder_sent_at);
+    }
+
+    public function test_editing_a_task_without_moving_the_deadline_keeps_the_reminder_stamp(): void
+    {
+        $this->actingAsCrmStaff();
+        $task = Task::factory()->create([
+            'status' => TaskStatus::Open,
+            'due_at' => CarbonImmutable::parse('2026-08-01 09:00:00'),
+            'reminder_sent_at' => now()->subHour(),
+        ]);
+
+        Livewire::test(TasksIndex::class)
+            ->call('edit', $task->id)
+            ->set('task_title', 'Renamed, same deadline')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        // A non-deadline edit must not re-fire an already-sent reminder.
+        $this->assertNotNull($task->refresh()->reminder_sent_at);
+    }
 
     private function actingAsCrmStaff(): User
     {

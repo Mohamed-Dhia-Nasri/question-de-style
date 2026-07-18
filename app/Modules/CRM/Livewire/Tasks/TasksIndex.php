@@ -225,7 +225,17 @@ class TasksIndex extends Component
         ];
 
         if ($editing) {
-            $task->update($attributes);
+            $task->fill($attributes);
+
+            // Rescheduling the deadline re-arms the one-time reminder (M10):
+            // reminder_sent_at is the per-deadline idempotency stamp, not a
+            // per-task one, so a moved due_at must clear it. Only reset on a
+            // genuine due_at change (dirty-tracking normalizes the cast).
+            if ($task->isDirty('due_at')) {
+                $task->reminder_sent_at = null;
+            }
+
+            $task->save();
         } else {
             $task = Task::create($attributes);
         }

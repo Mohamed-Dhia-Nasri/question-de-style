@@ -159,6 +159,34 @@ class PlatformAccountsPanelTest extends TestCase
         $this->assertDatabaseMissing('platform_accounts', ['handle' => 'second.instagram']);
     }
 
+    public function test_handles_are_canonicalized_so_case_and_at_variants_are_one_account(): void
+    {
+        // M02: '@Nike', 'nike' and 'NIKE' all name the same real account.
+        // Canonicalize on write (trim, strip leading '@', lowercase) so a
+        // second creator cannot silently track the same handle.
+        $this->actingAsCrmStaff();
+
+        $creatorA = Creator::factory()->create();
+        Livewire::test(PlatformAccountsPanel::class, ['creator' => $creatorA])
+            ->call('add')
+            ->set('account_platform', Platform::Instagram->value)
+            ->set('account_handle', '@Nike')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertSame('nike', $creatorA->platformAccounts()->firstOrFail()->handle);
+
+        $creatorB = Creator::factory()->create();
+        Livewire::test(PlatformAccountsPanel::class, ['creator' => $creatorB])
+            ->call('add')
+            ->set('account_platform', Platform::Instagram->value)
+            ->set('account_handle', 'NIKE')
+            ->call('save')
+            ->assertHasErrors(['account_handle']);
+
+        $this->assertSame(0, $creatorB->platformAccounts()->count());
+    }
+
     public function test_a_handle_claimed_by_another_creator_is_a_caught_error(): void
     {
         $this->actingAsCrmStaff();

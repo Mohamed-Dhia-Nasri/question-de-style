@@ -420,7 +420,9 @@ class CreatorCsvImport extends Component
             $value = substr($value, 1);
         }
 
-        return trim($value);
+        // Match CreatorWriter::canonicalHandle so the pre-write skip detection
+        // compares like-for-like against the canonical stored handle (M02).
+        return mb_strtolower(trim($value));
     }
 
     private function stripBom(string $value): string

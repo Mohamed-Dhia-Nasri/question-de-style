@@ -83,6 +83,34 @@ class SeedingProgressStripTest extends TestCase
             ->assertSee('The Posted count goes up once a creator’s post is matched to this run.');
     }
 
+    public function test_a_returned_parcel_is_not_counted_as_shipped_or_delivered(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $brand = Brand::factory()->create();
+        $run = SeedingCampaign::factory()->create(['brand_id' => $brand->id]);
+        $product = Product::factory()->create(['brand_id' => $brand->id]);
+        $creator = Creator::factory()->create();
+        $run->creators()->attach([$creator->id]);
+
+        // Delivered, then returned — the edit form preserves shipped_at and
+        // delivered_at on a Returned parcel, so a timestamp-based count would
+        // wrongly tally it. Counting strictly by status must not (M07).
+        Shipment::factory()->create([
+            'seeding_campaign_id' => $run->id,
+            'creator_id' => $creator->id,
+            'product_id' => $product->id,
+            'status' => ShipmentStatus::Returned,
+            'shipped_at' => now()->subDays(3),
+            'delivered_at' => now()->subDay(),
+        ]);
+
+        $this->get(route('crm.seeding.show', $run))
+            ->assertOk()
+            ->assertSee('Shipped 0/1')
+            ->assertSee('Delivered 0/1');
+    }
+
     public function test_the_strip_does_not_render_for_a_run_with_zero_shipments(): void
     {
         $this->actingAsCrmStaff();

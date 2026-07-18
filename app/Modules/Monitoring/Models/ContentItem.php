@@ -43,7 +43,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property list<MetricValue>|null $public_metrics
  * @property Provenance $provenance
  * @property array<int, string>|null $human_overrides
- * @property array<int, string>|null $mentions
+ * @property array<int, string>|null $mentioned_handles
  * @property array<int, array>|null $product_tags
  * @property array<int, string>|null $collaborators
  * @property bool|null $branded_content_label
@@ -67,7 +67,7 @@ class ContentItem extends Model
         'public_metrics',
         'provenance',
         'human_overrides',
-        'mentions',
+        'mentioned_handles',
         'product_tags',
         'collaborators',
         'branded_content_label',
@@ -84,7 +84,7 @@ class ContentItem extends Model
             'public_metrics' => AsValueObjectCollection::class.':'.MetricValue::class,
             'provenance' => AsValueObject::class.':'.Provenance::class,
             'human_overrides' => 'array',
-            'mentions' => 'array',
+            'mentioned_handles' => 'array',
             'product_tags' => 'array',
             'collaborators' => 'array',
             'branded_content_label' => 'boolean',

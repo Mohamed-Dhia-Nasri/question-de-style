@@ -58,13 +58,8 @@ class ContentItemPersister
                     'external_id' => $item->externalId,
                     'caption' => $item->caption,
                     'media_urls' => $item->mediaUrls,
-                    'mentions' => $item->mentions,
-                    'product_tags' => array_map(static fn (ProductTag $t): array => [
-                        'brand_ref' => $t->brandRef,
-                        'product_name' => $t->productName,
-                        'product_sku' => $t->productSku,
-                        'provider_tag_id' => $t->providerTagId,
-                    ], $item->productTags),
+                    'mentioned_handles' => $item->mentions,
+                    'product_tags' => $this->mapProductTags($item->productTags),
                     'collaborators' => $item->collaborators,
                     'branded_content_label' => $item->brandedContentLabel,
                     'permalink' => $item->permalink,
@@ -85,13 +80,8 @@ class ContentItemPersister
             $updates = [
                 'caption' => $item->caption,
                 'media_urls' => $item->mediaUrls,
-                'mentions' => $item->mentions,
-                'product_tags' => array_map(static fn (ProductTag $t): array => [
-                    'brand_ref' => $t->brandRef,
-                    'product_name' => $t->productName,
-                    'product_sku' => $t->productSku,
-                    'provider_tag_id' => $t->providerTagId,
-                ], $item->productTags),
+                'mentioned_handles' => $item->mentions,
+                'product_tags' => $this->mapProductTags($item->productTags),
                 'collaborators' => $item->collaborators,
                 'branded_content_label' => $item->brandedContentLabel,
                 // Keep the known permalink when a provider omits it (the
@@ -126,5 +116,19 @@ class ContentItemPersister
         $overrides = $item->human_overrides;
 
         return is_array($overrides) ? array_values(array_filter($overrides, 'is_string')) : [];
+    }
+
+    /**
+     * @param  list<ProductTag>  $tags
+     * @return list<array{brand_ref: ?string, product_name: ?string, product_sku: ?string, provider_tag_id: ?string}>
+     */
+    private function mapProductTags(array $tags): array
+    {
+        return array_map(static fn (ProductTag $t): array => [
+            'brand_ref' => $t->brandRef,
+            'product_name' => $t->productName,
+            'product_sku' => $t->productSku,
+            'provider_tag_id' => $t->providerTagId,
+        ], $tags);
     }
 }

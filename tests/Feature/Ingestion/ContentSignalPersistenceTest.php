@@ -41,7 +41,7 @@ class ContentSignalPersistenceTest extends TestCase
         app(ContentItemPersister::class)->persist($account, [$data]);
 
         $row = ContentItem::query()->where('external_id', 'sig-1')->firstOrFail();
-        $this->assertSame(['glossier'], $row->mentions);
+        $this->assertSame(['glossier'], $row->mentioned_handles);
         $this->assertSame('You Perfume', $row->product_tags[0]['product_name']);
         $this->assertSame(['glossier'], $row->collaborators);
         $this->assertTrue($row->branded_content_label);

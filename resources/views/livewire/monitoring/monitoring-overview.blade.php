@@ -54,7 +54,7 @@
             <a href="{{ route('monitoring.creators.index') }}" class="mt-1 inline-block text-theme-xs text-brand-500 hover:underline">View roster</a>
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-            <p class="text-sm text-gray-500 dark:text-gray-400">New content</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Posts published</p>
             <p class="mt-2 text-2xl font-semibold text-gray-800 dark:text-white/90">{{ number_format($newContent) }}</p>
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">

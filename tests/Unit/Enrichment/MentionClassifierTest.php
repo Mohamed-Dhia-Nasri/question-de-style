@@ -95,24 +95,16 @@ class MentionClassifierTest extends TestCase
     {
         $this->assertSame(60, config('qds.enrichment.attribution.shipment_window_days'));
 
-        // Published a few days after delivery of the same brand's shipment,
-        // WITH product-level evidence: the recognition names the same
-        // product the shipment carries (productId match). HIGH now requires
-        // this — brand alignment alone is no longer sufficient (doctrine
-        // tightened: product-level alignment, not just brand, proves HIGH).
+        // Published a few days after delivery of the same brand's shipment:
+        // under the default (flag-off) legacy brand-level doctrine, brand
+        // alignment alone is sufficient to prove HIGH — no product-level
+        // evidence required (the product-aware tightening only applies when
+        // the text_signals kill switch is ON; see MentionClassifierProductTest).
         $result = $this->classifier->classify(new EvidenceBundle(
-            recognitions: [[
-                'type' => 'LOGO',
-                'brand' => 'Maison Lumière',
-                'level' => ConfidenceLevel::High,
-                'productId' => 99,
-                'product' => 'Éclat Serum',
-            ]],
+            recognitions: [$this->recognition('Maison Lumière')],
             shipments: [new ShipmentEvidence(
                 reference: 'shipment-record:42',
                 brandName: 'Maison Lumière',
-                productLabel: 'Éclat Serum',
-                productId: 99,
                 shippedAt: CarbonImmutable::parse('2026-05-30'),
                 deliveredAt: CarbonImmutable::parse('2026-06-02'),
             )],

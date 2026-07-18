@@ -89,7 +89,6 @@ class MentionClassifier
         $aligned = $this->alignedShipments($evidence, $strongRecognitions, $weakRecognitions, $targetedHashtags);
 
         if ($aligned !== []) {
-            $productLevel = $this->hasProductLevelAlignment($aligned, [...$strongRecognitions, ...$weakRecognitions]);
             $strongRelevance = $this->shipmentHasStrongRelevance($aligned, $strongRecognitions, $targetedHashtags);
             $timingOk = $this->timingSatisfied($aligned, $evidence);
 
@@ -102,15 +101,24 @@ class MentionClassifier
                 $shipmentSignals[] = 'shipment-timing-unverified';
             }
 
-            // HIGH only when the SPECIFIC product is evidenced. Brand-only
-            // alignment is real but unconfirmed → MEDIUM + review flag.
-            if ($productLevel && $strongRelevance && $timingOk) {
-                $level = ConfidenceLevel::High;
-            } else {
-                $level = ConfidenceLevel::Medium;
-                if (! $productLevel) {
-                    $shipmentSignals[] = 'product-unconfirmed';
+            if ($evidence->productDoctrine) {
+                // Product-aware doctrine (kill switch ON): HIGH only when
+                // the SPECIFIC product is evidenced. Brand-only alignment
+                // is real but unconfirmed → MEDIUM + review flag.
+                $productLevel = $this->hasProductLevelAlignment($aligned, [...$strongRecognitions, ...$weakRecognitions]);
+
+                if ($productLevel && $strongRelevance && $timingOk) {
+                    $level = ConfidenceLevel::High;
+                } else {
+                    $level = ConfidenceLevel::Medium;
+                    if (! $productLevel) {
+                        $shipmentSignals[] = 'product-unconfirmed';
+                    }
                 }
+            } else {
+                // Legacy brand-level doctrine (kill switch OFF): brand
+                // alignment alone is sufficient for HIGH.
+                $level = ($strongRelevance && $timingOk) ? ConfidenceLevel::High : ConfidenceLevel::Medium;
             }
 
             return new ClassificationResult(

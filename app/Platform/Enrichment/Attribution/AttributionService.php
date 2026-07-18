@@ -201,6 +201,12 @@ class AttributionService
 
     private function buildEvidence(ContentItem|Story $target): EvidenceBundle
     {
+        // Kill switch (Tier 0 free-signal detection, sub-project A): OFF
+        // reproduces the legacy brand-level doctrine exactly (precision
+        // gate skipped, no paid label, no contextual cues, no product
+        // doctrine); ON enables the full product-aware behaviour.
+        $enabled = (bool) config('qds.enrichment.text_signals.enabled');
+
         $recognitions = [];
 
         $detectionQuery = RecognitionDetection::query();
@@ -221,8 +227,11 @@ class AttributionService
             }
 
             // Precision gate: an UNMATCHED logo (brand not in the lexicon) or a
-            // low-confidence logo carries no attribution relevance.
-            if ($detection->recognition_type === RecognitionType::Logo
+            // low-confidence logo carries no attribution relevance. Gated
+            // behind the kill switch — OFF reproduces the legacy behaviour
+            // where such detections still carried evidential weight.
+            if ($enabled
+                && $detection->recognition_type === RecognitionType::Logo
                 && (in_array('brand-lexicon:unmatched', $assessment->signals, true)
                     || $assessment->confidenceLevel === ConfidenceLevel::Low
                     || $assessment->confidenceLevel === ConfidenceLevel::Unknown)) {
@@ -247,11 +256,12 @@ class AttributionService
             hashtagMatches: $hashtagMatches,
             ambiguousHashtags: $ambiguous,
             shipments: $this->seedingEvidence->forTarget($target),
-            paidPartnershipLabel: $target instanceof ContentItem ? $target->branded_content_label : null,
-            contextualCues: $target instanceof ContentItem
+            paidPartnershipLabel: $enabled ? ($target instanceof ContentItem ? $target->branded_content_label : null) : false,
+            contextualCues: $enabled && $target instanceof ContentItem
                 ? app(ContextualCueDetector::class)->detect($target->caption)
                 : [],
             publishedAt: $this->publicationDate($target),
+            productDoctrine: $enabled,
         );
     }
 

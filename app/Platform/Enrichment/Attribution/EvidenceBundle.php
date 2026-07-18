@@ -46,5 +46,10 @@ final readonly class EvidenceBundle
         public ?CarbonImmutable $publishedAt = null,
         /** @var list<string> gifting/PR cue signals (relevance booster, not a brand claim) */
         public array $contextualCues = [],
+        /**
+         * When true, the classifier enforces the product-aware SEEDED
+         * doctrine; when false, the legacy brand-level doctrine applies.
+         */
+        public bool $productDoctrine = false,
     ) {}
 }

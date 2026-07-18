@@ -26,6 +26,7 @@ class MentionClassifierProductTest extends TestCase
             recognitions: [$this->recognition('Glossier', 42, 'You Perfume')],
             shipments: [new ShipmentEvidence(reference: 'shipment-record:1', brandName: 'Glossier', productLabel: 'You Perfume', productId: 42, deliveredAt: CarbonImmutable::parse('2026-06-01'))],
             publishedAt: CarbonImmutable::parse('2026-06-03'),
+            productDoctrine: true,
         ));
 
         $this->assertSame(MentionType::Seeded, $result->mentionType);
@@ -38,6 +39,7 @@ class MentionClassifierProductTest extends TestCase
             recognitions: [$this->recognition('Glossier', null, null)],
             shipments: [new ShipmentEvidence(reference: 'shipment-record:1', brandName: 'Glossier', productLabel: 'You Perfume', productId: 42, deliveredAt: CarbonImmutable::parse('2026-06-01'))],
             publishedAt: CarbonImmutable::parse('2026-06-03'),
+            productDoctrine: true,
         ));
 
         $this->assertSame(MentionType::Seeded, $result->mentionType);

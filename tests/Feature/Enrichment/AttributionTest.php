@@ -118,18 +118,15 @@ class AttributionTest extends TestCase
         $this->assertInstanceOf(ConfidenceAssessment::class, $mention->classification);
         $this->assertSame(MentionType::Seeded->value, $mention->classification->value);
 
-        // The RecognitionDetection here carries no product_id, so the
-        // shipment's brand-only alignment is real but unconfirmed at the
-        // product level: SEEDED stands, capped at MEDIUM and flagged for
-        // review (doctrine: HIGH requires product-level alignment). This
-        // stays MEDIUM even once AttributionService starts reading
-        // RecognitionDetection::product_id, because this fixture's
-        // detection has none.
-        $this->assertSame(ConfidenceLevel::Medium, $mention->classification->confidenceLevel);
+        // Under the default (text_signals kill switch OFF) legacy
+        // brand-level doctrine, brand alignment alone proves HIGH — the
+        // product-aware tightening (product-unconfirmed → MEDIUM) only
+        // applies when the flag is ON (see AttributionProductEvidenceTest).
+        $this->assertSame(ConfidenceLevel::High, $mention->classification->confidenceLevel);
         $this->assertSame(VerificationStatus::AiAssessed, $mention->classification->verificationStatus);
         $this->assertNotEmpty($mention->classification->signals);
         $this->assertContains('shipment-record:42', $mention->classification->signals);
-        $this->assertContains('product-unconfirmed', $mention->classification->signals);
+        $this->assertNotContains('product-unconfirmed', $mention->classification->signals);
 
         // The mention derives from the externally-sourced content: its
         // provenance is the content's provenance (DP-002).

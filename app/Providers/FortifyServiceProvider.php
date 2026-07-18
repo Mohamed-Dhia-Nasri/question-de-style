@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Actions\Fortify\ResetUserPassword;
 use App\Models\User;
+use App\Shared\Http\Responses\GenericPasswordResetLinkResponse;
 use App\Shared\Http\Responses\LoginResponse;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -11,6 +12,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
+use Laravel\Fortify\Contracts\FailedPasswordResetLinkRequestResponse;
 use Laravel\Fortify\Contracts\LoginResponse as LoginResponseContract;
 use Laravel\Fortify\Fortify;
 
@@ -19,6 +21,13 @@ class FortifyServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(LoginResponseContract::class, LoginResponse::class);
+
+        // Mask the "no such user" outcome so the reset endpoint is not a
+        // user-enumeration oracle (M33).
+        $this->app->singleton(
+            FailedPasswordResetLinkRequestResponse::class,
+            GenericPasswordResetLinkResponse::class,
+        );
     }
 
     public function boot(): void
@@ -50,5 +59,10 @@ class FortifyServiceProvider extends ServiceProvider
 
             return Limit::perMinute(5)->by($throttleKey);
         });
+
+        // The password-reset endpoints are throttled by ThrottlePasswordReset,
+        // appended to the web group in bootstrap/app.php (M33) — Fortify leaves
+        // its own reset routes unthrottled and reads no limiter config for
+        // them, and they register too late for a boot-time route mutation.
     }
 }

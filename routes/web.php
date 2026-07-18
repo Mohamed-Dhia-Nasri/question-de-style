@@ -6,7 +6,11 @@ use Illuminate\Support\Facades\Route;
 // Operational endpoints (/up and /health) are registered in bootstrap/app.php
 // outside the web middleware group so they never depend on the session store.
 
-Route::get('/', fn () => redirect()->route('dashboard'));
+// Role-aware landing: CLIENT_VIEWER lacks internal.access, so the bare '/'
+// must send them to their reports area, not the staff dashboard 403 (M32).
+Route::get('/', fn () => redirect()->route(
+    auth()->user()?->isClientViewer() ? 'reports.index' : 'dashboard'
+));
 
 // Internal staff surfaces. CLIENT_VIEWER lacks internal.access and is
 // confined to the approved-reports area (REQ-M3-012). 'subscribed' is the

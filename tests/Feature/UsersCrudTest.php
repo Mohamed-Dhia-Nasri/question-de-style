@@ -300,6 +300,44 @@ class UsersCrudTest extends TestCase
         $this->assertDatabaseHas('users', ['id' => $ownerA->id]);
     }
 
+    public function test_the_tenant_owner_cannot_be_deactivated_via_the_edit_form(): void
+    {
+        // M21: the billing owner is the sole billing.manage authority and
+        // EnsureUserIsActive logs out any inactive user — deactivating the
+        // owner locks the whole tenant out of billing. A second admin must be
+        // refused, mirroring the H3 owner-delete guard.
+        [$tenantA] = $this->makeTenantPair();
+        $ownerA = $tenantA->owner;
+        $adminB = $this->withTenant($tenantA, fn (): User => $this->makeUser(RoleName::Admin));
+
+        $this->actingAsTenant($tenantA);
+        $this->actingAs($adminB);
+
+        Livewire::test(UsersIndex::class)
+            ->call('edit', $ownerA->id)
+            ->set('active', false)
+            ->call('save')
+            ->assertHasErrors(['active']);
+
+        $this->assertTrue($ownerA->fresh()->active);
+    }
+
+    public function test_the_tenant_owner_cannot_be_deactivated_via_bulk_action(): void
+    {
+        [$tenantA] = $this->makeTenantPair();
+        $ownerA = $tenantA->owner;
+        $adminB = $this->withTenant($tenantA, fn (): User => $this->makeUser(RoleName::Admin));
+
+        $this->actingAsTenant($tenantA);
+        $this->actingAs($adminB);
+
+        Livewire::test(UsersIndex::class)
+            ->set('selected', [(string) $ownerA->id])
+            ->call('bulkSetActive', false);
+
+        $this->assertTrue($ownerA->fresh()->active);
+    }
+
     public function test_bulk_deactivation_skips_the_current_admin(): void
     {
         $admin = $this->actingAsAdmin();

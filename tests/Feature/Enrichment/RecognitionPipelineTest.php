@@ -190,6 +190,34 @@ class RecognitionPipelineTest extends TestCase
         $this->assertCount(1, $queue);
     }
 
+    public function test_two_distinct_provider_labels_for_the_same_brand_are_not_collapsed(): void
+    {
+        // Two distinct raw logo labels both resolve to the same CRM brand.
+        // Keying the detection on the mapped brand collapses them into one row,
+        // losing a genuine second detection; the identity must be the raw
+        // provider label (M27).
+        $this->brand();
+        $content = $this->imagePost();
+        $this->fakeVision(['logoAnnotations' => [
+            ['description' => 'Lumiere', 'score' => 0.94],
+            ['description' => 'Maison Lumière', 'score' => 0.88],
+        ]]);
+
+        $result = $this->enrich($content);
+
+        $this->assertSame(2, $result['created']);
+        $this->assertSame(2, RecognitionDetection::query()->count());
+        $this->assertSame(
+            ['Lumiere', 'Maison Lumière'],
+            RecognitionDetection::query()->orderBy('provider_label')->pluck('provider_label')->all(),
+        );
+        // Both still map to the same correctable brand.
+        $this->assertSame(
+            ['Maison Lumière', 'Maison Lumière'],
+            RecognitionDetection::query()->orderBy('provider_label')->pluck('detected_brand')->all(),
+        );
+    }
+
     public function test_ocr_text_where_a_brand_name_appears_only_as_a_substring_is_not_a_match(): void
     {
         // 'Mac' clears the 3-char length floor but appears only inside

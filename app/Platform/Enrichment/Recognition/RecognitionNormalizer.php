@@ -75,6 +75,7 @@ class RecognitionNormalizer
                     type: RecognitionType::Logo,
                     detectedText: null,
                     detectedBrand: $brand ?? $label,
+                    providerLabel: $label,
                     score: $score !== null ? (float) $score : null,
                     signals: [
                         $score !== null ? sprintf('logo-match-score:%.2f', (float) $score) : 'logo-match-score:unavailable',
@@ -199,6 +200,7 @@ class RecognitionNormalizer
                     type: RecognitionType::Logo,
                     detectedText: null,
                     detectedBrand: $brand ?? trim($label),
+                    providerLabel: trim($label),
                     score: $confidence,
                     signals: [
                         $confidence !== null ? sprintf('logo-match-score:%.2f', $confidence) : 'logo-match-score:unavailable',
@@ -230,6 +232,8 @@ class RecognitionNormalizer
             type: $type,
             detectedText: mb_substr(trim($text), 0, self::MAX_TEXT_LENGTH),
             detectedBrand: $brand,
+            // provider_label is varchar(255) while detected_text allows more.
+            providerLabel: mb_substr(trim($text), 0, 255),
             score: $score,
             signals: [
                 $matchSignal.':'.$brand,

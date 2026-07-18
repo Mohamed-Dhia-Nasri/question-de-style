@@ -359,6 +359,10 @@ return [
         'disk' => env('QDS_EXPORTS_DISK', 'exports'),
         'ttl_hours' => (int) env('QDS_EXPORTS_TTL_HOURS', 24),
         'download_link_ttl_minutes' => (int) env('QDS_EXPORTS_LINK_TTL_MINUTES', 10),
+        // A PENDING/RUNNING job older than this was abandoned by a dead worker
+        // (OOM/SIGKILL bypasses the in-handle catch); the reaper fails it so it
+        // stops blocking re-requests. Mirrors qds.enrichment.run_stale_after_minutes.
+        'run_stale_after_minutes' => (int) env('QDS_EXPORTS_RUN_STALE_AFTER_MINUTES', 180),
     ],
 
     /*

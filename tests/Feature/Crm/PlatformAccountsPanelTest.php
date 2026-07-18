@@ -8,6 +8,7 @@ use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Platform\Ingestion\SourceRegistry;
+use App\Shared\Audit\AuditLog;
 use App\Shared\Authorization\PermissionsCatalog;
 use App\Shared\Enums\Platform;
 use App\Shared\Enums\RoleName;
@@ -84,6 +85,15 @@ class PlatformAccountsPanelTest extends TestCase
         // The human is the identity authority; the stamp says so (ADR-0015).
         $this->assertSame(SourceRegistry::AGENCY_MANUAL_ENTRY, $account->provenance->source);
         $this->assertDatabaseHas('audit_logs', ['action' => 'platform_account.added', 'subject_id' => $account->id]);
+
+        // The social handle (PII) must not sit in the append-only audit context (M29).
+        foreach (AuditLog::all() as $log) {
+            $this->assertStringNotContainsString(
+                'hand.curated',
+                (string) json_encode($log->context),
+                "audit_logs.{$log->action} context leaked the account handle",
+            );
+        }
     }
 
     public function test_the_form_validates_platform_handle_and_links(): void
@@ -111,6 +121,27 @@ class PlatformAccountsPanelTest extends TestCase
             ->assertHasErrors(['account_links']);
     }
 
+    public function test_the_form_rejects_dangerous_non_http_link_schemes(): void
+    {
+        // H6 regression: FILTER_VALIDATE_URL accepts javascript:// URLs
+        // (e.g. "javascript://comment%0aalert(1)"), which the profile blade
+        // then renders as a clickable <a href> — a stored XSS vector against
+        // any staff member who clicks it. Only http/https links may be stored.
+        $this->actingAsCrmStaff();
+
+        $creator = Creator::factory()->create();
+
+        Livewire::test(PlatformAccountsPanel::class, ['creator' => $creator])
+            ->call('add')
+            ->set('account_platform', Platform::Instagram->value)
+            ->set('account_handle', 'xss.handle')
+            ->set('account_links', 'javascript://comment%0aalert(document.domain)')
+            ->call('save')
+            ->assertHasErrors(['account_links']);
+
+        $this->assertDatabaseMissing('platform_accounts', ['handle' => 'xss.handle']);
+    }
+
     public function test_a_second_account_on_the_same_platform_is_a_caught_error_not_a_silent_create(): void
     {
         $this->actingAsCrmStaff();
@@ -126,6 +157,34 @@ class PlatformAccountsPanelTest extends TestCase
             ->assertHasErrors(['account_handle']);
 
         $this->assertDatabaseMissing('platform_accounts', ['handle' => 'second.instagram']);
+    }
+
+    public function test_handles_are_canonicalized_so_case_and_at_variants_are_one_account(): void
+    {
+        // M02: '@Nike', 'nike' and 'NIKE' all name the same real account.
+        // Canonicalize on write (trim, strip leading '@', lowercase) so a
+        // second creator cannot silently track the same handle.
+        $this->actingAsCrmStaff();
+
+        $creatorA = Creator::factory()->create();
+        Livewire::test(PlatformAccountsPanel::class, ['creator' => $creatorA])
+            ->call('add')
+            ->set('account_platform', Platform::Instagram->value)
+            ->set('account_handle', '@Nike')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertSame('nike', $creatorA->platformAccounts()->firstOrFail()->handle);
+
+        $creatorB = Creator::factory()->create();
+        Livewire::test(PlatformAccountsPanel::class, ['creator' => $creatorB])
+            ->call('add')
+            ->set('account_platform', Platform::Instagram->value)
+            ->set('account_handle', 'NIKE')
+            ->call('save')
+            ->assertHasErrors(['account_handle']);
+
+        $this->assertSame(0, $creatorB->platformAccounts()->count());
     }
 
     public function test_a_handle_claimed_by_another_creator_is_a_caught_error(): void

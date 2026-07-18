@@ -45,7 +45,21 @@ class PruneStoryMediaCommand extends Command
                 ->where('captured_at', '<', $cutoff)
                 ->chunkById(100, function ($stories) use ($disk, &$pruned) {
                     foreach ($stories as $story) {
-                        $disk->delete((string) $story->media_url);
+                        $path = (string) $story->media_url;
+
+                        try {
+                            $deleted = $disk->delete($path);
+                        } catch (\Throwable) {
+                            // Some disks throw instead of returning false.
+                            $deleted = false;
+                        }
+
+                        // Only stamp the row once the blob is confirmed gone.
+                        // A failed delete is left for the next run rather than
+                        // orphaning the file behind a nulled media_url (M31).
+                        if (! $deleted && $disk->exists($path)) {
+                            continue;
+                        }
 
                         $story->update([
                             'media_url' => null,

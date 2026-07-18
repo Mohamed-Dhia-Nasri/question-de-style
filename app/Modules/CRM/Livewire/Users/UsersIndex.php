@@ -168,6 +168,15 @@ class UsersIndex extends Component
             }
         }
 
+        // Owner-lockout guard: the billing owner is the sole billing.manage
+        // authority and an inactive user is logged out on every request, so
+        // deactivating the owner locks the whole tenant out of billing. Unlike
+        // the self-check above, the deactivator is usually a different admin
+        // (M21). Mirrors UserPolicy::delete's owner guard (H3).
+        if ($editing && ! $validated['active'] && $user->isTenantOwner()) {
+            throw ValidationException::withMessages(['active' => 'You cannot deactivate the billing owner.']);
+        }
+
         // Seat model (ADR-0021): creating an active user or reactivating an
         // inactive one consumes a seat — those paths run under the tenant
         // seat lock so a concurrent change cannot overshoot the limit.
@@ -272,8 +281,8 @@ class UsersIndex extends Component
             $count = 0;
 
             foreach ($users as $user) {
-                // Skip self-deactivation and re-check per record.
-                if (! $active && $user->is(auth()->user())) {
+                // Skip self- and owner-deactivation, re-check per record (M21).
+                if (! $active && ($user->is(auth()->user()) || $user->isTenantOwner())) {
                     continue;
                 }
 
@@ -355,6 +364,9 @@ class UsersIndex extends Component
         return view('livewire.crm.users-index', [
             'users' => $this->usersQuery()->paginate($this->perPage()),
             'roles' => $this->allowedRoles(),
+            // The tenant's billing owner cannot be deleted (RESTRICT FK) —
+            // resolved once here so the row template needs no per-row query.
+            'ownerUserId' => auth()->user()->tenant()->value('owner_user_id'),
         ]);
     }
 }

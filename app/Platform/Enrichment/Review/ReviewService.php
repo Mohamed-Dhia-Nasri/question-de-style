@@ -17,6 +17,7 @@ use App\Shared\ValueObjects\ConfidenceAssessment;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use InvalidArgumentException;
 
@@ -46,17 +47,21 @@ class ReviewService
     {
         $this->authorize($reviewable, $reviewer);
 
-        $original = $this->snapshot($reviewable);
-
         if ($reviewable instanceof ContentHashtag) {
             throw new InvalidArgumentException(
                 'An ambiguous hashtag match cannot be approved as-is — correct it to one list entry or reject it.'
             );
         }
 
-        $this->moveEnvelope($reviewable, VerificationStatus::HumanReviewed, null, ['human-approved']);
+        return DB::transaction(function () use ($reviewable, $reviewer, $reason): ReviewAction {
+            $this->lockAndAssertPending($reviewable);
 
-        return $this->record($reviewable, ReviewDecision::Approve, $original, null, $reason, $reviewer);
+            $original = $this->snapshot($reviewable);
+
+            $this->moveEnvelope($reviewable, VerificationStatus::HumanReviewed, null, ['human-approved']);
+
+            return $this->record($reviewable, ReviewDecision::Approve, $original, null, $reason, $reviewer);
+        });
     }
 
     /** @param array<string, mixed> $correction */
@@ -64,37 +69,45 @@ class ReviewService
     {
         $this->authorize($reviewable, $reviewer);
 
-        $original = $this->snapshot($reviewable);
+        return DB::transaction(function () use ($reviewable, $correction, $reviewer, $reason): ReviewAction {
+            $this->lockAndAssertPending($reviewable);
 
-        match (true) {
-            $reviewable instanceof Mention => $this->correctMention($reviewable, $correction, $reason),
-            $reviewable instanceof RecognitionDetection => $this->correctRecognition($reviewable, $correction),
-            $reviewable instanceof SentimentAnalysis => $this->correctSentiment($reviewable, $correction),
-            $reviewable instanceof ContentHashtag => $this->resolveHashtag($reviewable, $correction, $reviewer),
-            default => throw new InvalidArgumentException('Unsupported reviewable type: '.$reviewable::class),
-        };
+            $original = $this->snapshot($reviewable);
 
-        return $this->record($reviewable, ReviewDecision::Correct, $original, $correction, $reason, $reviewer);
+            match (true) {
+                $reviewable instanceof Mention => $this->correctMention($reviewable, $correction, $reason),
+                $reviewable instanceof RecognitionDetection => $this->correctRecognition($reviewable, $correction),
+                $reviewable instanceof SentimentAnalysis => $this->correctSentiment($reviewable, $correction),
+                $reviewable instanceof ContentHashtag => $this->resolveHashtag($reviewable, $correction, $reviewer),
+                default => throw new InvalidArgumentException('Unsupported reviewable type: '.$reviewable::class),
+            };
+
+            return $this->record($reviewable, ReviewDecision::Correct, $original, $correction, $reason, $reviewer);
+        });
     }
 
     public function reject(Model $reviewable, User $reviewer, ?string $reason = null): ReviewAction
     {
         $this->authorize($reviewable, $reviewer);
 
-        $original = $this->snapshot($reviewable);
+        return DB::transaction(function () use ($reviewable, $reviewer, $reason): ReviewAction {
+            $this->lockAndAssertPending($reviewable);
 
-        match (true) {
-            // A rejected mention is "no real brand reference": the honest
-            // classification is UNKNOWN — deletion of AI outputs is never
-            // allowed (policy), the record and its history remain.
-            $reviewable instanceof Mention => $this->applyMention($reviewable, MentionType::Unknown, ['human-rejected']),
-            $reviewable instanceof RecognitionDetection => $this->moveEnvelope($reviewable, VerificationStatus::HumanCorrected, null, ['human-rejected'], nullValue: true),
-            $reviewable instanceof SentimentAnalysis => $this->rejectSentiment($reviewable),
-            $reviewable instanceof ContentHashtag => $this->resolveHashtag($reviewable, ['hashtag_list_id' => null], $reviewer),
-            default => throw new InvalidArgumentException('Unsupported reviewable type: '.$reviewable::class),
-        };
+            $original = $this->snapshot($reviewable);
 
-        return $this->record($reviewable, ReviewDecision::Reject, $original, null, $reason, $reviewer);
+            match (true) {
+                // A rejected mention is "no real brand reference": the honest
+                // classification is UNKNOWN — deletion of AI outputs is never
+                // allowed (policy), the record and its history remain.
+                $reviewable instanceof Mention => $this->applyMention($reviewable, MentionType::Unknown, ['human-rejected']),
+                $reviewable instanceof RecognitionDetection => $this->moveEnvelope($reviewable, VerificationStatus::HumanCorrected, null, ['human-rejected'], nullValue: true),
+                $reviewable instanceof SentimentAnalysis => $this->rejectSentiment($reviewable),
+                $reviewable instanceof ContentHashtag => $this->resolveHashtag($reviewable, ['hashtag_list_id' => null], $reviewer, allowClear: true),
+                default => throw new InvalidArgumentException('Unsupported reviewable type: '.$reviewable::class),
+            };
+
+            return $this->record($reviewable, ReviewDecision::Reject, $original, null, $reason, $reviewer);
+        });
     }
 
     /** Leave the item in the queue, recording that a reviewer looked at it. */
@@ -122,6 +135,38 @@ class ReviewService
     private function authorize(Model $reviewable, User $reviewer): void
     {
         Gate::forUser($reviewer)->authorize('update', $reviewable);
+    }
+
+    /**
+     * Re-read the row under a FOR UPDATE lock and assert no human has already
+     * decided it (M15). Two reviewers open the queue and both click a
+     * decision — without this the second silently overwrites the first and
+     * writes a misleading second review_actions row. The lock (held for the
+     * enclosing transaction) serializes the decisions; the fresh re-read is
+     * the authority on the current state, not the caller's stale in-memory
+     * copy. "Pending" is a not-yet-human-decided envelope (still AI_ASSESSED)
+     * or an unresolved ambiguous hashtag.
+     */
+    private function lockAndAssertPending(Model $reviewable): void
+    {
+        $locked = $reviewable->newQuery()->whereKey($reviewable->getKey())->lockForUpdate()->first();
+
+        $pending = match (true) {
+            $locked === null => false,
+            $locked instanceof ContentHashtag => $locked->needsHumanReview(),
+            $locked instanceof Mention => $locked->classification->verificationStatus === VerificationStatus::AiAssessed,
+            $locked instanceof RecognitionDetection => $locked->assessment->verificationStatus === VerificationStatus::AiAssessed,
+            $locked instanceof SentimentAnalysis => $locked->assessment->verificationStatus === VerificationStatus::AiAssessed,
+            default => throw new InvalidArgumentException('Unsupported reviewable type: '.$locked::class),
+        };
+
+        if (! $pending) {
+            throw new InvalidArgumentException('This item was already reviewed by someone else — refresh the queue and try again.');
+        }
+
+        // Act on the freshly-locked state, not the caller's stale copy
+        // (setRawAttributes(sync) also clears the value-object cast cache).
+        $reviewable->setRawAttributes($locked->getAttributes(), sync: true);
     }
 
     /** @param array<string, mixed> $correction */
@@ -191,9 +236,15 @@ class ReviewService
     }
 
     /** @param array<string, mixed> $correction */
-    private function resolveHashtag(ContentHashtag $hashtag, array $correction, User $reviewer): void
+    private function resolveHashtag(ContentHashtag $hashtag, array $correction, User $reviewer, bool $allowClear = false): void
     {
         $listId = $correction['hashtag_list_id'] ?? null;
+
+        // A CORRECT decision must pick one of the ambiguous entries; only the
+        // explicit reject() path may clear the match to nothing (M16).
+        if ($listId === null && ! $allowClear) {
+            throw new InvalidArgumentException('Resolving an ambiguous hashtag requires choosing one of its list entries — use reject to record no match.');
+        }
 
         if ($listId !== null) {
             $valid = array_map(

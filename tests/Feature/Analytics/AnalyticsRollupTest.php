@@ -8,15 +8,21 @@ use App\Modules\CRM\Models\Client;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\Monitoring\Models\ContentItem;
+use App\Modules\Monitoring\Models\EmvConfiguration;
+use App\Modules\Monitoring\Models\EmvResult;
 use App\Modules\Monitoring\Models\Mention;
 use App\Modules\Monitoring\Models\MetricSnapshot;
 use App\Modules\Monitoring\Models\MonitoredSubject;
+use App\Modules\Monitoring\Models\ReachConfiguration;
+use App\Modules\Monitoring\Models\ReachResult;
 use App\Platform\Analytics\Contracts\AnalyticsService;
 use App\Platform\Analytics\NeonAnalyticsService;
+use App\Platform\Analytics\RollupReader;
 use App\Shared\Enums\MetricTier;
 use App\Shared\Enums\Platform;
 use App\Shared\ValueObjects\MetricValue;
 use App\Shared\ValueObjects\Provenance;
+use App\Shared\ValueObjects\ReachEstimate;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -188,6 +194,78 @@ class AnalyticsRollupTest extends TestCase
         $this->assertSame('ESTIMATED', $rows[$brandA->id]->total_emv_tier);
     }
 
+    public function test_content_measures_are_not_double_counted_across_multiple_mentions(): void
+    {
+        // H4: the mentions unique index is (monitored_subject_id, content_item_id),
+        // so ONE content item legitimately yields multiple mention rows when two
+        // monitored subjects tie it to the same campaign. Each fact_mention row
+        // carries the SAME content-level views/reach/EMV, so the rollup must
+        // count those measures ONCE per content — not once per mention.
+        $client = Client::factory()->create();
+        $brand = Brand::factory()->create(['client_id' => $client->id]);
+        $campaign = Campaign::factory()->create(['brand_id' => $brand->id]);
+
+        $creator = Creator::factory()->create();
+        $account = PlatformAccount::factory()->create(['creator_id' => $creator->id]);
+        $content = ContentItem::factory()->create(['platform_account_id' => $account->id]);
+
+        // One set of content-level measures on the single post.
+        $this->contentSnapshot($content, [new MetricValue(500, MetricTier::Public, 'views')], '2026-07-03 09:00:00');
+
+        $emvConfig = EmvConfiguration::factory()->active()->create();
+        EmvResult::query()->create([
+            'content_item_id' => $content->id,
+            'emv_configuration_id' => $emvConfig->id,
+            'formula_version' => $emvConfig->formula_version,
+            'rate_card_version' => $emvConfig->rate_card_version,
+            'currency' => 'EUR',
+            'value' => new MetricValue(1234.0, MetricTier::Estimated, 'qds-emv v1'),
+            'inputs' => [],
+            'calculated_at' => now(),
+        ]);
+
+        $reachConfig = ReachConfiguration::factory()->active()->create();
+        ReachResult::query()->create([
+            'content_item_id' => $content->id,
+            'reach_configuration_id' => $reachConfig->id,
+            'formula_version' => $reachConfig->formula_version,
+            'value' => new ReachEstimate(1000.0, MetricTier::Estimated, 'qds-estimated-reach v1'),
+            'inputs' => [],
+            'calculated_at' => now(),
+        ]);
+
+        // Two monitored subjects both mention the SAME content on the SAME campaign.
+        foreach ([1, 2] as $ignored) {
+            $subject = MonitoredSubject::factory()->create(['creator_id' => $creator->id]);
+            Mention::factory()->create([
+                'monitored_subject_id' => $subject->id,
+                'content_item_id' => $content->id,
+                'story_id' => null,
+                'campaign_id' => $campaign->id,
+            ]);
+        }
+
+        app(AnalyticsService::class)->refreshRollups();
+
+        $brandRow = DB::table('rollup_mention_by_brand')
+            ->where('grain', 'month')->where('brand_id', $brand->id)->first();
+        $campaignRow = DB::table('rollup_mention_by_campaign')
+            ->where('grain', 'month')->where('campaign_id', $campaign->id)->first();
+
+        // Two mentions of the content...
+        $this->assertSame(2, (int) $brandRow->mention_count);
+        $this->assertSame(2, (int) $campaignRow->mention_count);
+        $this->assertSame(1, (int) $campaignRow->content_count);
+
+        // ...but the single post's audience/value is counted ONCE, not doubled.
+        $this->assertSame(500.0, (float) $brandRow->total_views);
+        $this->assertSame(1000.0, (float) $brandRow->total_estimated_reach);
+        $this->assertSame(1234.0, (float) $brandRow->total_emv);
+        $this->assertSame(500.0, (float) $campaignRow->total_views);
+        $this->assertSame(1000.0, (float) $campaignRow->total_estimated_reach);
+        $this->assertSame(1234.0, (float) $campaignRow->total_emv);
+    }
+
     public function test_analytics_schema_contains_no_personal_data_columns(): void
     {
         $tables = DB::table('information_schema.columns')
@@ -236,5 +314,145 @@ class AnalyticsRollupTest extends TestCase
         ] as $rollup) {
             $this->assertSame(0, DB::table($rollup)->count(), "{$rollup} must exist and be empty in P1.");
         }
+    }
+
+    /** @param array{brand: Brand, campaign: Campaign, account: PlatformAccount, creator: Creator, emvConfig: EmvConfiguration} $ctx */
+    private function seedEmvMention(array $ctx, string $currency): void
+    {
+        $content = ContentItem::factory()->create(['platform_account_id' => $ctx['account']->id]);
+        $this->contentSnapshot($content, [new MetricValue(100, MetricTier::Public, 'views')], '2026-07-03 09:00:00');
+        EmvResult::query()->create([
+            'content_item_id' => $content->id,
+            'emv_configuration_id' => $ctx['emvConfig']->id,
+            'formula_version' => $ctx['emvConfig']->formula_version,
+            'rate_card_version' => $ctx['emvConfig']->rate_card_version,
+            'currency' => $currency,
+            'value' => new MetricValue(1000.0, MetricTier::Estimated, 'qds-emv v1'),
+            'inputs' => [],
+            'calculated_at' => now(),
+        ]);
+        $subject = MonitoredSubject::factory()->create(['creator_id' => $ctx['creator']->id]);
+        Mention::factory()->create([
+            'monitored_subject_id' => $subject->id,
+            'content_item_id' => $content->id,
+            'story_id' => null,
+            'campaign_id' => $ctx['campaign']->id,
+        ]);
+    }
+
+    /** @return array{brand: Brand, campaign: Campaign, account: PlatformAccount, creator: Creator, emvConfig: EmvConfiguration} */
+    private function emvContext(): array
+    {
+        $client = Client::factory()->create();
+        $brand = Brand::factory()->create(['client_id' => $client->id]);
+        $creator = Creator::factory()->create();
+
+        return [
+            'brand' => $brand,
+            'campaign' => Campaign::factory()->create(['brand_id' => $brand->id]),
+            'account' => PlatformAccount::factory()->create(['creator_id' => $creator->id]),
+            'creator' => $creator,
+            'emvConfig' => EmvConfiguration::factory()->active()->create(),
+        ];
+    }
+
+    public function test_creator_and_mention_totals_can_be_filtered_by_platform(): void
+    {
+        $client = Client::factory()->create();
+        $brand = Brand::factory()->create(['client_id' => $client->id]);
+        $campaign = Campaign::factory()->create(['brand_id' => $brand->id]);
+        $creator = Creator::factory()->create();
+        $ig = PlatformAccount::factory()->create(['creator_id' => $creator->id, 'platform' => Platform::Instagram]);
+        $yt = PlatformAccount::factory()->create(['creator_id' => $creator->id, 'platform' => Platform::YouTube]);
+
+        foreach ([[$ig, Platform::Instagram, 100, 10], [$yt, Platform::YouTube, 500, 50]] as [$account, $platform, $views, $likes]) {
+            $content = ContentItem::factory()->create(['platform_account_id' => $account->id, 'platform' => $platform]);
+            $this->contentSnapshot($content, [
+                new MetricValue($views, MetricTier::Public, 'views'),
+                new MetricValue($likes, MetricTier::Public, 'likes'),
+            ], '2026-07-03 09:00:00');
+            $subject = MonitoredSubject::factory()->create(['creator_id' => $creator->id]);
+            Mention::factory()->create([
+                'monitored_subject_id' => $subject->id,
+                'content_item_id' => $content->id,
+                'story_id' => null,
+                'campaign_id' => $campaign->id,
+            ]);
+        }
+
+        app(AnalyticsService::class)->refreshRollups();
+        $reader = app(RollupReader::class);
+
+        // No platform filter → both platforms summed (unchanged behaviour).
+        $this->assertSame(600.0, (float) $reader->creatorTotals()->views_sum);
+        $this->assertSame(2, (int) $reader->mentionTotals(null, null, $brand->id)->mention_count);
+
+        // Filtered → only the requested platform.
+        $igTotals = $reader->creatorTotals(null, null, null, 'INSTAGRAM');
+        $this->assertSame(100.0, (float) $igTotals->views_sum);
+        $this->assertSame(10.0, (float) $igTotals->likes_sum);
+
+        $this->assertSame(1, (int) $reader->mentionTotals(null, null, $brand->id, 'YOUTUBE')->mention_count);
+    }
+
+    public function test_creator_totals_expose_each_engagement_component_separately(): void
+    {
+        $creator = Creator::factory()->create();
+        $account = PlatformAccount::factory()->create(['creator_id' => $creator->id]);
+        $content = ContentItem::factory()->create(['platform_account_id' => $account->id]);
+
+        $this->contentSnapshot($content, [
+            new MetricValue(500, MetricTier::Public, 'views'),
+            new MetricValue(40, MetricTier::Public, 'likes'),
+            new MetricValue(9, MetricTier::Public, 'comments'),
+            new MetricValue(3, MetricTier::Public, 'shares'),
+            new MetricValue(2, MetricTier::Public, 'saves'),
+        ], '2026-07-03 09:00:00');
+
+        app(AnalyticsService::class)->refreshRollups();
+
+        $totals = app(RollupReader::class)->creatorTotals();
+
+        $this->assertSame(40.0, (float) $totals->likes_sum);
+        $this->assertSame(9.0, (float) $totals->comments_sum);
+        $this->assertSame(3.0, (float) $totals->shares_sum);
+        $this->assertSame(2.0, (float) $totals->saves_sum);
+        // Engagement stays the sum of the four components (unchanged).
+        $this->assertSame(54.0, (float) $totals->engagement_sum);
+    }
+
+    public function test_mixed_currency_emv_is_reported_as_unavailable_not_summed(): void
+    {
+        $ctx = $this->emvContext();
+        $this->seedEmvMention($ctx, 'EUR');
+        $this->seedEmvMention($ctx, 'USD');
+
+        app(AnalyticsService::class)->refreshRollups();
+
+        // Summing EUR + USD into one number is meaningless — the bucket must
+        // report EMV as unavailable and carry no currency label (M24).
+        $brandRow = DB::table('rollup_mention_by_brand')
+            ->where('grain', 'month')->where('brand_id', $ctx['brand']->id)->first();
+
+        $this->assertNull($brandRow->total_emv);
+        $this->assertNull($brandRow->total_emv_currency);
+    }
+
+    public function test_single_currency_emv_carries_its_currency_label(): void
+    {
+        $ctx = $this->emvContext();
+        $this->seedEmvMention($ctx, 'EUR');
+
+        app(AnalyticsService::class)->refreshRollups();
+
+        $brandRow = DB::table('rollup_mention_by_brand')
+            ->where('grain', 'month')->where('brand_id', $ctx['brand']->id)->first();
+
+        $this->assertSame('EUR', $brandRow->total_emv_currency);
+        $this->assertSame(1000.0, (float) $brandRow->total_emv);
+
+        // The reader surfaces the currency for the KPI card.
+        $totals = app(RollupReader::class)->mentionTotals(null, null, $ctx['brand']->id);
+        $this->assertSame('EUR', $totals->total_emv_currency);
     }
 }

@@ -30,6 +30,19 @@ class BillingManage extends Component
         // Re-authorize on EVERY action (the UsersIndex doctrine).
         $this->authorize('billing.manage');
 
+        // A live subscription already exists: a plan CHANGE must go through
+        // the Billing Portal, never a second subscription-mode Checkout.
+        // Stripe Checkout would mint a NEW subscription without cancelling the
+        // old one, double-billing the tenant (the local supersede only
+        // rewrites our mirror row, it issues no Stripe cancel). Refuse
+        // server-side — the blade also hides the button, but a crafted
+        // Livewire call must not slip past. (ADR-0021 §plan changes.)
+        if ($this->tenant()->currentSubscription() !== null) {
+            $this->dispatch('notify', type: 'error', message: 'You already have a subscription — change your plan in the billing portal.');
+
+            return;
+        }
+
         /** @var SubscriptionPlan|null $plan */
         $plan = SubscriptionPlan::query()
             ->where('code', $planCode)

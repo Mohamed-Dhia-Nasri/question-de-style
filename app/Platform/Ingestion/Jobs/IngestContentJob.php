@@ -16,6 +16,7 @@ use App\Platform\Ingestion\Providers\ProviderResolver;
 use App\Shared\Tenancy\TenantContext;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Throwable;
 
 /**
@@ -60,6 +61,25 @@ class IngestContentJob implements ShouldQueue
     ) {
         $this->onQueue('ingestion');
         $this->tries = $this->configuredTries();
+    }
+
+    /**
+     * Serialize the billable provider call + non-atomic upsert per account
+     * (M23): an on-demand cycle and the scheduled cycle for the same account
+     * would otherwise double-bill and collide on the content unique index.
+     * Keyed per operation so content/stories/profile still run in parallel.
+     * releaseAfter re-queues the loser (never drops it, or the cycle wedges);
+     * expireAfter exceeds $timeout so the lock can't expire mid-run.
+     *
+     * @return array<int, object>
+     */
+    public function middleware(): array
+    {
+        return [
+            (new WithoutOverlapping('qds-account-content:'.$this->platformAccountId))
+                ->releaseAfter(60)
+                ->expireAfter(1200),
+        ];
     }
 
     public function handle(

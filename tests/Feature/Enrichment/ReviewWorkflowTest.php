@@ -356,6 +356,49 @@ class ReviewWorkflowTest extends TestCase
         $this->assertFalse($hashtag->is_ambiguous);
     }
 
+    public function test_a_stale_second_decision_is_rejected_and_does_not_overwrite_the_first(): void
+    {
+        // Two reviewers open the queue; A decides first. B's stale decision
+        // must be refused, not silently overwrite A's (M15).
+        $reviewer = $this->analyst();
+        $this->actingAs($reviewer);
+
+        $mention = Mention::factory()->lowConfidence()->create()->fresh();
+        $stale = Mention::query()->findOrFail($mention->id); // B's already-loaded copy (AI_ASSESSED)
+
+        app(ReviewService::class)->approve($mention, $reviewer); // A → HUMAN_REVIEWED
+
+        try {
+            app(ReviewService::class)->correct($stale, ['mention_type' => MentionType::Paid->value], $reviewer, reason: 'x');
+            $this->fail('A stale second decision must be refused.');
+        } catch (InvalidArgumentException) {
+        }
+
+        $fresh = $mention->fresh();
+        $this->assertSame(VerificationStatus::HumanReviewed, $fresh->classification->verificationStatus);
+        $this->assertSame(1, ReviewAction::query()->count());
+    }
+
+    public function test_correct_hashtag_without_a_list_entry_throws_and_records_nothing(): void
+    {
+        // 'Save correction' with no entry picked must NOT silently resolve the
+        // ambiguity to nothing and log it as a CORRECT decision — that is what
+        // reject is for (M16).
+        $reviewer = $this->analyst();
+        [$hashtag] = $this->ambiguousHashtag();
+
+        try {
+            app(ReviewService::class)->correct($hashtag, ['hashtag_list_id' => null], $reviewer);
+            $this->fail('Correcting an ambiguous hashtag with no list entry must throw.');
+        } catch (InvalidArgumentException) {
+        }
+
+        $hashtag->refresh();
+        $this->assertTrue($hashtag->is_ambiguous);
+        $this->assertNull($hashtag->resolved_at);
+        $this->assertSame(0, ReviewAction::query()->count());
+    }
+
     public function test_an_ambiguous_hashtag_cannot_be_approved_as_is(): void
     {
         $reviewer = $this->analyst();

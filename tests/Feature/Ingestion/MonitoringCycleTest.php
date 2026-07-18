@@ -10,7 +10,6 @@ use App\Platform\Ingestion\Jobs\IngestStoriesBatchJob;
 use App\Platform\Ingestion\Jobs\PollMonitoredAccountJob;
 use App\Platform\Ingestion\Jobs\RunMonitoringCycleJob;
 use App\Platform\Ingestion\Models\IngestionCycle;
-use App\Platform\Ingestion\Support\AdaptiveCadence;
 use App\Platform\Ingestion\Support\CycleStatus;
 use App\Shared\Enums\MonitoredSubjectType;
 use App\Shared\Enums\Platform;
@@ -61,7 +60,7 @@ class MonitoringCycleTest extends TestCase
 
         Queue::fake();
 
-        (new RunMonitoringCycleJob)->handle(app(AdaptiveCadence::class));
+        (new RunMonitoringCycleJob)->handle();
 
         $cycle = IngestionCycle::query()->firstOrFail();
         $this->assertSame(CycleStatus::Running, $cycle->status);
@@ -105,7 +104,7 @@ class MonitoringCycleTest extends TestCase
 
         Queue::fake();
 
-        (new RunMonitoringCycleJob)->handle(app(AdaptiveCadence::class));
+        (new RunMonitoringCycleJob)->handle();
 
         $cycle = IngestionCycle::query()->firstOrFail();
         $this->assertSame(1, $cycle->accounts_count); // TikTok account only
@@ -119,8 +118,8 @@ class MonitoringCycleTest extends TestCase
 
         Queue::fake();
 
-        (new RunMonitoringCycleJob)->handle(app(AdaptiveCadence::class));
-        (new RunMonitoringCycleJob)->handle(app(AdaptiveCadence::class)); // duplicate start — must no-op
+        (new RunMonitoringCycleJob)->handle();
+        (new RunMonitoringCycleJob)->handle(); // duplicate start — must no-op
 
         $this->assertSame(1, IngestionCycle::query()->count());
         Queue::assertPushed(PollMonitoredAccountJob::class, 2); // still only the first fan-out
@@ -132,7 +131,7 @@ class MonitoringCycleTest extends TestCase
 
         Queue::fake();
 
-        (new RunMonitoringCycleJob(storiesOnly: true))->handle(app(AdaptiveCadence::class));
+        (new RunMonitoringCycleJob(storiesOnly: true))->handle();
 
         $cycle = IngestionCycle::query()->firstOrFail();
         $this->assertTrue($cycle->stories_only);
@@ -170,7 +169,7 @@ class MonitoringCycleTest extends TestCase
 
         Queue::fake();
 
-        (new RunMonitoringCycleJob(storiesOnly: true))->handle(app(AdaptiveCadence::class));
+        (new RunMonitoringCycleJob(storiesOnly: true))->handle();
 
         // A new story cycle IS created despite the recent stale one.
         $this->assertSame(2, IngestionCycle::query()->count());
@@ -197,7 +196,7 @@ class MonitoringCycleTest extends TestCase
 
         Queue::fake();
 
-        (new RunMonitoringCycleJob(storiesOnly: true))->handle(app(AdaptiveCadence::class));
+        (new RunMonitoringCycleJob(storiesOnly: true))->handle();
 
         $this->assertSame(1, IngestionCycle::query()->count());
         Queue::assertNotPushed(IngestStoriesBatchJob::class);
@@ -211,7 +210,7 @@ class MonitoringCycleTest extends TestCase
 
         Queue::fake();
 
-        (new RunMonitoringCycleJob(storiesOnly: true))->handle(app(AdaptiveCadence::class));
+        (new RunMonitoringCycleJob(storiesOnly: true))->handle();
 
         // No cycle row, no jobs — the paid story actor is never invoked.
         $this->assertSame(0, IngestionCycle::query()->count());

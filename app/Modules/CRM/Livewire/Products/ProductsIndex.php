@@ -147,7 +147,7 @@ class ProductsIndex extends Component
             'product_name' => ['required', 'string', 'max:255'],
             'product_sku' => ['nullable', 'string', 'max:255'],
             'product_variant' => ['nullable', 'string', 'max:255'],
-            'product_unit_value' => ['nullable', 'numeric', 'min:0'],
+            'product_unit_value' => ['nullable', 'numeric', 'min:0', 'max:999999999999'],
             'product_category' => ['nullable', Rule::in(array_column(SectorLabel::cases(), 'value'))],
         ]);
 

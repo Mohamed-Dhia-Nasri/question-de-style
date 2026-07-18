@@ -175,7 +175,9 @@ class CreatorsIndex extends Component
                 : null,
         );
 
-        $audit->record('creator.created', $creator, ['display_name' => $creator->display_name]);
+        // Identifier-only context — the subject_id already identifies the row;
+        // the display name is PII and must not persist in append-only audit (M29).
+        $audit->record('creator.created', $creator);
 
         $this->showForm = false;
         $this->resetForm();
@@ -229,7 +231,7 @@ class CreatorsIndex extends Component
             return;
         }
 
-        $audit->record('creator.deleted', $creator, ['display_name' => $creator->display_name]);
+        $audit->record('creator.deleted', $creator);
 
         $this->confirmingDeleteId = null;
         $this->clearSelection();

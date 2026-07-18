@@ -229,7 +229,8 @@ class CampaignWizard extends Component
         return [
             'campaign_name' => ['required', 'string', 'max:255'],
             'campaign_start_at' => ['nullable', 'date'],
-            'campaign_end_at' => ['nullable', 'date', 'after_or_equal:campaign_start_at'],
+            // Order the dates only when a start is present (M06).
+            'campaign_end_at' => ['nullable', 'date', Rule::when($this->campaign_start_at !== '', ['after_or_equal:campaign_start_at'])],
         ];
     }
 
@@ -298,7 +299,8 @@ class CampaignWizard extends Component
             ($validated['new_creator_language'] ?? '') !== '' ? $validated['new_creator_language'] : null,
         );
 
-        $audit->record('creator.created', $creator, ['display_name' => $creator->display_name]);
+        // Identifier-only context — display name is PII (M29).
+        $audit->record('creator.created', $creator);
 
         $this->selected_creator_ids[] = (string) $creator->id;
 

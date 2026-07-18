@@ -34,8 +34,12 @@ class UserPolicy
 
     public function delete(User $user, User $model): bool
     {
-        // No self-deletion: an admin cannot remove their own account.
+        // No self-deletion (an admin cannot remove their own account) and
+        // never the tenant's billing owner: tenants.owner_user_id is a
+        // RESTRICT foreign key, so the delete would fail at the database with
+        // an unhandled 500. Ownership must be reassigned first.
         return $user->can(PermissionsCatalog::USERS_MANAGE)
-            && ! $user->is($model);
+            && ! $user->is($model)
+            && ! $model->isTenantOwner();
     }
 }

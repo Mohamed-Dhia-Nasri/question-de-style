@@ -53,8 +53,12 @@ class ProviderCallRecorder
         $quarantined = $this->quarantine($context, $batch);
 
         $rejectedCount = count($batch->rejected);
+        $unattributed = $persistence->unattributed;
 
-        $outcome = $rejectedCount > 0 ? CallOutcome::Partial : CallOutcome::Success;
+        // Unattributed items (accepted by validation but persisted for no
+        // account — a lost owner handle) are a first-class failure signal, not
+        // a silent skip (M22).
+        $outcome = ($rejectedCount > 0 || $unattributed > 0) ? CallOutcome::Partial : CallOutcome::Success;
 
         // Empty result where the call itself succeeded may be legitimate
         // (quiet account) — recorded as-is; unexpected emptiness is judged
@@ -70,7 +74,12 @@ class ProviderCallRecorder
             'duration_ms' => round($context->elapsedMs(), 2),
             'http_status' => $batch->response->httpStatus,
             'outcome' => $outcome,
-            'error_category' => $rejectedCount > 0 ? $this->dominantRejectionCategory($batch) : null,
+            'error_category' => match (true) {
+                $rejectedCount > 0 => $this->dominantRejectionCategory($batch),
+                // A lost owner handle is a provider-shape change.
+                $unattributed > 0 => ErrorCategory::SchemaDrift,
+                default => null,
+            },
             'error_message' => null,
             'retry_count' => $context->retryCount,
             'response_bytes' => $batch->response->responseBytes,
@@ -90,7 +99,7 @@ class ProviderCallRecorder
         ]);
 
         $this->markSuccess($context, $outcome);
-        $this->raiseSchemaDriftAlertIfNeeded($context, $batch);
+        $this->raiseSchemaDriftAlertIfNeeded($context, $batch, $unattributed);
         $this->raiseDurationAlertIfNeeded($context);
 
         $this->sampler->maybeSample($context->source, $context->operation, $context->correlationId, $batch->response);
@@ -216,14 +225,16 @@ class ProviderCallRecorder
         }
     }
 
-    private function raiseSchemaDriftAlertIfNeeded(CallContext $context, NormalizedBatch $batch): void
+    private function raiseSchemaDriftAlertIfNeeded(CallContext $context, NormalizedBatch $batch, int $unattributed = 0): void
     {
         $driftCategories = [ErrorCategory::SchemaDrift, ErrorCategory::MissingRequiredFields, ErrorCategory::InvalidFieldTypes];
 
+        // Accepted-but-unattributed items (lost owner handle) are drift too —
+        // they pass validation, so they never land in $batch->rejected (M22).
         $drifted = count(array_filter(
             $batch->rejected,
             fn ($r): bool => in_array($r->category, $driftCategories, true),
-        ));
+        )) + $unattributed;
 
         $total = count($batch->response->items);
 

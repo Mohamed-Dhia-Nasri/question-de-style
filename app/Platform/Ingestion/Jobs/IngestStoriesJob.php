@@ -13,6 +13,7 @@ use App\Platform\Ingestion\Providers\ProviderResolver;
 use App\Shared\Tenancy\TenantContext;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Throwable;
 
 /**
@@ -40,6 +41,21 @@ class IngestStoriesJob implements ShouldQueue
     ) {
         $this->onQueue('ingestion');
         $this->tries = $this->configuredTries();
+    }
+
+    /**
+     * Serialize the billable stories call + non-atomic upsert per account
+     * (M23); keyed per operation. See IngestContentJob::middleware.
+     *
+     * @return array<int, object>
+     */
+    public function middleware(): array
+    {
+        return [
+            (new WithoutOverlapping('qds-account-stories:'.$this->platformAccountId))
+                ->releaseAfter(60)
+                ->expireAfter(600),
+        ];
     }
 
     public function handle(

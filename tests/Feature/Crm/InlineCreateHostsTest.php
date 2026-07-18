@@ -114,6 +114,23 @@ class InlineCreateHostsTest extends TestCase
             ->assertSet('showForm', true);
     }
 
+    public function test_seeding_inline_product_rejects_a_brand_context_not_in_the_tenant(): void
+    {
+        $this->actingAsCrmStaff();
+
+        // seeding_brand_id is a tamperable public prop. An id that is not a
+        // brand in the active tenant must fail cleanly, not 500 on the FK.
+        Livewire::test(SeedingCampaignsIndex::class)
+            ->call('create')
+            ->set('seeding_brand_id', '999999')
+            ->call('openInlineCreate', 'product')
+            ->set('inline_product_name', 'Sample Kit')
+            ->call('saveInlineCreate')
+            ->assertDispatched('notify', type: 'error');
+
+        $this->assertDatabaseMissing('products', ['name' => 'Sample Kit']);
+    }
+
     // --- ProductsIndex -------------------------------------------------------
 
     public function test_products_form_inline_brand_is_created_and_selected(): void

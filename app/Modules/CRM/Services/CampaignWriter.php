@@ -3,6 +3,7 @@
 namespace App\Modules\CRM\Services;
 
 use App\Modules\CRM\Exceptions\CampaignBrandLocked;
+use App\Modules\CRM\Exceptions\CampaignStatusTransitionNotAllowed;
 use App\Modules\CRM\Models\Campaign;
 use App\Shared\Audit\AuditLogger;
 
@@ -47,12 +48,23 @@ final class CampaignWriter
      * @param  array<string, mixed>  $attributes
      *
      * @throws CampaignBrandLocked
+     * @throws CampaignStatusTransitionNotAllowed
      */
     public function updateCampaign(Campaign $campaign, array $attributes, AuditLogger $audit): Campaign
     {
         $this->assertBrandChangeAllowed($campaign, $attributes);
 
         $previousStatus = $campaign->status;
+
+        // AC-M3-009 / M04: the status column is a lifecycle, not a free set.
+        // A closed-set Rule::in on the form only proves the target is a valid
+        // status; the legal FROM→TO graph is enforced here, the single write
+        // path, so terminal/backward revivals are refused everywhere.
+        $newStatus = $attributes['status'] ?? $previousStatus;
+
+        if ($newStatus !== $previousStatus && ! $previousStatus->canTransitionTo($newStatus)) {
+            throw CampaignStatusTransitionNotAllowed::from($previousStatus, $newStatus);
+        }
 
         $campaign->update($attributes);
 

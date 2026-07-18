@@ -28,8 +28,10 @@ use App\Shared\ValueObjects\ConfidenceAssessment;
 use App\Shared\ValueObjects\MetricValue;
 use App\Shared\ValueObjects\Provenance;
 use Carbon\CarbonImmutable;
+use GuzzleHttp\Psr7\Response;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 /**
@@ -125,6 +127,33 @@ class EnrichmentHardeningTest extends TestCase
      * retracted to UNKNOWN/LOW so it re-enters the review queue (DP-004),
      * not left as a stale, invisible SEEDED claim.
      */
+    public function test_retracting_a_stale_mention_clears_its_campaign_attribution(): void
+    {
+        $brand = Brand::factory()->create();
+        $campaign = Campaign::factory()->create(['brand_id' => $brand->id]);
+
+        $mention = Mention::factory()->create([
+            'monitored_subject_id' => $this->subject->id,
+            'content_item_id' => $this->content->id,
+            'story_id' => null,
+            'campaign_id' => $campaign->id,
+            'mention_type' => MentionType::Seeded,
+            'classification' => new ConfidenceAssessment(
+                MentionType::Seeded->value,
+                ConfidenceLevel::Medium,
+                ['shipment-record:1'],
+                VerificationStatus::AiAssessed,
+            ),
+        ]);
+
+        // No evidence now exists → the mention is retracted to UNKNOWN; its
+        // campaign link must be cleared too, or it keeps over-counting the
+        // campaign/brand mention totals (M28).
+        app(AttributionService::class)->enrich($this->content);
+
+        $this->assertNull($mention->fresh()->campaign_id);
+    }
+
     public function test_stale_ai_mention_is_retracted_when_evidence_disappears(): void
     {
         $mention = Mention::factory()->create([
@@ -220,6 +249,40 @@ class EnrichmentHardeningTest extends TestCase
         $this->assertNull($fetcher->fromPublicUrl('http://[::1]/loopback'));
         // Non-http scheme is refused before any resolution.
         $this->assertNull($fetcher->fromPublicUrl('file:///etc/passwd'));
+    }
+
+    /**
+     * H5: the SSRF guard must pin the connection to the SAME IP it validated,
+     * so a DNS rebinding between the check and the fetch cannot land on an
+     * internal address. We assert the fetch is issued against the validated
+     * IP (via the pinning seam), not a separately re-resolved host.
+     */
+    public function test_media_fetch_is_pinned_to_the_validated_public_ip(): void
+    {
+        Http::fake();
+
+        $fetcher = new class extends MediaFetcher
+        {
+            /** @var list<array{url:string,host:string,port:int,ip:string}> */
+            public array $pins = [];
+
+            protected function pinnedGet(string $url, string $host, int $port, string $ip): \Illuminate\Http\Client\Response
+            {
+                $this->pins[] = compact('url', 'host', 'port', 'ip');
+
+                return new \Illuminate\Http\Client\Response(
+                    new Response(200, ['Content-Type' => 'image/jpeg'], 'IMG'),
+                );
+            }
+        };
+
+        $bytes = $fetcher->fromPublicUrl('http://93.184.216.34/photo.jpg');
+
+        $this->assertSame('IMG', $bytes);
+        $this->assertCount(1, $fetcher->pins);
+        $this->assertSame('93.184.216.34', $fetcher->pins[0]['host']);
+        $this->assertSame('93.184.216.34', $fetcher->pins[0]['ip'], 'the fetch must connect to the validated IP');
+        $this->assertSame(80, $fetcher->pins[0]['port']);
     }
 
     /** Finding #8: append-only rows resist even query-builder writes (DB trigger). */

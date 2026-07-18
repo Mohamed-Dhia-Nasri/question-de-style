@@ -29,7 +29,28 @@ class GenerateExportJob implements ShouldQueue
 
     public int $tries = 1;
 
+    /** Fail fast on a runaway render rather than holding a worker (M19). */
+    public int $timeout = 600;
+
     public function __construct(public readonly int $exportJobId) {}
+
+    /**
+     * A queue timeout (SIGALRM) or a caught fatal invokes this after handle()
+     * has aborted. CAS-mark only our own still-live row FAILED so a genuinely
+     * COMPLETED row is never clobbered; the reaper is the backstop for a hard
+     * OS kill that never reaches this hook (M19).
+     */
+    public function failed(?Throwable $exception): void
+    {
+        ExportJob::query()
+            ->whereKey($this->exportJobId)
+            ->whereIn('status', [ExportJobStatus::Pending->value, ExportJobStatus::Running->value])
+            ->update([
+                'status' => ExportJobStatus::Failed->value,
+                'failed_at' => now(),
+                'error' => 'Export worker timed out or was killed.',
+            ]);
+    }
 
     public function handle(ReportBuilder $builder, ExportService $exporter): void
     {

@@ -292,7 +292,10 @@ class RecognitionService
             $identity = [
                 $targetKey => $target->id,
                 'recognition_type' => $candidate->type,
-                'provider_label' => $candidate->detectedBrand,
+                // Key on the RAW provider label, not the lexicon-mapped brand,
+                // so two distinct labels for one brand stay two detections and
+                // the raw label is a stable, immutable identity (M27).
+                'provider_label' => $candidate->providerLabel,
             ];
 
             $detection = RecognitionDetection::query()->firstOrNew($identity);

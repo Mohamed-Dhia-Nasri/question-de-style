@@ -114,7 +114,6 @@ class PlatformAccountsPanel extends Component
                 $writer->updatePlatformAccount($account, $platform, $validated['account_handle'], $bio, $links);
                 $audit->record('platform_account.updated', $account, [
                     'platform' => $platform->value,
-                    'handle' => $validated['account_handle'],
                 ]);
             } else {
                 $account = $writer->addManualPlatformAccount(
@@ -126,7 +125,6 @@ class PlatformAccountsPanel extends Component
                 );
                 $audit->record('platform_account.added', $account, [
                     'platform' => $platform->value,
-                    'handle' => $account->handle,
                 ]);
             }
         } catch (PlatformAccountConflict $conflict) {
@@ -179,7 +177,6 @@ class PlatformAccountsPanel extends Component
 
         $audit->record('platform_account.removed', $account, [
             'platform' => $account->platform->value,
-            'handle' => $account->handle,
         ]);
 
         $this->creator->refresh();
@@ -204,9 +201,14 @@ class PlatformAccountsPanel extends Component
         $links = array_values(array_filter(array_map('trim', preg_split('/\R/', $raw) ?: [])));
 
         foreach ($links as $link) {
-            if (filter_var($link, FILTER_VALIDATE_URL) === false) {
+            $scheme = strtolower((string) parse_url($link, PHP_URL_SCHEME));
+
+            // FILTER_VALIDATE_URL alone accepts javascript:// and other
+            // script-bearing schemes, which the profile blade renders as a
+            // clickable href — a stored XSS vector. Restrict to web links.
+            if (filter_var($link, FILTER_VALIDATE_URL) === false || ! in_array($scheme, ['http', 'https'], true)) {
                 throw ValidationException::withMessages([
-                    'account_links' => "[{$link}] is not a valid URL — one link per line.",
+                    'account_links' => "[{$link}] must be a valid http:// or https:// link — one per line.",
                 ]);
             }
         }

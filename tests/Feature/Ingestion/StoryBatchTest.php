@@ -6,13 +6,17 @@ use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\Monitoring\Models\Story;
 use App\Platform\Ingestion\Jobs\ArchiveStoryMediaJob;
 use App\Platform\Ingestion\Jobs\IngestStoriesBatchJob;
+use App\Platform\Ingestion\Models\IngestionAlert;
 use App\Platform\Ingestion\Models\IngestionCycle;
 use App\Platform\Ingestion\Models\ProviderCall;
 use App\Platform\Ingestion\Observability\ProviderCallRecorder;
 use App\Platform\Ingestion\Observability\ProviderCircuitBreaker;
 use App\Platform\Ingestion\Persistence\StoryPersister;
 use App\Platform\Ingestion\Providers\ProviderResolver;
+use App\Platform\Ingestion\Support\AlertType;
+use App\Platform\Ingestion\Support\CallOutcome;
 use App\Platform\Ingestion\Support\CycleStatus;
+use App\Platform\Ingestion\Support\ErrorCategory;
 use App\Shared\Enums\Platform;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
@@ -61,6 +65,38 @@ class StoryBatchTest extends TestCase
             'jobs_failed' => 0,
             'started_at' => now(),
         ]);
+    }
+
+    public function test_a_batch_that_loses_all_owner_handles_is_recorded_partial_and_alerts(): void
+    {
+        // The actor stopped returning the owner handle for a whole chunk, so
+        // every story is unattributed and silently dropped. That is a schema
+        // drift — it must downgrade the outcome and raise an alert, not be
+        // recorded as a clean SUCCESS (M22).
+        $alpha = PlatformAccount::factory()->create(['platform' => Platform::Instagram, 'handle' => 'alpha.ig']);
+        $beta = PlatformAccount::factory()->create(['platform' => Platform::Instagram, 'handle' => 'beta.ig']);
+
+        $this->fakeAsyncStoryRun([
+            ['id' => 'story-x1', 'imageUrl' => 'https://cdn.example/x1.jpg'],
+            ['id' => 'story-x2', 'imageUrl' => 'https://cdn.example/x2.jpg'],
+        ]);
+
+        $cycle = $this->runningStoryCycle(1);
+        Queue::fake();
+
+        (new IngestStoriesBatchJob([$alpha->id, $beta->id], $cycle->id, 'corr-batch'))->handle(
+            app(ProviderResolver::class),
+            app(ProviderCallRecorder::class),
+            app(StoryPersister::class),
+            app(ProviderCircuitBreaker::class),
+        );
+
+        $this->assertSame(0, Story::query()->count());
+
+        $call = ProviderCall::query()->where('operation', 'stories.fetch')->sole();
+        $this->assertSame(CallOutcome::Partial, $call->outcome);
+        $this->assertSame(ErrorCategory::SchemaDrift, $call->error_category);
+        $this->assertSame(1, IngestionAlert::query()->where('alert_type', AlertType::SchemaDrift->value)->count());
     }
 
     public function test_one_batched_run_attributes_stories_to_the_right_accounts(): void

@@ -256,9 +256,11 @@ class ShipmentsPanel extends Component
             'shipment_status' => ['required', Rule::in(array_column(ShipmentStatus::cases(), 'value'))],
             'shipment_tracking_number' => ['nullable', 'string', 'max:255'],
             'shipment_shipped_at' => ['nullable', 'date'],
-            'shipment_delivered_at' => ['nullable', 'date', 'after_or_equal:shipment_shipped_at'],
+            // Order the dates only when a ship date is present, so a delivered
+            // date with no recorded ship date is not wrongly rejected (M06).
+            'shipment_delivered_at' => ['nullable', 'date', Rule::when($this->shipment_shipped_at !== '', ['after_or_equal:shipment_shipped_at'])],
             'shipment_quantity' => ['nullable', 'integer', 'min:1'],
-            'shipment_value' => ['nullable', 'numeric', 'min:0'],
+            'shipment_value' => ['nullable', 'numeric', 'min:0', 'max:999999999999'],
         ]);
 
         // Defense-in-depth: a hidden field's value can be tampered back in

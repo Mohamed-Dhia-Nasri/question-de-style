@@ -18,9 +18,10 @@ class PruneExpiredExportsCommand extends Command
 
     public function handle(ExportManager $exports): int
     {
+        $reaped = $exports->reapStale();
         $pruned = $exports->pruneExpired();
 
-        $this->info("Pruned {$pruned} expired exports.");
+        $this->info("Pruned {$pruned} expired exports; reaped {$reaped} stale jobs.");
 
         return self::SUCCESS;
     }

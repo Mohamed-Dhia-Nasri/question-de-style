@@ -3,9 +3,9 @@
 namespace App\Platform\Enrichment\Recognition;
 
 use App\Modules\Monitoring\Models\Story;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
-use RuntimeException;
 use Throwable;
 
 /**
@@ -16,12 +16,15 @@ use Throwable;
  * and stays unavailable, never fabricated.
  *
  * SSRF guard: a scraped `media_urls` value is UNTRUSTED (copied verbatim
- * from third-party Apify JSON). Before fetching we reject any URL whose
- * host resolves to a loopback/link-local/private/reserved address (e.g. the
- * cloud metadata endpoint 169.254.169.254 or an internal service), and we
- * re-validate every redirect hop — otherwise an attacker-influenced URL
- * could make the enrichment worker read an internal resource and exfiltrate
- * it to Google via OCR.
+ * from third-party Apify JSON). We resolve the host ONCE, refuse it unless
+ * every resolved address is a routable public IP, and then PIN the
+ * connection to the validated IP (curl CURLOPT_RESOLVE) so the fetch cannot
+ * re-resolve to a different address between the check and the request — the
+ * classic DNS-rebinding / TOCTOU bypass. Redirects are followed manually so
+ * every hop is re-validated and re-pinned the same way; without pinning an
+ * attacker could point a short-TTL record at a public IP for the check and a
+ * private one (e.g. the cloud metadata endpoint 169.254.169.254) for the
+ * fetch.
  */
 class MediaFetcher
 {
@@ -32,41 +35,9 @@ class MediaFetcher
 
     public function fromPublicUrl(string $url): ?string
     {
-        $parts = parse_url($url);
-        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
-        $host = (string) ($parts['host'] ?? '');
+        $response = $this->fetchFollowingRedirects($url, self::MAX_REDIRECTS);
 
-        if (! in_array($scheme, ['https', 'http'], true) || $host === '') {
-            return null;
-        }
-
-        if (! $this->hostIsPublic($host)) {
-            return null;
-        }
-
-        try {
-            $response = Http::withOptions([
-                'allow_redirects' => [
-                    'max' => self::MAX_REDIRECTS,
-                    'strict' => true,
-                    'referer' => false,
-                    'protocols' => ['http', 'https'],
-                    // Re-validate every hop to defeat an open-redirect bounce
-                    // into an internal host.
-                    'on_redirect' => function ($request, $response, $uri): void {
-                        if (! $this->hostIsPublic((string) $uri->getHost())) {
-                            throw new RuntimeException('Blocked redirect to a non-public host (SSRF guard).');
-                        }
-                    },
-                ],
-            ])->timeout(30)->connectTimeout(10)->get($url);
-        } catch (Throwable) {
-            // Connection error, blocked redirect, or any transport failure —
-            // recognition for this asset stays unavailable, never fabricated.
-            return null;
-        }
-
-        if (! $response->successful()) {
+        if ($response === null || ! $response->successful()) {
             return null;
         }
 
@@ -83,6 +54,69 @@ class MediaFetcher
         $body = $response->body();
 
         return $body !== '' && strlen($body) <= self::MAX_BYTES ? $body : null;
+    }
+
+    /**
+     * Fetch $url, following up to $redirectsLeft hops. Each hop is resolved,
+     * validated public, and pinned to the validated IP before the request —
+     * so no hop can rebind to an internal address.
+     */
+    private function fetchFollowingRedirects(string $url, int $redirectsLeft): ?Response
+    {
+        $parts = parse_url($url);
+
+        if ($parts === false) {
+            return null;
+        }
+
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        $host = (string) ($parts['host'] ?? '');
+
+        if (! in_array($scheme, ['https', 'http'], true) || $host === '') {
+            return null;
+        }
+
+        $ip = $this->resolvePublicIp($host);
+
+        if ($ip === null) {
+            return null;
+        }
+
+        $port = (int) ($parts['port'] ?? ($scheme === 'https' ? 443 : 80));
+
+        try {
+            $response = $this->pinnedGet($url, $host, $port, $ip);
+        } catch (Throwable) {
+            // Connection error or any transport failure — recognition for
+            // this asset stays unavailable, never fabricated.
+            return null;
+        }
+
+        if ($response->redirect()) {
+            if ($redirectsLeft <= 0) {
+                return null;
+            }
+
+            $next = $this->resolveRedirectTarget($url, (string) $response->header('Location'));
+
+            return $next === null ? null : $this->fetchFollowingRedirects($next, $redirectsLeft - 1);
+        }
+
+        return $response;
+    }
+
+    /**
+     * A single HTTP GET pinned to the pre-validated IP. curl connects to
+     * $ip for $host (CURLOPT_RESOLVE) instead of re-resolving the hostname,
+     * so the bytes come from exactly the address that passed the guard.
+     * Redirects are disabled here — the caller follows them, re-pinning each.
+     */
+    protected function pinnedGet(string $url, string $host, int $port, string $ip): Response
+    {
+        return Http::withOptions([
+            'allow_redirects' => false,
+            'curl' => [CURLOPT_RESOLVE => ["{$host}:{$port}:{$ip}"]],
+        ])->timeout(30)->connectTimeout(10)->get($url);
     }
 
     /** Archived story media lives on the private disk (never re-exposed by URL). */
@@ -102,14 +136,16 @@ class MediaFetcher
     }
 
     /**
-     * True only when every address the host resolves to is a routable public
-     * IP. An unresolvable host, or any private/reserved/loopback/link-local
-     * address in the set, is refused.
+     * One validated public IP for the host, or null. A literal IP is checked
+     * directly; a hostname is resolved and REFUSED unless EVERY returned
+     * address is a routable public IP (so a record that mixes a public and a
+     * private answer is rejected outright). The returned IP is the one the
+     * connection is pinned to.
      */
-    private function hostIsPublic(string $host): bool
+    private function resolvePublicIp(string $host): ?string
     {
         if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
-            return $this->ipIsPublic($host);
+            return $this->ipIsPublic($host) ? $host : null;
         }
 
         $ips = [];
@@ -131,16 +167,53 @@ class MediaFetcher
         }
 
         if ($ips === []) {
-            return false;
+            return null;
         }
 
         foreach ($ips as $ip) {
             if (! $this->ipIsPublic($ip)) {
-                return false;
+                return null;
             }
         }
 
-        return true;
+        return $ips[0];
+    }
+
+    /**
+     * The absolute URL a redirect points to, or null. Absolute http(s)
+     * Locations are taken as-is (re-validated + re-pinned by the caller);
+     * a root-relative Location keeps the current host (so the same pinned IP
+     * applies). Anything else is refused rather than guessed.
+     */
+    private function resolveRedirectTarget(string $base, string $location): ?string
+    {
+        if ($location === '') {
+            return null;
+        }
+
+        $target = parse_url($location);
+
+        if ($target === false) {
+            return null;
+        }
+
+        if (isset($target['scheme'], $target['host'])) {
+            return $location;
+        }
+
+        if (! str_starts_with($location, '/')) {
+            return null;
+        }
+
+        $baseParts = parse_url($base);
+
+        if ($baseParts === false || ! isset($baseParts['scheme'], $baseParts['host'])) {
+            return null;
+        }
+
+        $port = isset($baseParts['port']) ? ':'.$baseParts['port'] : '';
+
+        return "{$baseParts['scheme']}://{$baseParts['host']}{$port}{$location}";
     }
 
     private function ipIsPublic(string $ip): bool

@@ -6,6 +6,7 @@ use App\Shared\Http\Middleware\AssignRequestId;
 use App\Shared\Http\Middleware\EnsureUserIsActive;
 use App\Shared\Http\Middleware\SetSecureHeaders;
 use App\Shared\Http\Middleware\SetTenantContext;
+use App\Shared\Http\Middleware\ThrottlePasswordReset;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -41,6 +42,9 @@ return Application::configure(basePath: dirname(__DIR__))
             AuthenticateSession::class,
             EnsureUserIsActive::class,
             SetTenantContext::class,
+            // Fortify leaves its password-reset routes unthrottled; this
+            // rate-limits them by path once the route is resolved (M33).
+            ThrottlePasswordReset::class,
         ]);
 
         // ADR-0021: server-side subscription gate for product surfaces.

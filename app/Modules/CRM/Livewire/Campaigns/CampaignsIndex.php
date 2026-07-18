@@ -3,6 +3,7 @@
 namespace App\Modules\CRM\Livewire\Campaigns;
 
 use App\Modules\CRM\Exceptions\CampaignBrandLocked;
+use App\Modules\CRM\Exceptions\CampaignStatusTransitionNotAllowed;
 use App\Modules\CRM\Livewire\Concerns\WithInlineCreate;
 use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Campaign;
@@ -176,12 +177,15 @@ class CampaignsIndex extends Component
             'campaign_name' => ['required', 'string', 'max:255'],
             'campaign_brand_id' => ['required', 'integer', TenantRule::exists('brands', 'id')],
             'campaign_start_at' => ['nullable', 'date'],
-            'campaign_end_at' => ['nullable', 'date', 'after_or_equal:campaign_start_at'],
+            // Dates are optional and independent; only order them when a start
+            // is actually present (else after_or_equal compares against "now"
+            // and wrongly rejects an end-only date). M06.
+            'campaign_end_at' => ['nullable', 'date', Rule::when($this->campaign_start_at !== '', ['after_or_equal:campaign_start_at'])],
         ];
 
         if (! $creating) {
             $rules['campaign_status'] = ['required', Rule::in(array_column(CampaignStatus::cases(), 'value'))];
-            $rules['campaign_spend'] = ['nullable', 'numeric', 'min:0'];
+            $rules['campaign_spend'] = ['nullable', 'numeric', 'min:0', 'max:999999999999'];
             $rules['campaign_objective'] = ['nullable', 'string', 'max:2000'];
             $rules['campaign_markets'] = ['nullable', 'string', 'max:2000'];
         }
@@ -221,6 +225,10 @@ class CampaignsIndex extends Component
                 // Block-and-tell: surface the coherence refusal on the brand
                 // field instead of silently rewriting the runs' brand_id.
                 throw ValidationException::withMessages(['campaign_brand_id' => $e->getMessage()]);
+            } catch (CampaignStatusTransitionNotAllowed $e) {
+                // Block-and-tell: an illegal lifecycle move surfaces on the
+                // status field (M04).
+                throw ValidationException::withMessages(['campaign_status' => $e->getMessage()]);
             }
         } else {
             $campaign = $writer->createCampaign($attributes, $audit);

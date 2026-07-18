@@ -62,6 +62,28 @@ class StoryMediaRetentionTest extends TestCase
         $this->assertNull($fresh->media_pruned_at);
     }
 
+    public function test_media_row_is_not_stamped_pruned_when_the_blob_delete_fails(): void
+    {
+        // A path that is a directory on the fake disk: delete() returns false
+        // (the unlink fails) while exists() stays true. The row must NOT be
+        // stamped pruned, or the file is orphaned forever (M31).
+        $path = 'stories/instagram/1/undeletable.mp4';
+        Storage::disk('media')->makeDirectory($path);
+
+        $old = Story::factory()->create([
+            'media_url' => $path,
+            'captured_at' => now()->subDays(120),
+        ]);
+
+        $this->artisan('qds:prune-story-media')->assertSuccessful();
+
+        $old->refresh();
+
+        $this->assertSame($path, $old->media_url);
+        $this->assertNull($old->media_pruned_at);
+        Storage::disk('media')->assertExists($path);
+    }
+
     public function test_pruning_is_disabled_when_retention_is_zero(): void
     {
         config(['qds.ingestion.media_retention_days' => 0]);

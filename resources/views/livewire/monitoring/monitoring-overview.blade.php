@@ -11,15 +11,6 @@
             </x-form.select>
         </div>
         <div>
-            <x-form.label for="overview-brand">Brand</x-form.label>
-            <x-form.select id="overview-brand" wire:model.live="brandId">
-                <option value="0">All brands</option>
-                @foreach ($brands as $brand)
-                    <option value="{{ $brand->id }}">{{ $brand->name }}</option>
-                @endforeach
-            </x-form.select>
-        </div>
-        <div>
             <x-form.label for="overview-from">From</x-form.label>
             <x-form.input id="overview-from" type="date" wire:model.blur="from" />
         </div>
@@ -54,7 +45,7 @@
             <a href="{{ route('monitoring.creators.index') }}" class="mt-1 inline-block text-theme-xs text-brand-500 hover:underline">View roster</a>
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-            <p class="text-sm text-gray-500 dark:text-gray-400">New content</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Posts published</p>
             <p class="mt-2 text-2xl font-semibold text-gray-800 dark:text-white/90">{{ number_format($newContent) }}</p>
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
@@ -91,6 +82,16 @@
                     <x-states.unavailable reason="No observed engagement for the selected dates — never shown as zero." />
                 @endif
             </div>
+            {{-- Breakdown of the engagement total by type. A dash means the
+                 metric was not observed for the range — never shown as zero (DP-001). --}}
+            <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 border-t border-gray-100 pt-3 text-xs dark:border-gray-800">
+                @foreach (['Likes' => 'likes_sum', 'Comments' => 'comments_sum', 'Shares' => 'shares_sum', 'Saves' => 'saves_sum'] as $label => $field)
+                    <div class="flex items-center justify-between gap-2">
+                        <dt class="text-gray-500 dark:text-gray-400">{{ $label }}</dt>
+                        <dd class="font-medium tabular-nums text-gray-700 dark:text-gray-300">{{ $creatorTotals->{$field} !== null ? number_format((float) $creatorTotals->{$field}) : '—' }}</dd>
+                    </div>
+                @endforeach
+            </dl>
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
             <p class="text-sm text-gray-500 dark:text-gray-400">Estimated reach</p>
@@ -111,7 +112,7 @@
                 @if ($activeSeedingOnly)
                     <x-states.unavailable reason="Aggregated by brand — not available for the seeding filter." />
                 @elseif ($mentionTotals->total_emv !== null)
-                    <span class="text-2xl font-semibold text-gray-800 dark:text-white/90">{{ number_format((float) $mentionTotals->total_emv, 2) }}</span>
+                    <span class="text-2xl font-semibold text-gray-800 dark:text-white/90">{{ number_format((float) $mentionTotals->total_emv, 2) }}@if ($mentionTotals->total_emv_currency) <span class="text-base font-normal text-gray-500 dark:text-gray-400">{{ $mentionTotals->total_emv_currency }}</span>@endif</span>
                     <x-metric.tier-badge tier="ESTIMATED" />
                 @else
                     <x-states.unavailable reason="EMV requires an active, user-managed EMV configuration (REQ-M1-011) and calculated results." />

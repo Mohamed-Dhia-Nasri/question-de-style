@@ -70,10 +70,18 @@
                     <div class="mt-4">
                         @if ($subscription !== null && $subscription->subscription_plan_id === $plan->id)
                             <x-ui.badge color="success">Current plan</x-ui.badge>
+                        @elseif ($subscription !== null)
+                            {{-- A live subscription already exists: plan changes go through
+                                 the Stripe Billing Portal (prorated onto the SAME subscription),
+                                 never a second Checkout that would double-bill. --}}
+                            <x-ui.button wire:click="openPortal" wire:loading.attr="disabled"
+                                :disabled="! $stripeConfigured">
+                                Change plan in portal
+                            </x-ui.button>
                         @else
                             <x-ui.button wire:click="subscribe('{{ $plan->code }}')" wire:loading.attr="disabled"
                                 :disabled="! $stripeConfigured || ! $plan->isPurchasable()">
-                                {{ $subscription === null ? 'Subscribe' : 'Switch via checkout' }}
+                                Subscribe
                             </x-ui.button>
                             @unless ($plan->isPurchasable())
                                 <p class="mt-2 text-theme-xs text-gray-500 dark:text-gray-400">Not yet available.</p>

@@ -44,7 +44,12 @@ class BrandLexicon
                 continue;
             }
 
-            if (mb_strpos($haystack, $alias) !== false) {
+            // Require a whole-word match (unicode-aware) rather than bare
+            // substring containment — a short alias like 'mac' must not match
+            // inside 'making'/'macaroni' and auto-accept a false detection (M26).
+            $pattern = '/(?<![\p{L}\p{N}])'.preg_quote($alias, '/').'(?![\p{L}\p{N}])/u';
+
+            if (preg_match($pattern, $haystack) === 1) {
                 return $brandName;
             }
         }

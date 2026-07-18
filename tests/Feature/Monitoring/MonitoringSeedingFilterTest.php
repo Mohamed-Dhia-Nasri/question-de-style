@@ -8,14 +8,20 @@ use App\Modules\CRM\Models\SeedingCampaign;
 use App\Modules\Monitoring\Livewire\Dashboard\MonitoringOverview;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\Mention;
+use App\Modules\Monitoring\Models\MetricSnapshot;
 use App\Modules\Monitoring\Models\MonitoredSubject;
 use App\Modules\Monitoring\Models\Story;
+use App\Platform\Analytics\Contracts\AnalyticsService;
+use App\Shared\Enums\MetricTier;
 use App\Shared\Enums\MonitoredSubjectType;
 use App\Shared\Enums\Platform;
 use App\Shared\Enums\RoleName;
 use App\Shared\Enums\SeedingCampaignStatus;
+use App\Shared\ValueObjects\MetricValue;
+use App\Shared\ValueObjects\Provenance;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -35,6 +41,91 @@ class MonitoringSeedingFilterTest extends TestCase
         parent::setUp();
         $this->seedRoles();
         $this->actingAs($this->makeUser(RoleName::Analyst));
+    }
+
+    public function test_the_platform_filter_narrows_the_kpi_totals(): void
+    {
+        $creator = Creator::factory()->create();
+        $ig = PlatformAccount::factory()->create(['creator_id' => $creator->id, 'platform' => Platform::Instagram]);
+        $yt = PlatformAccount::factory()->create(['creator_id' => $creator->id, 'platform' => Platform::YouTube]);
+
+        foreach ([[$ig, Platform::Instagram, 111], [$yt, Platform::YouTube, 777]] as [$account, $platform, $views]) {
+            $content = ContentItem::factory()->create(['platform_account_id' => $account->id, 'platform' => $platform]);
+            MetricSnapshot::create([
+                'content_item_id' => $content->id,
+                'captured_at' => now(),
+                'metrics' => [new MetricValue($views, MetricTier::Public, 'views')],
+                'provenance' => new Provenance('SRC-apify-instagram-profile-scraper', now()->toImmutable(), 'v1'),
+            ]);
+        }
+
+        app(AnalyticsService::class)->refreshRollups();
+
+        // No filter → both platforms (111 + 777).
+        Livewire::test(MonitoringOverview::class)
+            ->assertViewHas('creatorTotals', fn (object $t): bool => (int) $t->views_sum === 888);
+
+        // YouTube only.
+        Livewire::test(MonitoringOverview::class)
+            ->set('platform', Platform::YouTube->value)
+            ->assertViewHas('creatorTotals', fn (object $t): bool => (int) $t->views_sum === 777);
+    }
+
+    public function test_the_overview_shows_the_engagement_breakdown_by_type(): void
+    {
+        $creator = Creator::factory()->create();
+        $account = PlatformAccount::factory()->create(['creator_id' => $creator->id, 'platform' => Platform::Instagram]);
+        $content = ContentItem::factory()->create(['platform_account_id' => $account->id]);
+
+        MetricSnapshot::create([
+            'content_item_id' => $content->id,
+            'captured_at' => now(),
+            'metrics' => [
+                new MetricValue(400, MetricTier::Public, 'likes'),
+                new MetricValue(90, MetricTier::Public, 'comments'),
+                new MetricValue(30, MetricTier::Public, 'shares'),
+                new MetricValue(20, MetricTier::Public, 'saves'),
+            ],
+            'provenance' => new Provenance('SRC-apify-instagram-profile-scraper', now()->toImmutable(), 'v1'),
+        ]);
+
+        app(AnalyticsService::class)->refreshRollups();
+
+        Livewire::test(MonitoringOverview::class)
+            ->assertSee('Engagement')
+            ->assertSee('Likes')
+            ->assertSee('Comments')
+            ->assertSee('Shares')
+            ->assertSee('Saves')
+            ->assertSee('400')   // likes
+            ->assertSee('90')    // comments
+            ->assertSee('540');  // engagement total = 400+90+30+20
+    }
+
+    public function test_week_grain_overview_aligns_the_label_and_live_counts_to_whole_weeks(): void
+    {
+        // 2026-07-13 is a Monday; 2026-07-15 is the Wednesday of the same ISO
+        // week. A mention on the Monday must be reflected consistently: the
+        // week-grain KPI rollups always count it, so the range label and the
+        // live mentions-by-type count must too (M14/M25).
+        $creator = Creator::factory()->create();
+        $subject = MonitoredSubject::factory()->create([
+            'subject_type' => MonitoredSubjectType::Creator->value,
+            'creator_id' => $creator->id,
+            'active' => true,
+        ]);
+        $account = PlatformAccount::factory()->create(['creator_id' => $creator->id, 'platform' => Platform::Instagram]);
+        $content = ContentItem::factory()->create(['platform_account_id' => $account->id]);
+        $mention = Mention::factory()->create([
+            'monitored_subject_id' => $subject->id,
+            'content_item_id' => $content->id,
+        ]);
+        DB::table('mentions')->where('id', $mention->id)->update(['created_at' => '2026-07-13 09:00:00']);
+
+        Livewire::test(MonitoringOverview::class)
+            ->set('from', '2026-07-15')
+            ->assertViewHas('rangeLabel', fn (string $label) => str_contains($label, '13 Jul 2026'))
+            ->assertViewHas('mentionsByType', fn (Collection $c) => (int) $c->sum() === 1);
     }
 
     /**

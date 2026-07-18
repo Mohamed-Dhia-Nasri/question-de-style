@@ -17,6 +17,33 @@ class PasswordResetTest extends TestCase
         $this->get('/forgot-password')->assertOk();
     }
 
+    public function test_forgot_password_does_not_disclose_whether_an_account_exists(): void
+    {
+        // M33: known vs unknown emails must be indistinguishable, or the
+        // endpoint is a user-enumeration oracle.
+        $this->seedRoles();
+        $user = $this->makeUser(RoleName::Analyst);
+
+        $this->post('/forgot-password', ['email' => $user->email])
+            ->assertSessionHas('status')
+            ->assertSessionHasNoErrors();
+
+        $this->post('/forgot-password', ['email' => 'ghost@nowhere.test'])
+            ->assertSessionHasNoErrors()
+            ->assertSessionHas('status');
+    }
+
+    public function test_forgot_password_is_rate_limited(): void
+    {
+        $this->seedRoles();
+
+        foreach (range(1, 5) as $ignored) {
+            $this->post('/forgot-password', ['email' => 'ghost@nowhere.test']);
+        }
+
+        $this->post('/forgot-password', ['email' => 'ghost@nowhere.test'])->assertStatus(429);
+    }
+
     public function test_reset_password_link_can_be_requested(): void
     {
         Notification::fake();

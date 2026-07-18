@@ -19,5 +19,12 @@ final readonly class RecognitionCandidate
         public ?float $score,
         /** @var list<string> evidence descriptors for the ConfidenceAssessment */
         public array $signals,
+        /**
+         * The untouched provider label BEFORE lexicon mapping. This is the
+         * detection's stable identity — two distinct raw labels that map to
+         * one brand must remain two detections (M27). detectedBrand is the
+         * mapped, human-correctable value.
+         */
+        public ?string $providerLabel = null,
     ) {}
 }

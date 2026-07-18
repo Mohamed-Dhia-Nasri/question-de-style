@@ -163,6 +163,41 @@ class CampaignsCrudTest extends TestCase
             ->assertHasErrors(['campaign_spend' => 'min']);
     }
 
+    public function test_overflow_spend_is_rejected_not_a_500(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $campaign = Campaign::factory()->create();
+
+        // '1e400' casts to INF; without a max bound it reaches the JSON cast and 500s.
+        Livewire::test(CampaignsIndex::class)
+            ->call('edit', $campaign->id)
+            ->set('campaign_spend', '1e400')
+            ->call('save')
+            ->assertHasErrors(['campaign_spend' => 'max']);
+    }
+
+    public function test_end_only_campaign_date_is_accepted(): void
+    {
+        $this->actingAsCrmStaff();
+        $brand = Brand::factory()->create();
+
+        // Dates are optional and independent: an end with no start must save,
+        // not be rejected by after_or_equal comparing against "now".
+        Livewire::test(CampaignsIndex::class)
+            ->call('create')
+            ->set('campaign_name', 'End Only')
+            ->set('campaign_brand_id', (string) $brand->id)
+            ->set('campaign_start_at', '')
+            ->set('campaign_end_at', now()->subMonth()->format('Y-m-d\TH:i'))
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $campaign = Campaign::where('name', 'End Only')->firstOrFail();
+        $this->assertNull($campaign->start_at);
+        $this->assertNotNull($campaign->end_at);
+    }
+
     public function test_status_transitions_are_recorded_with_from_and_to(): void
     {
         $this->actingAsCrmStaff();
@@ -182,6 +217,21 @@ class CampaignsCrudTest extends TestCase
 
         $this->assertSame('DRAFT', $log->context['from']);
         $this->assertSame('ACTIVE', $log->context['to']);
+    }
+
+    public function test_a_terminal_campaign_cannot_be_revived(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $campaign = Campaign::factory()->create(['status' => CampaignStatus::Completed]);
+
+        Livewire::test(CampaignsIndex::class)
+            ->call('edit', $campaign->id)
+            ->set('campaign_status', CampaignStatus::Draft->value)
+            ->call('save')
+            ->assertHasErrors(['campaign_status']);
+
+        $this->assertSame(CampaignStatus::Completed, $campaign->fresh()->status);
     }
 
     public function test_editing_without_a_status_change_records_no_transition(): void

@@ -11,7 +11,6 @@ use App\Modules\Monitoring\Services\RosterEnrollmentService;
 use App\Platform\Ingestion\Jobs\PollMonitoredAccountJob;
 use App\Platform\Ingestion\Jobs\RunMonitoringCycleJob;
 use App\Platform\Ingestion\SourceRegistry;
-use App\Platform\Ingestion\Support\AdaptiveCadence;
 use App\Shared\Enums\MonitoredSubjectType;
 use App\Shared\Enums\Platform;
 use App\Shared\ValueObjects\Provenance;
@@ -87,7 +86,7 @@ class CreatorRosterEnrollmentTest extends TestCase
 
         Queue::fake();
 
-        (new RunMonitoringCycleJob)->handle(app(AdaptiveCadence::class));
+        (new RunMonitoringCycleJob)->handle();
 
         Queue::assertPushed(
             fn (PollMonitoredAccountJob $job) => $job->platformAccountId === $account->id,

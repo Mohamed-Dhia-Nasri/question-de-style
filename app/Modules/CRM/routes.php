@@ -44,8 +44,12 @@ Route::middleware(['web', 'auth', 'can:'.PermissionsCatalog::CRM_VIEW, 'subscrib
         Route::get('/seeding/{seedingCampaign}', fn (SeedingCampaign $seedingCampaign) => view('crm.seeding-detail', [
             'seedingCampaign' => $seedingCampaign->load(['brand.client', 'campaign', 'product'])->loadCount([
                 'creators', 'shipments',
-                'shipments as shipped_count' => fn ($q) => $q->where(fn ($w) => $w->whereIn('status', [ShipmentStatus::Shipped, ShipmentStatus::InTransit, ShipmentStatus::Delivered])->orWhereNotNull('shipped_at')),
-                'shipments as delivered_count' => fn ($q) => $q->where(fn ($w) => $w->where('status', ShipmentStatus::Delivered)->orWhereNotNull('delivered_at')),
+                // Count strictly by status (M07). A Returned/Failed parcel
+                // keeps its shipped_at/delivered_at timestamps by design, so an
+                // orWhereNotNull branch would tally it as shipped/delivered and
+                // let delivered exceed shipped.
+                'shipments as shipped_count' => fn ($q) => $q->whereIn('status', [ShipmentStatus::Shipped, ShipmentStatus::InTransit, ShipmentStatus::Delivered]),
+                'shipments as delivered_count' => fn ($q) => $q->where('status', ShipmentStatus::Delivered),
                 'shipments as posted_count' => fn ($q) => $q->where('posted', true),
                 'shipments as expected_posts_count' => fn ($q) => $q->where('posting_required', true),
             ]),

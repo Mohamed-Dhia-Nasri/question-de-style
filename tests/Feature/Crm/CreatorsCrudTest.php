@@ -8,6 +8,7 @@ use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\Discovery\Contracts\CreatorGeography;
 use App\Modules\Monitoring\Models\ContentItem;
+use App\Shared\Audit\AuditLog;
 use App\Shared\Authorization\PermissionsCatalog;
 use App\Shared\Enums\RelationshipStatus;
 use App\Shared\Enums\RoleName;
@@ -25,6 +26,36 @@ use Tests\TestCase;
 class CreatorsCrudTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_creator_audit_events_store_no_personal_data_in_context(): void
+    {
+        $this->actingAsCrmStaff();
+
+        Livewire::test(CreatorsIndex::class)
+            ->call('create')
+            ->set('display_name', 'Erika Musterfrau')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $creator = Creator::where('display_name', 'Erika Musterfrau')->firstOrFail();
+
+        Livewire::test(CreatorsIndex::class)
+            ->call('confirmDelete', $creator->id)
+            ->call('delete')
+            ->assertHasNoErrors();
+
+        // subject_id still identifies the record; the display name (PII) must
+        // never sit in the append-only audit context (M29).
+        $this->assertDatabaseHas('audit_logs', ['action' => 'creator.created', 'subject_id' => $creator->id]);
+
+        foreach (AuditLog::all() as $log) {
+            $this->assertStringNotContainsString(
+                'Erika Musterfrau',
+                (string) json_encode($log->context),
+                "audit_logs.{$log->action} context leaked the creator's display name",
+            );
+        }
+    }
 
     private function actingAsCrmStaff(): User
     {

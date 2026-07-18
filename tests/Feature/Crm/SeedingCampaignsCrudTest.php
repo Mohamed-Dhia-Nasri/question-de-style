@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Modules\CRM\Livewire\Seeding\SeedingCampaignsIndex;
 use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Campaign;
+use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\Product;
 use App\Modules\CRM\Models\SeedingCampaign;
 use App\Modules\CRM\Models\Shipment;
@@ -207,6 +208,72 @@ class SeedingCampaignsCrudTest extends TestCase
             ->set('seeding_spend', '-1')
             ->call('save')
             ->assertHasErrors(['seeding_spend' => 'min']);
+    }
+
+    public function test_overflow_spend_is_rejected_not_a_500(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $seeding = SeedingCampaign::factory()->create();
+
+        Livewire::test(SeedingCampaignsIndex::class)
+            ->call('edit', $seeding->id)
+            ->set('seeding_spend', '1e400')
+            ->call('save')
+            ->assertHasErrors(['seeding_spend' => 'max']);
+    }
+
+    public function test_a_terminal_seeding_run_cannot_be_revived(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $seeding = SeedingCampaign::factory()->create(['status' => SeedingCampaignStatus::Cancelled]);
+
+        Livewire::test(SeedingCampaignsIndex::class)
+            ->call('edit', $seeding->id)
+            ->set('seeding_status', SeedingCampaignStatus::Draft->value)
+            ->call('save')
+            ->assertHasErrors(['seeding_status']);
+
+        $this->assertSame(SeedingCampaignStatus::Cancelled, $seeding->fresh()->status);
+    }
+
+    public function test_brand_change_is_refused_while_shipments_exist(): void
+    {
+        $this->actingAsCrmStaff();
+        $brandA = Brand::factory()->create();
+        $brandB = Brand::factory()->create();
+        $seeding = SeedingCampaign::factory()->create([
+            'brand_id' => $brandA->id, 'product_id' => null, 'campaign_id' => null,
+        ]);
+        Shipment::factory()->create(['seeding_campaign_id' => $seeding->id]);
+
+        Livewire::test(SeedingCampaignsIndex::class)
+            ->call('edit', $seeding->id)
+            ->set('seeding_brand_id', (string) $brandB->id)
+            ->call('save')
+            ->assertHasErrors(['seeding_brand_id']);
+
+        $this->assertSame($brandA->id, $seeding->fresh()->brand_id);
+    }
+
+    public function test_brand_change_is_refused_while_the_roster_is_populated(): void
+    {
+        $this->actingAsCrmStaff();
+        $brandA = Brand::factory()->create();
+        $brandB = Brand::factory()->create();
+        $seeding = SeedingCampaign::factory()->create([
+            'brand_id' => $brandA->id, 'product_id' => null, 'campaign_id' => null,
+        ]);
+        $seeding->creators()->attach(Creator::factory()->create()->id);
+
+        Livewire::test(SeedingCampaignsIndex::class)
+            ->call('edit', $seeding->id)
+            ->set('seeding_brand_id', (string) $brandB->id)
+            ->call('save')
+            ->assertHasErrors(['seeding_brand_id']);
+
+        $this->assertSame($brandA->id, $seeding->fresh()->brand_id);
     }
 
     public function test_status_transitions_are_recorded(): void

@@ -3,6 +3,7 @@
 namespace App\Platform\Enrichment\Attribution;
 
 use App\Modules\CRM\Models\Brand;
+use App\Modules\Monitoring\Contracts\ContentMatchFeedback;
 use App\Modules\Monitoring\Models\ContentHashtag;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\Mention;
@@ -34,6 +35,7 @@ class AttributionService
     public function __construct(
         private readonly MentionClassifier $classifier,
         private readonly SeedingEvidenceSource $seedingEvidence,
+        private readonly ContentMatchFeedback $matchFeedback,
     ) {}
 
     /** @return list<Mention> the mentions written (or left untouched by precedence) */
@@ -149,6 +151,8 @@ class AttributionService
             return $mention;
         }
 
+        $campaignId = $mention->campaign_id;
+
         $mention->fill([
             'mention_type' => MentionType::Unknown,
             'classification' => new ConfidenceAssessment(
@@ -161,6 +165,15 @@ class AttributionService
         ]);
 
         $mention->save();
+
+        // A now-UNKNOWN mention must drop its campaign attribution, or it keeps
+        // over-counting the campaign/brand mention totals (M28). Route through
+        // the single sanctioned write path (nulls campaign_id + audits) rather
+        // than force-writing it here.
+        if ($campaignId !== null && $target instanceof ContentItem) {
+            $this->matchFeedback->deny($target, $campaignId);
+            $mention->refresh();
+        }
 
         return $mention;
     }

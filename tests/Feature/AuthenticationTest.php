@@ -43,6 +43,32 @@ class AuthenticationTest extends TestCase
         $response->assertRedirect(route('reports.index'));
     }
 
+    public function test_client_viewer_intended_staff_url_is_ignored_after_login(): void
+    {
+        // M32: a stashed staff-only intended URL (e.g. /dashboard) must not win
+        // over the client's reports area, or they land on a 403 after login.
+        $this->seedRoles();
+        $viewer = $this->makeUser(RoleName::ClientViewer);
+
+        $response = $this->withSession(['url.intended' => route('dashboard')])
+            ->post('/login', [
+                'email' => $viewer->email,
+                'password' => 'password',
+            ]);
+
+        $this->assertAuthenticatedAs($viewer);
+        $response->assertRedirect(route('reports.index'));
+    }
+
+    public function test_client_viewer_root_redirect_goes_to_the_reports_area(): void
+    {
+        // M32 sibling: the bare '/' redirect must be role-aware too.
+        $this->seedRoles();
+        $viewer = $this->makeUser(RoleName::ClientViewer);
+
+        $this->actingAs($viewer)->get('/')->assertRedirect(route('reports.index'));
+    }
+
     public function test_invalid_credentials_are_rejected(): void
     {
         $this->seedRoles();

@@ -101,6 +101,25 @@ class CampaignWizardTest extends TestCase
         $this->assertSame(0, SeedingCampaign::query()->count());
     }
 
+    public function test_campaign_step_accepts_an_end_date_with_no_start_date(): void
+    {
+        $this->actingAsCrmStaff();
+        $client = Client::factory()->create();
+        $brand = Brand::factory()->create(['client_id' => $client->id]);
+
+        // Dates are optional/independent; an end-only date must not be
+        // rejected by after_or_equal comparing against "now".
+        Livewire::test(CampaignWizard::class)
+            ->set('wizard_client_id', (string) $client->id)
+            ->set('wizard_brand_id', (string) $brand->id)
+            ->call('next')
+            ->set('campaign_name', 'End Only')
+            ->set('campaign_end_at', now()->subMonth()->format('Y-m-d\TH:i'))
+            ->call('next')
+            ->assertHasNoErrors()
+            ->assertSet('step', 3);
+    }
+
     public function test_the_literal_new_segment_wins_over_the_campaign_wildcard(): void
     {
         $this->actingAsCrmStaff();

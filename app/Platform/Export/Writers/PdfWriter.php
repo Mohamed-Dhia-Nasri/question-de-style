@@ -28,6 +28,13 @@ class PdfWriter
 
     private const TITLE_FONT_SIZE = 14;
 
+    private const PRINTABLE_WIDTH = self::PAGE_WIDTH - 2 * self::MARGIN;
+
+    /** Conservative Helvetica advance (em) — over-estimates so rows never overrun. */
+    private const CHAR_ADVANCE = 0.6;
+
+    private const MIN_COL_WIDTH = 4;
+
     public function write(ReportDocument $document): string
     {
         $pages = $this->paginate($this->lines($document));
@@ -129,7 +136,27 @@ class PdfWriter
             }
         }
 
-        return array_map(static fn (int $width): int => min($width, 34), $widths);
+        $widths = array_map(static fn (int $width): int => min($width, 34), $widths);
+
+        // Horizontal fit (M20): a wide section (many columns × 34-char caps)
+        // would run past the printable area and lose its right-hand columns.
+        // If the padded row would overflow, scale every column down
+        // proportionally; tableRow()'s ellipsis then truncates each cell so
+        // nothing is pushed off-page.
+        $budgetChars = (int) floor(self::PRINTABLE_WIDTH / (self::FONT_SIZE * self::CHAR_ADVANCE));
+        $separatorChars = 2 * max(0, count($widths) - 1);
+        $contentBudget = $budgetChars - $separatorChars;
+        $total = array_sum($widths);
+
+        if ($contentBudget > 0 && $total > $contentBudget) {
+            $scale = $contentBudget / $total;
+            $widths = array_map(
+                static fn (int $width): int => max(self::MIN_COL_WIDTH, (int) floor($width * $scale)),
+                $widths,
+            );
+        }
+
+        return $widths;
     }
 
     /**

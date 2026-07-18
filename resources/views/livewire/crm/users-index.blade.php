@@ -140,7 +140,7 @@
                                         class="text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">
                                         Edit
                                     </button>
-                                    @if (auth()->id() !== $user->id)
+                                    @if (auth()->id() !== $user->id && (int) $user->id !== (int) $ownerUserId)
                                         <button type="button" wire:click="confirmDelete({{ $user->id }})"
                                             class="text-sm font-medium text-error-500 hover:text-error-600">
                                             Delete

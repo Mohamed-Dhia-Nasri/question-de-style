@@ -128,6 +128,43 @@ class ShipmentsPanelTest extends TestCase
         $this->assertDatabaseCount('shipments', 1);
     }
 
+    public function test_overflow_shipment_value_is_rejected_not_a_500(): void
+    {
+        $this->actingAsCrmStaff();
+        $this->makeSeedingRun();
+
+        Livewire::test(ShipmentsPanel::class, ['seedingCampaign' => $this->seeding])
+            ->call('create')
+            ->set('shipment_creator_id', (string) $this->creator->id)
+            ->set('shipment_product_id', (string) $this->product->id)
+            ->set('shipment_status', ShipmentStatus::Pending->value)
+            ->set('shipment_value', '1e309')
+            ->call('save')
+            ->assertHasErrors(['shipment_value' => 'max']);
+
+        $this->assertDatabaseCount('shipments', 0);
+    }
+
+    public function test_delivered_only_date_is_accepted_when_shipped_at_is_blank(): void
+    {
+        $this->actingAsCrmStaff();
+        $this->makeSeedingRun();
+
+        // Delivered without a recorded ship date must save — after_or_equal
+        // must not compare the delivered date against "now" when shipped is blank.
+        Livewire::test(ShipmentsPanel::class, ['seedingCampaign' => $this->seeding])
+            ->call('create')
+            ->set('shipment_creator_id', (string) $this->creator->id)
+            ->set('shipment_product_id', (string) $this->product->id)
+            ->set('shipment_status', ShipmentStatus::Delivered->value)
+            ->set('shipment_shipped_at', '')
+            ->set('shipment_delivered_at', now()->subMonth()->format('Y-m-d\TH:i'))
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseCount('shipments', 1);
+    }
+
     public function test_status_transitions_are_recorded(): void
     {
         $this->actingAsCrmStaff();

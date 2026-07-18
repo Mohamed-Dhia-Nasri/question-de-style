@@ -26,7 +26,15 @@ final readonly class MetricValue
          * awaiting a data-model doc amendment (same class as external_id).
          */
         public ?string $metric = null,
-    ) {}
+    ) {
+        // Invariant: the amount must be a finite number. A non-finite value
+        // (INF from an overflowing input like 1e400, or NaN) cannot be
+        // JSON-encoded by the AsValueObject cast, so reject it loudly here
+        // rather than letting it crash at persist time (M05).
+        if (! is_finite($amount)) {
+            throw new \InvalidArgumentException('MetricValue amount must be a finite number.');
+        }
+    }
 
     /** @return array{amount: float, tier: string, metric?: string} */
     public function toArray(): array

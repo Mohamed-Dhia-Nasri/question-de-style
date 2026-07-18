@@ -76,6 +76,24 @@ class ProductsCrudTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'product.created', 'subject_id' => $product->id]);
     }
 
+    public function test_overflow_unit_value_is_rejected_not_a_500(): void
+    {
+        $this->actingAsCrmStaff();
+        $brand = Brand::factory()->create();
+
+        // '1e309' is is_numeric-true and >= 0, but casts to INF — which the
+        // JSON MetricValue cast cannot encode. It must fail validation, not 500.
+        Livewire::test(ProductsIndex::class)
+            ->call('create')
+            ->set('product_brand_id', (string) $brand->id)
+            ->set('product_name', 'Overflow')
+            ->set('product_unit_value', '1e309')
+            ->call('save')
+            ->assertHasErrors(['product_unit_value' => 'max']);
+
+        $this->assertDatabaseMissing('products', ['name' => 'Overflow']);
+    }
+
     public function test_edit_updates_the_product(): void
     {
         $this->actingAsCrmStaff();

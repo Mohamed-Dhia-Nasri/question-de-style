@@ -209,6 +209,19 @@ class SeedingCampaignsCrudTest extends TestCase
             ->assertHasErrors(['seeding_spend' => 'min']);
     }
 
+    public function test_overflow_spend_is_rejected_not_a_500(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $seeding = SeedingCampaign::factory()->create();
+
+        Livewire::test(SeedingCampaignsIndex::class)
+            ->call('edit', $seeding->id)
+            ->set('seeding_spend', '1e400')
+            ->call('save')
+            ->assertHasErrors(['seeding_spend' => 'max']);
+    }
+
     public function test_status_transitions_are_recorded(): void
     {
         $this->actingAsCrmStaff();

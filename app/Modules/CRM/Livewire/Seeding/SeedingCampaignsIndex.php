@@ -227,7 +227,7 @@ class SeedingCampaignsIndex extends Component
 
         if (! $creating) {
             $rules['seeding_status'] = ['required', Rule::in(array_column(SeedingCampaignStatus::cases(), 'value'))];
-            $rules['seeding_spend'] = ['nullable', 'numeric', 'min:0'];
+            $rules['seeding_spend'] = ['nullable', 'numeric', 'min:0', 'max:999999999999'];
         }
 
         $validated = $this->validate($rules);

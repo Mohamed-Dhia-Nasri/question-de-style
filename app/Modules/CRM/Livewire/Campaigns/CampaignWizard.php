@@ -229,7 +229,8 @@ class CampaignWizard extends Component
         return [
             'campaign_name' => ['required', 'string', 'max:255'],
             'campaign_start_at' => ['nullable', 'date'],
-            'campaign_end_at' => ['nullable', 'date', 'after_or_equal:campaign_start_at'],
+            // Order the dates only when a start is present (M06).
+            'campaign_end_at' => ['nullable', 'date', Rule::when($this->campaign_start_at !== '', ['after_or_equal:campaign_start_at'])],
         ];
     }
 

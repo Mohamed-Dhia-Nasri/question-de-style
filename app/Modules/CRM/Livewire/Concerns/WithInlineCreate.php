@@ -162,11 +162,15 @@ trait WithInlineCreate
             return;
         }
 
-        // product / campaign — the owning brand comes from the host context,
-        // never from tamperable client state.
+        // product / campaign — the owning brand comes from the host context.
+        // Some hosts derive it from a tamperable public prop (e.g.
+        // SeedingCampaignsIndex::seeding_brand_id), so re-validate it against
+        // the active tenant here. Brand uses BelongsToTenant, so Brand::query()
+        // is tenant-scoped: an id that is not a live brand in this tenant fails
+        // cleanly instead of hitting the composite FK and 500ing (M11).
         $brandId = $this->inlineBrandContextId();
 
-        if ($brandId === null) {
+        if ($brandId === null || Brand::query()->whereKey($brandId)->doesntExist()) {
             $this->dispatch('notify', type: 'error', message: 'Choose a brand first.');
 
             return;

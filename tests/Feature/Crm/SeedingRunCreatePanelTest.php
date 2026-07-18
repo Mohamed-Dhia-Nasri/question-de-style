@@ -46,7 +46,7 @@ class SeedingRunCreatePanelTest extends TestCase
             ->set('run_type', SeedingType::Gifting->value)
             ->call('save')
             ->assertHasNoErrors()
-            ->assertRedirect(route('crm.seeding.show', SeedingCampaign::query()->where('name', 'Frühling Gifting')->firstOrFail()));
+            ->assertRedirect(route('crm.campaigns.show', $campaign).'#seeding');
 
         $run = SeedingCampaign::query()->where('name', 'Frühling Gifting')->firstOrFail();
         $this->assertSame($campaign->brand_id, $run->brand_id);

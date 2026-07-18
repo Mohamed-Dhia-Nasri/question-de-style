@@ -94,7 +94,10 @@ class SeedingRunCreatePanel extends Component
 
         $audit->record('seeding_campaign.created', $run, ['name' => $run->name, 'campaign_id' => $this->campaign->id]);
 
-        $this->redirect(route('crm.seeding.show', $run));
+        // Stay on the campaign (seeding tab) rather than jumping to the brand-new,
+        // empty run page — the campaign's context and counts stay visible and the
+        // new run shows up in the list (with a link to open it).
+        $this->redirect(route('crm.campaigns.show', $this->campaign).'#seeding');
     }
 
     protected function inlineCreateTypes(): array

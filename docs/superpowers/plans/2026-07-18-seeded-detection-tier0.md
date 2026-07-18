@@ -101,7 +101,7 @@ class ContentDataSignalsTest extends TestCase
             mediaUrls: [],
             publishedAt: CarbonImmutable::now(),
             publicMetrics: [],
-            provenance: new Provenance('SRC-x', CarbonImmutable::now(), 'v1'),
+            provenance: new Provenance(\App\Platform\Ingestion\SourceRegistry::AGENCY_MANUAL_ENTRY, CarbonImmutable::now(), 'v1'),
         );
 
         $this->assertSame([], $data->mentions);
@@ -222,7 +222,7 @@ class ContentSignalPersistenceTest extends TestCase
             mediaUrls: ['https://cdn/x.mp4'],
             publishedAt: CarbonImmutable::now(),
             publicMetrics: [],
-            provenance: new Provenance('SRC-x', CarbonImmutable::now(), 'v1'),
+            provenance: new Provenance(\App\Platform\Ingestion\SourceRegistry::AGENCY_MANUAL_ENTRY, CarbonImmutable::now(), 'v1'),
             permalink: null,
             mentions: ['glossier'],
             productTags: [new ProductTag('glossier', 'You Perfume', 'GLO-YOU-50', 'ig-1')],

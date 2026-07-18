@@ -67,7 +67,7 @@ class MentionClassifier
         $hasAnySignal = $hasRelevance
             || $agencyHashtags !== []
             || $evidence->ambiguousHashtags !== []
-            || $evidence->paidPartnershipLabel;
+            || $evidence->paidPartnershipLabel === true;
 
         if (! $hasAnySignal) {
             return null;
@@ -76,7 +76,7 @@ class MentionClassifier
         // A platform disclosure label is a proving record for PAID
         // (AC-M1-003). QDS's own workflow never produces paid placements,
         // so this only ever reflects the platform's own labelling.
-        if ($evidence->paidPartnershipLabel) {
+        if ($evidence->paidPartnershipLabel === true) {
             return new ClassificationResult(
                 MentionType::Paid,
                 ConfidenceLevel::High,
@@ -89,6 +89,7 @@ class MentionClassifier
         $aligned = $this->alignedShipments($evidence, $strongRecognitions, $weakRecognitions, $targetedHashtags);
 
         if ($aligned !== []) {
+            $productLevel = $this->hasProductLevelAlignment($aligned, [...$strongRecognitions, ...$weakRecognitions]);
             $strongRelevance = $this->shipmentHasStrongRelevance($aligned, $strongRecognitions, $targetedHashtags);
             $timingOk = $this->timingSatisfied($aligned, $evidence);
 
@@ -101,10 +102,21 @@ class MentionClassifier
                 $shipmentSignals[] = 'shipment-timing-unverified';
             }
 
+            // HIGH only when the SPECIFIC product is evidenced. Brand-only
+            // alignment is real but unconfirmed → MEDIUM + review flag.
+            if ($productLevel && $strongRelevance && $timingOk) {
+                $level = ConfidenceLevel::High;
+            } else {
+                $level = ConfidenceLevel::Medium;
+                if (! $productLevel) {
+                    $shipmentSignals[] = 'product-unconfirmed';
+                }
+            }
+
             return new ClassificationResult(
                 MentionType::Seeded,
-                $strongRelevance && $timingOk ? ConfidenceLevel::High : ConfidenceLevel::Medium,
-                [...$shipmentSignals, ...$signals],
+                $level,
+                [...$shipmentSignals, ...$signals, ...$evidence->contextualCues],
             );
         }
 
@@ -115,7 +127,7 @@ class MentionClassifier
             return new ClassificationResult(
                 MentionType::Unknown,
                 ConfidenceLevel::Low,
-                [...$signals, 'ambiguous-hashtag-match'],
+                [...$signals, 'ambiguous-hashtag-match', ...$evidence->contextualCues],
             );
         }
 
@@ -125,7 +137,7 @@ class MentionClassifier
             return new ClassificationResult(
                 MentionType::Unknown,
                 ConfidenceLevel::Low,
-                [...$signals, 'no-seeding-record'],
+                [...$signals, 'no-seeding-record', ...$evidence->contextualCues],
             );
         }
 
@@ -136,7 +148,7 @@ class MentionClassifier
             return new ClassificationResult(
                 MentionType::LikelyOrganic,
                 ConfidenceLevel::Medium,
-                [...$signals, 'no-disclosure-label', 'no-seeding-record'],
+                [...$signals, 'no-disclosure-label', 'no-seeding-record', ...$evidence->contextualCues],
             );
         }
 
@@ -144,7 +156,7 @@ class MentionClassifier
         return new ClassificationResult(
             MentionType::Unknown,
             ConfidenceLevel::Low,
-            [...$signals, 'no-disclosure-label', 'no-seeding-record', 'weak-signal'],
+            [...$signals, 'no-disclosure-label', 'no-seeding-record', 'weak-signal', ...$evidence->contextualCues],
         );
     }
 
@@ -230,6 +242,12 @@ class MentionClassifier
     private function shipmentAligns(ShipmentEvidence $shipment, array $recognitions, array $targetedHashtags): bool
     {
         foreach ($recognitions as $recognition) {
+            // Product-level alignment (primary): id match, else exact folded name.
+            if (($recognition['productId'] ?? null) !== null && $shipment->productId !== null
+                && (int) $recognition['productId'] === $shipment->productId) {
+                return true;
+            }
+
             if ($shipment->brandName !== null
                 && mb_strtolower($recognition['brand']) === mb_strtolower($shipment->brandName)) {
                 return true;
@@ -249,6 +267,24 @@ class MentionClassifier
                 && $match['product_label'] !== null
                 && mb_strtolower($match['product_label']) === mb_strtolower($shipment->productLabel)) {
                 return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  list<ShipmentEvidence>  $aligned
+     * @param  list<array{type: string, brand: string, level: ConfidenceLevel, productId?: int|null, product?: string|null}>  $recognitions
+     */
+    private function hasProductLevelAlignment(array $aligned, array $recognitions): bool
+    {
+        foreach ($aligned as $shipment) {
+            foreach ($recognitions as $r) {
+                if (($r['productId'] ?? null) !== null && $shipment->productId !== null
+                    && (int) $r['productId'] === $shipment->productId) {
+                    return true;
+                }
             }
         }
 

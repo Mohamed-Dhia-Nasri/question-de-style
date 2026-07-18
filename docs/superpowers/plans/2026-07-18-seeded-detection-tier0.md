@@ -606,13 +606,31 @@ class BrandLexiconTest extends TestCase
 
     public function test_matches_all_brands_diacritic_insensitive(): void
     {
-        Brand::factory()->create(['name' => "L'Oréal", 'aliases' => []]);
+        Brand::factory()->create(['name' => 'Nestlé', 'aliases' => []]);
         Brand::factory()->create(['name' => 'CeraVe', 'aliases' => []]);
 
-        $lex = new BrandLexicon;
-        $found = $lex->matchAllInText('loving loreal and cerave together');
+        $found = (new BrandLexicon)->matchAllInText('loving nestle and cerave together');
 
-        $this->assertEqualsCanonicalizing(["L'Oréal", 'CeraVe'], $found);
+        $this->assertEqualsCanonicalizing(['Nestlé', 'CeraVe'], $found);
+    }
+
+    public function test_matches_possessive_brand_mention(): void
+    {
+        Brand::factory()->create(['name' => 'Nike', 'aliases' => []]);
+
+        // Apostrophes are kept in folding, so "nike's" still boundary-matches "nike".
+        $this->assertSame(['Nike'], (new BrandLexicon)->matchAllInText("obsessed with nike's new drop"));
+    }
+
+    public function test_returns_brands_in_first_offset_order_even_via_alias(): void
+    {
+        Brand::factory()->create(['name' => 'Glossier', 'aliases' => ['glossy']]);
+        Brand::factory()->create(['name' => 'Dove', 'aliases' => []]);
+
+        // "glossy" (a Glossier alias) appears before "dove"; Glossier must sort first.
+        $found = (new BrandLexicon)->matchAllInText('glossy serum then dove cream then glossier reveal');
+
+        $this->assertSame(['Glossier', 'Dove'], $found);
     }
 
     public function test_resolves_at_handle_to_brand(): void
@@ -712,7 +730,9 @@ class BrandLexicon
             }
 
             if (preg_match('/(?<![\p{L}\p{N}])'.preg_quote($alias, '/').'(?![\p{L}\p{N}])/u', $haystack, $m, PREG_OFFSET_CAPTURE) === 1) {
-                $hits[$brandName] ??= $m[0][1];
+                // A brand can have several matching keys (name + aliases); keep
+                // the EARLIEST text offset so first-occurrence order is honest.
+                $hits[$brandName] = isset($hits[$brandName]) ? min($hits[$brandName], $m[0][1]) : $m[0][1];
             }
         }
 
@@ -740,15 +760,17 @@ class BrandLexicon
         return false;
     }
 
-    /** Lower-case + strip diacritics (NFKD, drop combining marks). */
+    /** Lower-case + strip diacritics (NFKD) + trim. Apostrophes are KEPT so a
+     *  possessive ("Nike's") still yields a word boundary after the brand; an
+     *  apostrophe-in-name brand ("L'Oréal") matches its no-apostrophe form via a
+     *  configured alias ("loreal"), not by stripping punctuation (which would
+     *  glue the possessive 's onto the name and break whole-word matching). */
     private static function fold(string $s): string
     {
-        $n = \Normalizer::normalize($s, \Normalizer::FORM_KD);
+        $n = \Normalizer::normalize(trim($s), \Normalizer::FORM_KD);
         $n = is_string($n) ? $n : $s;
 
-        // Strip combining marks (é→e) AND apostrophes (straight U+0027 /
-        // curly U+2019) so "L'Oréal", "LOréal" and "loreal" all fold equal.
-        return mb_strtolower(preg_replace('/[\p{Mn}\x{2019}\x{0027}]+/u', '', $n) ?? $n);
+        return mb_strtolower(preg_replace('/\p{Mn}+/u', '', $n) ?? $n);
     }
 
     /** @return array<string, string> */
@@ -996,9 +1018,7 @@ final class ContextualCueDetector
         $n = \Normalizer::normalize($s, \Normalizer::FORM_KD);
         $n = is_string($n) ? $n : $s;
 
-        // Strip combining marks (é→e) AND apostrophes (straight U+0027 /
-        // curly U+2019) so "L'Oréal", "LOréal" and "loreal" all fold equal.
-        return mb_strtolower(preg_replace('/[\p{Mn}\x{2019}\x{0027}]+/u', '', $n) ?? $n);
+        return mb_strtolower(preg_replace('/\p{Mn}+/u', '', $n) ?? $n);
     }
 }
 ```
@@ -1356,9 +1376,7 @@ final class ProductResolver
         $n = \Normalizer::normalize($s, \Normalizer::FORM_KD);
         $n = is_string($n) ? $n : $s;
 
-        // Strip combining marks (é→e) AND apostrophes (straight U+0027 /
-        // curly U+2019) so "L'Oréal", "LOréal" and "loreal" all fold equal.
-        return mb_strtolower(preg_replace('/[\p{Mn}\x{2019}\x{0027}]+/u', '', $n) ?? $n);
+        return mb_strtolower(preg_replace('/\p{Mn}+/u', '', $n) ?? $n);
     }
 }
 ```

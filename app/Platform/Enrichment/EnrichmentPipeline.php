@@ -12,6 +12,7 @@ use App\Platform\Enrichment\Reach\ReachCalculator;
 use App\Platform\Enrichment\Recognition\RecognitionService;
 use App\Platform\Enrichment\Sentiment\SentimentEnricher;
 use App\Platform\Enrichment\Support\EnrichmentRunStatus;
+use App\Platform\Enrichment\TextSignals\TextSignalRecognizer;
 use App\Platform\Ingestion\Exceptions\ProviderCallException;
 use Carbon\CarbonImmutable;
 use Throwable;
@@ -19,7 +20,7 @@ use Throwable;
 /**
  * The SVC-EnrichmentAI pipeline over one ContentItem or Story:
  *
- *   hashtags → recognition → sentiment → seeded attribution → EMV → reach
+ *   hashtags → recognition → text signals → sentiment → seeded attribution → EMV → reach
  *
  * Stage outcomes are recorded on an EnrichmentRun row (operational
  * telemetry, sanitized values only). Unavailable boundaries (sentiment
@@ -33,6 +34,7 @@ class EnrichmentPipeline
     public function __construct(
         private readonly HashtagEnricher $hashtags,
         private readonly RecognitionService $recognition,
+        private readonly TextSignalRecognizer $textSignals,
         private readonly SentimentEnricher $sentiment,
         private readonly AttributionService $attribution,
         private readonly EmvCalculator $emv,
@@ -68,6 +70,12 @@ class EnrichmentPipeline
                 $recognition['updated'],
                 $recognition['skipped'] !== [] ? ' skipped='.implode('|', $recognition['skipped']) : '',
             );
+
+            if (config('qds.enrichment.text_signals.enabled')) {
+                $stages['text_signals'] = $this->textSignals->enrich($target);
+            } else {
+                $stages['text_signals'] = 'skipped:disabled';
+            }
 
             $stages['sentiment'] = $target instanceof ContentItem
                 ? $this->sentiment->enrich($target)

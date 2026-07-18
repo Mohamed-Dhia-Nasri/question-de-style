@@ -913,6 +913,15 @@ class DemoDataSeeder extends Seeder
     {
         $count = 0;
 
+        // Which campaigns each creator is actually on (the campaign roster).
+        // A paid mention is only attributed to one of THOSE campaigns — never a
+        // random campaign — so the demo mirrors the real pipeline, which ties a
+        // paid post to a campaign only on evidence (brand/campaign match).
+        $campaignsByCreator = DB::table('campaign_creator')
+            ->get(['creator_id', 'campaign_id'])
+            ->groupBy('creator_id')
+            ->map(fn ($rows) => $rows->pluck('campaign_id')->all());
+
         foreach ($this->contentByCreator as $creatorId => $contentIds) {
             foreach ($contentIds as $contentId) {
                 if (isset($this->mentionedContent[$contentId]) || mt_rand(1, 100) > 40) {
@@ -928,7 +937,13 @@ class DemoDataSeeder extends Seeder
 
                 if ($roll <= 12) {
                     $factory = $factory->paid();
-                    $attrs['campaign_id'] = $this->campaigns->whereNotIn('status', [CampaignStatus::Draft])->random()->id;
+                    // Attribute only to a campaign this creator is on the roster
+                    // of; otherwise leave it unattributed — a paid post we can't
+                    // tie to one of our campaigns.
+                    $creatorCampaigns = $campaignsByCreator[$creatorId] ?? [];
+                    $attrs['campaign_id'] = $creatorCampaigns !== []
+                        ? $creatorCampaigns[array_rand($creatorCampaigns)]
+                        : null;
                 } elseif ($roll <= 24) {
                     $factory = $factory->lowConfidence(); // review queue
                 }

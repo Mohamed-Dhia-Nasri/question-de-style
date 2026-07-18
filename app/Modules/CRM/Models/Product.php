@@ -31,6 +31,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string|null $variant
  * @property MetricValue|null $unit_value
  * @property SectorLabel|null $category
+ * @property array<int, string>|null $aliases
  */
 class Product extends Model
 {
@@ -46,6 +47,7 @@ class Product extends Model
         'variant',
         'unit_value',
         'category',
+        'aliases',
     ];
 
     /** @return array<string, string> */
@@ -54,6 +56,7 @@ class Product extends Model
         return [
             'unit_value' => AsValueObject::class.':'.MetricValue::class,
             'category' => SectorLabel::class,
+            'aliases' => 'array',
         ];
     }
 

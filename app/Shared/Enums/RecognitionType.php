@@ -12,4 +12,7 @@ enum RecognitionType: string
     case Logo = 'LOGO';
     case SpokenBrand = 'SPOKEN_BRAND';
     case OnScreenText = 'ON_SCREEN_TEXT';
+    case CaptionText = 'CAPTION_TEXT';
+    case Mention = 'MENTION';
+    case ProductTag = 'PRODUCT_TAG';
 }

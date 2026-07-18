@@ -90,7 +90,7 @@ class ReviewService
             $reviewable instanceof Mention => $this->applyMention($reviewable, MentionType::Unknown, ['human-rejected']),
             $reviewable instanceof RecognitionDetection => $this->moveEnvelope($reviewable, VerificationStatus::HumanCorrected, null, ['human-rejected'], nullValue: true),
             $reviewable instanceof SentimentAnalysis => $this->rejectSentiment($reviewable),
-            $reviewable instanceof ContentHashtag => $this->resolveHashtag($reviewable, ['hashtag_list_id' => null], $reviewer),
+            $reviewable instanceof ContentHashtag => $this->resolveHashtag($reviewable, ['hashtag_list_id' => null], $reviewer, allowClear: true),
             default => throw new InvalidArgumentException('Unsupported reviewable type: '.$reviewable::class),
         };
 
@@ -191,9 +191,15 @@ class ReviewService
     }
 
     /** @param array<string, mixed> $correction */
-    private function resolveHashtag(ContentHashtag $hashtag, array $correction, User $reviewer): void
+    private function resolveHashtag(ContentHashtag $hashtag, array $correction, User $reviewer, bool $allowClear = false): void
     {
         $listId = $correction['hashtag_list_id'] ?? null;
+
+        // A CORRECT decision must pick one of the ambiguous entries; only the
+        // explicit reject() path may clear the match to nothing (M16).
+        if ($listId === null && ! $allowClear) {
+            throw new InvalidArgumentException('Resolving an ambiguous hashtag requires choosing one of its list entries — use reject to record no match.');
+        }
 
         if ($listId !== null) {
             $valid = array_map(

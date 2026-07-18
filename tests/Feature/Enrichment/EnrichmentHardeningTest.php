@@ -127,6 +127,33 @@ class EnrichmentHardeningTest extends TestCase
      * retracted to UNKNOWN/LOW so it re-enters the review queue (DP-004),
      * not left as a stale, invisible SEEDED claim.
      */
+    public function test_retracting_a_stale_mention_clears_its_campaign_attribution(): void
+    {
+        $brand = Brand::factory()->create();
+        $campaign = Campaign::factory()->create(['brand_id' => $brand->id]);
+
+        $mention = Mention::factory()->create([
+            'monitored_subject_id' => $this->subject->id,
+            'content_item_id' => $this->content->id,
+            'story_id' => null,
+            'campaign_id' => $campaign->id,
+            'mention_type' => MentionType::Seeded,
+            'classification' => new ConfidenceAssessment(
+                MentionType::Seeded->value,
+                ConfidenceLevel::Medium,
+                ['shipment-record:1'],
+                VerificationStatus::AiAssessed,
+            ),
+        ]);
+
+        // No evidence now exists → the mention is retracted to UNKNOWN; its
+        // campaign link must be cleared too, or it keeps over-counting the
+        // campaign/brand mention totals (M28).
+        app(AttributionService::class)->enrich($this->content);
+
+        $this->assertNull($mention->fresh()->campaign_id);
+    }
+
     public function test_stale_ai_mention_is_retracted_when_evidence_disappears(): void
     {
         $mention = Mention::factory()->create([

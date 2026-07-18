@@ -190,6 +190,21 @@ class RecognitionPipelineTest extends TestCase
         $this->assertCount(1, $queue);
     }
 
+    public function test_ocr_text_where_a_brand_name_appears_only_as_a_substring_is_not_a_match(): void
+    {
+        // 'Mac' clears the 3-char length floor but appears only inside
+        // 'making'/'macaroni' — a bare substring match auto-accepts a false
+        // MEDIUM detection that never reaches human review (M26).
+        Brand::factory()->create(['name' => 'Mac', 'aliases' => []]);
+        $content = $this->imagePost();
+        $this->fakeVision(['textAnnotations' => [['description' => 'making macaroni for dinner tonight']]]);
+
+        $result = $this->enrich($content);
+
+        $this->assertSame(0, $result['created']);
+        $this->assertSame(0, RecognitionDetection::query()->count());
+    }
+
     public function test_ocr_text_containing_a_brand_alias_becomes_a_medium_ocr_detection(): void
     {
         $this->brand();

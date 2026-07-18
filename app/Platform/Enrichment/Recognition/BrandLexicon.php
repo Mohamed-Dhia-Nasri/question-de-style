@@ -50,7 +50,9 @@ class BrandLexicon
             }
 
             if (preg_match('/(?<![\p{L}\p{N}])'.preg_quote($alias, '/').'(?![\p{L}\p{N}])/u', $haystack, $m, PREG_OFFSET_CAPTURE) === 1) {
-                $hits[$brandName] ??= $m[0][1];
+                // A brand can have several matching keys (name + aliases); keep
+                // the EARLIEST text offset so first-occurrence order is honest.
+                $hits[$brandName] = isset($hits[$brandName]) ? min($hits[$brandName], $m[0][1]) : $m[0][1];
             }
         }
 
@@ -78,15 +80,17 @@ class BrandLexicon
         return false;
     }
 
-    /** Lower-case + strip diacritics (NFKD, drop combining marks). */
+    /** Lower-case + strip diacritics (NFKD) + trim. Apostrophes are KEPT so a
+     *  possessive ("Nike's") still yields a word boundary after the brand; an
+     *  apostrophe-in-name brand ("L'Oréal") matches its no-apostrophe form via a
+     *  configured alias ("loreal"), not by stripping punctuation (which would
+     *  glue the possessive 's onto the name and break whole-word matching). */
     private static function fold(string $s): string
     {
-        $n = \Normalizer::normalize($s, \Normalizer::FORM_KD);
+        $n = \Normalizer::normalize(trim($s), \Normalizer::FORM_KD);
         $n = is_string($n) ? $n : $s;
 
-        // Strip combining marks (é→e) AND apostrophes (straight U+0027 /
-        // curly U+2019) so "L'Oréal", "LOréal" and "loreal" all fold equal.
-        return mb_strtolower(preg_replace('/[\p{Mn}\x{2019}\x{0027}]+/u', '', $n) ?? $n);
+        return mb_strtolower(preg_replace('/\p{Mn}+/u', '', $n) ?? $n);
     }
 
     /** @return array<string, string> */

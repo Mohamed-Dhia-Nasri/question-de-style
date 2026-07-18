@@ -185,7 +185,7 @@ git commit -m "feat(ingestion): add structured-signal fields to ContentData + Pr
 
 **Interfaces:**
 - Consumes: `ContentData.{mentions,productTags,collaborators,brandedContentLabel}` (Task 1).
-- Produces: `content_items.{mentions,product_tags,collaborators,branded_content_label}` columns; `ContentItem` casts them (`array`, `array`, `array`, `boolean`).
+- Produces: `content_items.{mentioned_handles,product_tags,collaborators,branded_content_label}` columns; `ContentItem` casts them (`array`, `array`, `array`, `boolean`). (Column is `mentioned_handles`, not `mentions`, to avoid shadowing the `mentions()` relation.)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -233,7 +233,7 @@ class ContentSignalPersistenceTest extends TestCase
         app(ContentItemPersister::class)->persist($account, [$data]);
 
         $row = ContentItem::query()->where('external_id', 'sig-1')->firstOrFail();
-        $this->assertSame(['glossier'], $row->mentions);
+        $this->assertSame(['glossier'], $row->mentioned_handles);
         $this->assertSame('You Perfume', $row->product_tags[0]['product_name']);
         $this->assertSame(['glossier'], $row->collaborators);
         $this->assertTrue($row->branded_content_label);
@@ -244,7 +244,7 @@ class ContentSignalPersistenceTest extends TestCase
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `XDEBUG_MODE=off vendor/bin/phpunit --filter ContentSignalPersistenceTest`
-Expected: FAIL (unknown column `mentions`).
+Expected: FAIL (unknown column `mentioned_handles`).
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -262,8 +262,11 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('content_items', function (Blueprint $table): void {
-            $table->jsonb('mentions')->nullable()->after('caption');
-            $table->jsonb('product_tags')->nullable()->after('mentions');
+            // NOTE: column is `mentioned_handles`, NOT `mentions` — a `mentions`
+            // cast would shadow the existing ContentItem::mentions() HasMany
+            // relationship (attribution Mention rows) and break the dashboard.
+            $table->jsonb('mentioned_handles')->nullable()->after('caption');
+            $table->jsonb('product_tags')->nullable()->after('mentioned_handles');
             $table->jsonb('collaborators')->nullable()->after('product_tags');
             // Tri-state: true=paid, false=explicitly-not, null=unknown. No default.
             $table->boolean('branded_content_label')->nullable()->after('collaborators');
@@ -273,36 +276,48 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('content_items', function (Blueprint $table): void {
-            $table->dropColumn(['mentions', 'product_tags', 'collaborators', 'branded_content_label']);
+            $table->dropColumn(['mentioned_handles', 'product_tags', 'collaborators', 'branded_content_label']);
         });
     }
 };
 ```
 
-In `app/Modules/Monitoring/Models/ContentItem.php`, add to `$fillable`: `'mentions', 'product_tags', 'collaborators', 'branded_content_label'`. Add to `casts()`:
+In `app/Modules/Monitoring/Models/ContentItem.php`, add to `$fillable`: `'mentioned_handles', 'product_tags', 'collaborators', 'branded_content_label'`. Add to `casts()`:
 
 ```php
-            'mentions' => 'array',
+            'mentioned_handles' => 'array',
             'product_tags' => 'array',
             'collaborators' => 'array',
             'branded_content_label' => 'boolean',
 ```
 
-In `ContentItemPersister::persist`, add to the create array (after `'media_urls' => $item->mediaUrls,`) and to the `$updates` array:
+> **Do not** name the column/cast `mentions` — `ContentItem` already has a `mentions(): HasMany` relationship (attribution `Mention` rows) and a `'mentions'` cast would shadow it, breaking `$content->mentions` on the Monitoring content-detail page and its tests.
+
+In `ContentItemPersister::persist`, add to the create array (after `'media_urls' => $item->mediaUrls,`) and to the `$updates` array (extract the product-tag mapping into a private `mapProductTags(array $tags): array` method to avoid duplicating the closure):
 
 ```php
-            'mentions' => $item->mentions,
-            'product_tags' => array_map(static fn (ProductTag $t): array => [
-                'brand_ref' => $t->brandRef,
-                'product_name' => $t->productName,
-                'product_sku' => $t->productSku,
-                'provider_tag_id' => $t->providerTagId,
-            ], $item->productTags),
+            'mentioned_handles' => $item->mentions,
+            'product_tags' => $this->mapProductTags($item->productTags),
             'collaborators' => $item->collaborators,
             'branded_content_label' => $item->brandedContentLabel,
 ```
 
-Add `use App\Platform\Ingestion\DTO\ProductTag;` at the top. (These fields are covered by the existing `human_overrides` guard automatically.)
+with the shared helper:
+
+```php
+    /** @param list<ProductTag> $tags @return list<array{brand_ref: ?string, product_name: ?string, product_sku: ?string, provider_tag_id: ?string}> */
+    private function mapProductTags(array $tags): array
+    {
+        return array_map(static fn (ProductTag $t): array => [
+            'brand_ref' => $t->brandRef,
+            'product_name' => $t->productName,
+            'product_sku' => $t->productSku,
+            'provider_tag_id' => $t->providerTagId,
+        ], $tags);
+    }
+```
+
+Add `use App\Platform\Ingestion\DTO\ProductTag;` at the top. (These fields are covered by the existing `human_overrides` guard automatically — the DTO field stays `mentions`; only the column is `mentioned_handles`.)
 
 - [ ] **Step 4: Run test to verify it passes**
 

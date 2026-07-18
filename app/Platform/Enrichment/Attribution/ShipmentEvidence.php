@@ -29,6 +29,7 @@ final readonly class ShipmentEvidence
         public ?int $brandId = null,
         public ?string $brandName = null,
         public ?string $productLabel = null,
+        public ?int $productId = null,
         public ?CarbonImmutable $shippedAt = null,
         public ?CarbonImmutable $deliveredAt = null,
         public ?int $campaignId = null,

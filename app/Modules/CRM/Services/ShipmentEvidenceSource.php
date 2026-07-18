@@ -42,6 +42,7 @@ class ShipmentEvidenceSource implements SeedingEvidenceSource
                 brandId: $shipment->seedingCampaign->brand_id,
                 brandName: $shipment->seedingCampaign->brand->name,
                 productLabel: $shipment->product->name,
+                productId: $shipment->product_id,
                 shippedAt: $shipment->shipped_at instanceof CarbonImmutable ? $shipment->shipped_at : null,
                 deliveredAt: $shipment->delivered_at instanceof CarbonImmutable ? $shipment->delivered_at : null,
                 campaignId: $shipment->seedingCampaign->campaign_id,

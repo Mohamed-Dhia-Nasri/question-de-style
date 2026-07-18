@@ -114,7 +114,6 @@ class PlatformAccountsPanel extends Component
                 $writer->updatePlatformAccount($account, $platform, $validated['account_handle'], $bio, $links);
                 $audit->record('platform_account.updated', $account, [
                     'platform' => $platform->value,
-                    'handle' => $validated['account_handle'],
                 ]);
             } else {
                 $account = $writer->addManualPlatformAccount(
@@ -126,7 +125,6 @@ class PlatformAccountsPanel extends Component
                 );
                 $audit->record('platform_account.added', $account, [
                     'platform' => $platform->value,
-                    'handle' => $account->handle,
                 ]);
             }
         } catch (PlatformAccountConflict $conflict) {
@@ -179,7 +177,6 @@ class PlatformAccountsPanel extends Component
 
         $audit->record('platform_account.removed', $account, [
             'platform' => $account->platform->value,
-            'handle' => $account->handle,
         ]);
 
         $this->creator->refresh();

@@ -180,7 +180,8 @@ trait ManagesCreatorRoster
             ($validated['new_creator_language'] ?? '') !== '' ? $validated['new_creator_language'] : null,
         );
 
-        $audit->record('creator.created', $creator, ['display_name' => $creator->display_name]);
+        // Identifier-only context — display name is PII (M29).
+        $audit->record('creator.created', $creator);
 
         $result = $this->rosterRelation()->syncWithoutDetaching([$creator->id]);
 

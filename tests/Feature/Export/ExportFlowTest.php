@@ -276,4 +276,25 @@ class ExportFlowTest extends TestCase
         $this->assertNull($job->fresh()->file_path);
         $this->assertSame(1, AuditLog::query()->where('action', 'export.pruned')->count());
     }
+
+    public function test_pruning_leaves_a_job_completed_when_the_artifact_delete_fails(): void
+    {
+        $user = $this->analyst();
+        $this->actingAs($user);
+        $job = $this->requestCsv($user)->fresh();
+
+        // Point the artifact at a directory so delete() fails while the blob
+        // remains — the job must NOT be flipped to Expired with a nulled path
+        // that orphans the file (M31 sibling).
+        Storage::disk($job->disk)->delete($job->file_path);
+        $dirPath = 'tenants/'.$job->tenant_id.'/exports/undeletable';
+        Storage::disk($job->disk)->makeDirectory($dirPath);
+        $job->update(['file_path' => $dirPath, 'expires_at' => now()->subHour()]);
+
+        $this->artisan('qds:prune-expired-exports')->assertSuccessful();
+
+        $this->assertSame(ExportJobStatus::Completed, $job->fresh()->status);
+        $this->assertSame($dirPath, $job->fresh()->file_path);
+        Storage::disk($job->disk)->assertExists($dirPath);
+    }
 }

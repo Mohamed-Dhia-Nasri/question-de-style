@@ -111,7 +111,18 @@ class ExportManager
             // each pruned job's audit event to its owning tenant (ADR-0019).
             app(TenantContext::class)->runAs($job->tenant_id, function () use ($job): void {
                 if ($job->disk !== null && $job->file_path !== null) {
-                    Storage::disk($job->disk)->delete($job->file_path);
+                    try {
+                        $deleted = Storage::disk($job->disk)->delete($job->file_path);
+                    } catch (\Throwable) {
+                        $deleted = false;
+                    }
+
+                    // Leave the job Completed (retried next run) while the
+                    // artifact is still on disk — never flip to Expired and
+                    // null the path while the file is orphaned (M31 sibling).
+                    if (! $deleted && Storage::disk($job->disk)->exists($job->file_path)) {
+                        return;
+                    }
                 }
 
                 $job->update(['status' => ExportJobStatus::Expired, 'file_path' => null]);

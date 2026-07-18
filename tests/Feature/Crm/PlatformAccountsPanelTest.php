@@ -8,6 +8,7 @@ use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Platform\Ingestion\SourceRegistry;
+use App\Shared\Audit\AuditLog;
 use App\Shared\Authorization\PermissionsCatalog;
 use App\Shared\Enums\Platform;
 use App\Shared\Enums\RoleName;
@@ -84,6 +85,15 @@ class PlatformAccountsPanelTest extends TestCase
         // The human is the identity authority; the stamp says so (ADR-0015).
         $this->assertSame(SourceRegistry::AGENCY_MANUAL_ENTRY, $account->provenance->source);
         $this->assertDatabaseHas('audit_logs', ['action' => 'platform_account.added', 'subject_id' => $account->id]);
+
+        // The social handle (PII) must not sit in the append-only audit context (M29).
+        foreach (AuditLog::all() as $log) {
+            $this->assertStringNotContainsString(
+                'hand.curated',
+                (string) json_encode($log->context),
+                "audit_logs.{$log->action} context leaked the account handle",
+            );
+        }
     }
 
     public function test_the_form_validates_platform_handle_and_links(): void

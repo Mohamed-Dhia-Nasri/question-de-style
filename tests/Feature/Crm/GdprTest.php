@@ -8,6 +8,7 @@ use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\CRM\Services\Gdpr\CreatorDataExporter;
 use App\Modules\CRM\Services\Gdpr\CreatorEraser;
+use App\Modules\Discovery\Models\GeoAttribution;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\EmvConfiguration;
 use App\Modules\Monitoring\Models\EmvResult;
@@ -127,6 +128,28 @@ class GdprTest extends TestCase
         $this->assertCount(1, $data['monitoring']['content_items']);
         $this->assertCount(1, $data['monitoring']['stories']);
         $this->assertSame(2, $data['monitoring']['metric_snapshot_count']);
+    }
+
+    public function test_export_includes_the_creators_geography(): void
+    {
+        $creator = Creator::factory()->create();
+        GeoAttribution::factory()->create(['creator_id' => $creator->id]);
+
+        $data = app(CreatorDataExporter::class)->export($creator);
+
+        $this->assertSame('DE', $data['geography']['country_code']);
+        $this->assertSame('Bavaria', $data['geography']['region']);
+        $this->assertSame('Munich', $data['geography']['city']);
+        $this->assertSame('DE', $data['geography']['assessment']['value']);
+    }
+
+    public function test_export_geography_is_null_when_none_is_recorded(): void
+    {
+        $creator = Creator::factory()->create();
+
+        $data = app(CreatorDataExporter::class)->export($creator);
+
+        $this->assertNull($data['geography']);
     }
 
     public function test_export_command_writes_json_to_the_private_exports_disk(): void

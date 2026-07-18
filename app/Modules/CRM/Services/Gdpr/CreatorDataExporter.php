@@ -33,6 +33,7 @@ class CreatorDataExporter
             'campaigns',
             'seedingCampaigns',
             'monitoredSubjects',
+            'geoAttribution',
         ]);
 
         $accountIds = $creator->platformAccounts->pluck('id')->all();
@@ -72,6 +73,14 @@ class CreatorDataExporter
                 'external_links' => $a->external_links,
                 'follower_count' => $a->follower_count?->toArray(),
             ])->all(),
+            // ADR-0018: the creator's stored geography is personal data and
+            // belongs in the subject-access export (M30). Nullable HasOne.
+            'geography' => ($geo = $creator->geoAttribution) === null ? null : [
+                'country_code' => $geo->country_code,
+                'region' => $geo->region,
+                'city' => $geo->city,
+                'assessment' => $geo->assessment->toArray(),
+            ],
             'campaign_participation' => [
                 'campaigns' => $creator->campaigns->pluck('name')->all(),
                 'seeding_campaigns' => $creator->seedingCampaigns->pluck('name')->all(),

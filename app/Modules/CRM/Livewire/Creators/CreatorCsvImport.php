@@ -138,8 +138,8 @@ class CreatorCsvImport extends Component
                         $row['language'] !== '' ? $row['language'] : null,
                     );
 
+                    // Identifier-only context — display name is PII (M29).
                     $audit->record('creator.created', $creator, [
-                        'display_name' => $row['name'],
                         'source' => 'csv-import',
                     ]);
 
@@ -155,7 +155,6 @@ class CreatorCsvImport extends Component
 
                         $audit->record('platform_account.added', $account, [
                             'platform' => $platform->value,
-                            'handle' => $handle,
                         ]);
                     }
                 });

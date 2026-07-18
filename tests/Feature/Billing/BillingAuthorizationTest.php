@@ -202,6 +202,48 @@ class BillingAuthorizationTest extends TestCase
         $this->assertSame('cus_a', $this->tenantA->fresh()->stripe_customer_id);
     }
 
+    public function test_subscribe_is_refused_when_a_live_subscription_already_exists(): void
+    {
+        // C1 regression: switching plans must NEVER open a second
+        // subscription Checkout. Stripe Checkout in subscription mode mints a
+        // brand-new subscription and never cancels the old one, so a second
+        // checkout double-bills the tenant. Plan changes go to the Billing
+        // Portal instead. Enforced server-side — a hidden button is not enough.
+        $this->fakeStripeCredentials();
+        Http::fake([
+            'api.stripe.com/v1/checkout/sessions*' => Http::response([
+                'id' => 'cs_dup',
+                'url' => 'https://checkout.stripe.com/second',
+            ]),
+        ]);
+
+        $this->tenantA->forceFill(['stripe_customer_id' => 'cus_a'])->save();
+
+        $starter = SubscriptionPlan::factory()->seats(5)->create(['code' => 'STARTER']);
+        $growth = SubscriptionPlan::factory()->seats(10)->create(['code' => 'GROWTH']);
+
+        // Tenant A already holds a live (Active) subscription on STARTER.
+        $this->withTenant($this->tenantA, fn () => TenantSubscription::factory()->create([
+            'subscription_plan_id' => $starter->id,
+        ]));
+
+        $this->actingAsTenant($this->tenantA);
+        $this->actingAs($this->ownerA);
+
+        Livewire::test(BillingManage::class)
+            ->call('subscribe', $growth->code)
+            ->assertNoRedirect()
+            ->assertDispatched('notify', type: 'error');
+
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), '/v1/checkout/sessions'));
+
+        $this->assertSame(
+            1,
+            TenantSubscription::query()->withoutGlobalScopes()->count(),
+            'no second subscription row may be created by a refused checkout',
+        );
+    }
+
     public function test_open_portal_uses_only_the_tenants_own_stored_customer_id(): void
     {
         $this->fakeStripeCredentials();

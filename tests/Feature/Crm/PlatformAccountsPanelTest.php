@@ -111,6 +111,27 @@ class PlatformAccountsPanelTest extends TestCase
             ->assertHasErrors(['account_links']);
     }
 
+    public function test_the_form_rejects_dangerous_non_http_link_schemes(): void
+    {
+        // H6 regression: FILTER_VALIDATE_URL accepts javascript:// URLs
+        // (e.g. "javascript://comment%0aalert(1)"), which the profile blade
+        // then renders as a clickable <a href> — a stored XSS vector against
+        // any staff member who clicks it. Only http/https links may be stored.
+        $this->actingAsCrmStaff();
+
+        $creator = Creator::factory()->create();
+
+        Livewire::test(PlatformAccountsPanel::class, ['creator' => $creator])
+            ->call('add')
+            ->set('account_platform', Platform::Instagram->value)
+            ->set('account_handle', 'xss.handle')
+            ->set('account_links', 'javascript://comment%0aalert(document.domain)')
+            ->call('save')
+            ->assertHasErrors(['account_links']);
+
+        $this->assertDatabaseMissing('platform_accounts', ['handle' => 'xss.handle']);
+    }
+
     public function test_a_second_account_on_the_same_platform_is_a_caught_error_not_a_silent_create(): void
     {
         $this->actingAsCrmStaff();

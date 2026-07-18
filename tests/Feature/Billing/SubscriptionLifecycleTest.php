@@ -12,6 +12,7 @@ use App\Shared\Enums\RoleName;
 use App\Shared\Enums\SubscriptionStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\Support\InteractsWithStripe;
 use Tests\TestCase;
@@ -304,6 +305,50 @@ class SubscriptionLifecycleTest extends TestCase
         $this->assertSame(SubscriptionStatus::Active, $row->status, 'a stale event must not change status');
         $this->assertSame($planA->id, $row->subscription_plan_id, 'a stale event must not change the plan');
         $this->assertSame($t0, $row->last_stripe_event_at?->getTimestamp(), 'the watermark must not move backwards');
+    }
+
+    public function test_the_existing_subscription_is_locked_for_update_before_an_event_is_applied(): void
+    {
+        // H1 regression: concurrent, out-of-order webhook deliveries for the
+        // SAME subscription must serialize. Without a row lock, two handlers
+        // read the same pre-write watermark, so a stale event can roll state
+        // backwards and resurrect a canceled subscription (a lost update).
+        // The watermark guard alone is insufficient under true concurrency.
+        //
+        // The fix loads the existing row FOR UPDATE; the controller wraps
+        // handle() in a DB::transaction, so the second delivery blocks on the
+        // first and then re-reads the fresh watermark and correctly skips.
+        // The race cannot be reproduced single-threaded (sequential syncs
+        // already commit between reads), so we assert the pessimistic lock —
+        // the actual defense — is taken.
+        $this->connectStripeCustomer('cus_lock');
+        $plan = SubscriptionPlan::factory()->create();
+        $t0 = now()->getTimestamp();
+
+        $this->sync($this->stripeEvent(
+            'customer.subscription.created',
+            $this->stripeSubscriptionObject('sub_lock', 'cus_lock', (string) $plan->stripe_price_id),
+            created: $t0,
+        ));
+
+        $lockingReads = [];
+        DB::listen(function ($query) use (&$lockingReads): void {
+            $sql = strtolower($query->sql);
+            if (str_contains($sql, 'tenant_subscriptions') && str_contains($sql, 'for update')) {
+                $lockingReads[] = $query->sql;
+            }
+        });
+
+        $this->sync($this->stripeEvent(
+            'customer.subscription.updated',
+            $this->stripeSubscriptionObject('sub_lock', 'cus_lock', (string) $plan->stripe_price_id, 'past_due'),
+            created: $t0 + 60,
+        ));
+
+        $this->assertNotEmpty(
+            $lockingReads,
+            'the existing subscription must be read FOR UPDATE before an event is applied, so concurrent out-of-order deliveries serialize',
+        );
     }
 
     public function test_replaying_the_same_event_payload_is_idempotent(): void

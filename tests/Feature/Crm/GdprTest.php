@@ -9,13 +9,19 @@ use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\CRM\Services\Gdpr\CreatorDataExporter;
 use App\Modules\CRM\Services\Gdpr\CreatorEraser;
 use App\Modules\Monitoring\Models\ContentItem;
+use App\Modules\Monitoring\Models\EmvConfiguration;
+use App\Modules\Monitoring\Models\EmvResult;
 use App\Modules\Monitoring\Models\Mention;
 use App\Modules\Monitoring\Models\MetricSnapshot;
 use App\Modules\Monitoring\Models\MonitoredSubject;
 use App\Modules\Monitoring\Models\ReachConfiguration;
 use App\Modules\Monitoring\Models\ReachResult;
+use App\Modules\Monitoring\Models\ReviewAction;
+use App\Modules\Monitoring\Models\SentimentAnalysis;
 use App\Modules\Monitoring\Models\Story;
+use App\Platform\Enrichment\Support\ReviewDecision;
 use App\Shared\Enums\MetricTier;
+use App\Shared\ValueObjects\MetricValue;
 use App\Shared\ValueObjects\ReachEstimate;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -186,6 +192,50 @@ class GdprTest extends TestCase
 
         // The bystander's history survived.
         $this->assertSame(1, MetricSnapshot::query()->where('platform_account_id', $other->id)->count());
+    }
+
+    public function test_erasure_purges_emv_results_and_review_actions_history(): void
+    {
+        // C2 regression: emv_results and review_actions carry the append-only
+        // qds_enrichment_append_only trigger, which — unlike the metric_snapshots
+        // and analytics fact guards — never received the gdpr_erasure DELETE
+        // gate. Any creator with EMV figures or a human review correction (both
+        // routine for a monitored creator) could therefore NEVER be erased: the
+        // DELETE raised inside the trigger and rolled the whole transaction back.
+        // The full-footprint fixture masked it by seeding neither table.
+        ['creator' => $creator, 'content' => $content] = $this->seedCreatorWithFullFootprint();
+
+        $emvConfig = EmvConfiguration::factory()->active()->create();
+        EmvResult::query()->create([
+            'content_item_id' => $content->id,
+            'emv_configuration_id' => $emvConfig->id,
+            'formula_version' => $emvConfig->formula_version,
+            'rate_card_version' => $emvConfig->rate_card_version,
+            'currency' => 'EUR',
+            'value' => new MetricValue(1234.0, MetricTier::Estimated, 'qds-emv v1'),
+            'inputs' => [['metric' => 'likes', 'value' => 10]],
+            'calculated_at' => now(),
+        ]);
+
+        // A human sentiment correction on the creator's content — an
+        // append-only review_actions row anchored to erasable personal data.
+        $sentiment = SentimentAnalysis::factory()->create(['content_item_id' => $content->id]);
+        ReviewAction::query()->create([
+            'reviewable_type' => $sentiment->getMorphClass(),
+            'reviewable_id' => $sentiment->id,
+            'action' => ReviewDecision::Correct,
+            'original' => ['label' => 'POSITIVE'],
+            'correction' => ['label' => 'NEGATIVE'],
+            'reason' => 'mislabelled',
+            'actor_id' => 1,
+        ]);
+
+        app(CreatorEraser::class)->erase($creator);
+
+        // The erasure completes and removes the enrichment history too.
+        $this->assertDatabaseMissing('creators', ['id' => $creator->id]);
+        $this->assertSame(0, DB::table('emv_results')->where('content_item_id', $content->id)->count());
+        $this->assertSame(0, DB::table('review_actions')->where('reviewable_id', $sentiment->id)->count());
     }
 
     public function test_append_only_guards_still_hold_outside_the_erasure_gate(): void

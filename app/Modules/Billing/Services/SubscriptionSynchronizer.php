@@ -114,10 +114,17 @@ class SubscriptionSynchronizer
             return;
         }
 
+        // Lock the row FOR UPDATE (the controller wraps handle() in a
+        // transaction): concurrent, out-of-order deliveries for the same
+        // subscription must serialize on it, so the second handler blocks
+        // until the first commits and then re-reads the FRESH watermark below.
+        // Without the lock both read the same pre-write watermark and a stale
+        // event can resurrect a canceled subscription (a lost update).
         /** @var TenantSubscription|null $existing */
         $existing = TenantSubscription::query()
             ->withoutGlobalScopes()
             ->where('stripe_subscription_id', $stripeId)
+            ->lockForUpdate()
             ->first();
 
         // Out-of-order guard: never let a stale event roll state backwards.

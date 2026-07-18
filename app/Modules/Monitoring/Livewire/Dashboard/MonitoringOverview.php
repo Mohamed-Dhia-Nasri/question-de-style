@@ -99,8 +99,12 @@ class MonitoringOverview extends Component
     public function render(ReviewQueue $queue, ProviderHealthService $health, RollupReader $rollups): View
     {
         $platform = $this->platformFilter();
-        $from = $this->dateFilter($this->from);
-        $to = $this->dateFilter($this->to)?->endOfDay();
+        // The KPI totals read week-grain rollups (RollupReader snaps to whole
+        // weeks). Snap the whole window to weeks ONCE here so the range label,
+        // the live-table cards and the rollup KPIs all describe the same
+        // week-aligned window instead of silently disagreeing (M14/M25).
+        $from = $this->dateFilter($this->from)?->startOfWeek();
+        $to = $this->dateFilter($this->to)?->endOfWeek();
         $brandId = $this->brandFilter();
 
         // "Active seeding only" (spec 2026-07-17): resolve the enrolled

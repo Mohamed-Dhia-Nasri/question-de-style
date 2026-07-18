@@ -120,7 +120,7 @@ class RollupReader
     {
         $totals = $this->tenant(DB::table('rollup_mention_by_brand'))
             ->where('grain', 'week')
-            ->when($from, fn ($q) => $q->where('bucket_start', '>=', $from->startOfWeek()->toDateString()))
+            ->when($from, fn ($q) => $q->where('bucket_start', '>=', $from->copy()->startOfWeek()->toDateString()))
             ->when($to, fn ($q) => $q->where('bucket_start', '<=', $to->toDateString()))
             ->when($brandId !== null, fn ($q) => $q->where('brand_id', $brandId))
             ->selectRaw('sum(mention_count) as mention_count')
@@ -148,7 +148,7 @@ class RollupReader
     {
         return $this->tenant(DB::table('rollup_creator_by_period'))
             ->where('grain', 'week')
-            ->when($from, fn ($q) => $q->where('bucket_start', '>=', $from->startOfWeek()->toDateString()))
+            ->when($from, fn ($q) => $q->where('bucket_start', '>=', $from->copy()->startOfWeek()->toDateString()))
             ->when($to, fn ($q) => $q->where('bucket_start', '<=', $to->toDateString()))
             ->when($creatorIds !== null, fn ($q) => $q->whereIn('creator_id', $creatorIds))
             ->selectRaw('sum(views_sum) as views_sum')
@@ -272,7 +272,7 @@ class RollupReader
         $totals = $this->tenant(DB::table('rollup_mention_by_campaign'))
             ->where('grain', 'week')
             ->where('campaign_id', $campaignId)
-            ->when($from, fn ($q) => $q->where('bucket_start', '>=', $from->startOfWeek()->toDateString()))
+            ->when($from, fn ($q) => $q->where('bucket_start', '>=', $from->copy()->startOfWeek()->toDateString()))
             ->when($to, fn ($q) => $q->where('bucket_start', '<=', $to->toDateString()))
             ->selectRaw('sum(mention_count) as mention_count')
             ->selectRaw('sum(content_count) as content_count')

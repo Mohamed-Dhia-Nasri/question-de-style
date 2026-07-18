@@ -57,12 +57,15 @@ class CreatorDetail extends Component
 
     public function updatingPlatform(): void
     {
-        $this->resetPage();
+        // The content list paginates under the custom page name 'content'
+        // (see render()); the default resetPage() targets 'page' and leaves
+        // the user stranded on an out-of-range content page (M12).
+        $this->resetPage('content');
     }
 
     public function updatingContentType(): void
     {
-        $this->resetPage();
+        $this->resetPage('content');
     }
 
     public function render(RollupReader $rollups, DerivedMetricsService $derived, MonitoringSettingsResolver $settings): View
@@ -110,7 +113,10 @@ class CreatorDetail extends Component
 
                 return null;
             })
-            ->filter()
+            // Keep observed 0.0 views — a bare filter() drops them as falsy
+            // and overstates the average/median (M13). Only unobserved
+            // (null) content is excluded.
+            ->filter(fn (?float $amount) => $amount !== null)
             ->values()
             ->all();
 

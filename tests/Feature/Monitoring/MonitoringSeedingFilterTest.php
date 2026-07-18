@@ -8,12 +8,17 @@ use App\Modules\CRM\Models\SeedingCampaign;
 use App\Modules\Monitoring\Livewire\Dashboard\MonitoringOverview;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\Mention;
+use App\Modules\Monitoring\Models\MetricSnapshot;
 use App\Modules\Monitoring\Models\MonitoredSubject;
 use App\Modules\Monitoring\Models\Story;
+use App\Platform\Analytics\Contracts\AnalyticsService;
+use App\Shared\Enums\MetricTier;
 use App\Shared\Enums\MonitoredSubjectType;
 use App\Shared\Enums\Platform;
 use App\Shared\Enums\RoleName;
 use App\Shared\Enums\SeedingCampaignStatus;
+use App\Shared\ValueObjects\MetricValue;
+use App\Shared\ValueObjects\Provenance;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -36,6 +41,37 @@ class MonitoringSeedingFilterTest extends TestCase
         parent::setUp();
         $this->seedRoles();
         $this->actingAs($this->makeUser(RoleName::Analyst));
+    }
+
+    public function test_the_overview_shows_the_engagement_breakdown_by_type(): void
+    {
+        $creator = Creator::factory()->create();
+        $account = PlatformAccount::factory()->create(['creator_id' => $creator->id, 'platform' => Platform::Instagram]);
+        $content = ContentItem::factory()->create(['platform_account_id' => $account->id]);
+
+        MetricSnapshot::create([
+            'content_item_id' => $content->id,
+            'captured_at' => now(),
+            'metrics' => [
+                new MetricValue(400, MetricTier::Public, 'likes'),
+                new MetricValue(90, MetricTier::Public, 'comments'),
+                new MetricValue(30, MetricTier::Public, 'shares'),
+                new MetricValue(20, MetricTier::Public, 'saves'),
+            ],
+            'provenance' => new Provenance('SRC-apify-instagram-profile-scraper', now()->toImmutable(), 'v1'),
+        ]);
+
+        app(AnalyticsService::class)->refreshRollups();
+
+        Livewire::test(MonitoringOverview::class)
+            ->assertSee('Engagement')
+            ->assertSee('Likes')
+            ->assertSee('Comments')
+            ->assertSee('Shares')
+            ->assertSee('Saves')
+            ->assertSee('400')   // likes
+            ->assertSee('90')    // comments
+            ->assertSee('540');  // engagement total = 400+90+30+20
     }
 
     public function test_week_grain_overview_aligns_the_label_and_live_counts_to_whole_weeks(): void

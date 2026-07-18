@@ -356,6 +356,32 @@ class AnalyticsRollupTest extends TestCase
         ];
     }
 
+    public function test_creator_totals_expose_each_engagement_component_separately(): void
+    {
+        $creator = Creator::factory()->create();
+        $account = PlatformAccount::factory()->create(['creator_id' => $creator->id]);
+        $content = ContentItem::factory()->create(['platform_account_id' => $account->id]);
+
+        $this->contentSnapshot($content, [
+            new MetricValue(500, MetricTier::Public, 'views'),
+            new MetricValue(40, MetricTier::Public, 'likes'),
+            new MetricValue(9, MetricTier::Public, 'comments'),
+            new MetricValue(3, MetricTier::Public, 'shares'),
+            new MetricValue(2, MetricTier::Public, 'saves'),
+        ], '2026-07-03 09:00:00');
+
+        app(AnalyticsService::class)->refreshRollups();
+
+        $totals = app(RollupReader::class)->creatorTotals();
+
+        $this->assertSame(40.0, (float) $totals->likes_sum);
+        $this->assertSame(9.0, (float) $totals->comments_sum);
+        $this->assertSame(3.0, (float) $totals->shares_sum);
+        $this->assertSame(2.0, (float) $totals->saves_sum);
+        // Engagement stays the sum of the four components (unchanged).
+        $this->assertSame(54.0, (float) $totals->engagement_sum);
+    }
+
     public function test_mixed_currency_emv_is_reported_as_unavailable_not_summed(): void
     {
         $ctx = $this->emvContext();

@@ -91,6 +91,16 @@
                     <x-states.unavailable reason="No observed engagement for the selected dates — never shown as zero." />
                 @endif
             </div>
+            {{-- Breakdown of the engagement total by type. A dash means the
+                 metric was not observed for the range — never shown as zero (DP-001). --}}
+            <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 border-t border-gray-100 pt-3 text-xs dark:border-gray-800">
+                @foreach (['Likes' => 'likes_sum', 'Comments' => 'comments_sum', 'Shares' => 'shares_sum', 'Saves' => 'saves_sum'] as $label => $field)
+                    <div class="flex items-center justify-between gap-2">
+                        <dt class="text-gray-500 dark:text-gray-400">{{ $label }}</dt>
+                        <dd class="font-medium tabular-nums text-gray-700 dark:text-gray-300">{{ $creatorTotals->{$field} !== null ? number_format((float) $creatorTotals->{$field}) : '—' }}</dd>
+                    </div>
+                @endforeach
+            </dl>
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
             <p class="text-sm text-gray-500 dark:text-gray-400">Estimated reach</p>

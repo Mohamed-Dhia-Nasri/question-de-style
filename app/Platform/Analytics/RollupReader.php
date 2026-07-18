@@ -151,7 +151,7 @@ class RollupReader
      * never zero (DP-001).
      *
      * @param  list<int>|null  $creatorIds
-     * @return object{views_sum: string|null, engagement_sum: string|null, content_count: string|null}
+     * @return object{views_sum: string|null, engagement_sum: string|null, likes_sum: string|null, comments_sum: string|null, shares_sum: string|null, saves_sum: string|null, content_count: string|null}
      */
     public function creatorTotals(?Carbon $from = null, ?Carbon $to = null, ?array $creatorIds = null): object
     {
@@ -162,6 +162,10 @@ class RollupReader
             ->when($creatorIds !== null, fn ($q) => $q->whereIn('creator_id', $creatorIds))
             ->selectRaw('sum(views_sum) as views_sum')
             ->selectRaw('sum(engagement_sum) as engagement_sum')
+            ->selectRaw('sum(likes_sum) as likes_sum')
+            ->selectRaw('sum(comments_sum) as comments_sum')
+            ->selectRaw('sum(shares_sum) as shares_sum')
+            ->selectRaw('sum(saves_sum) as saves_sum')
             ->selectRaw('sum(content_count) as content_count')
             ->first();
     }

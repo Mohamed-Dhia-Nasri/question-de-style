@@ -304,6 +304,22 @@ return [
             ],
         ],
 
+        // Tier 0 free-signal detection (sub-project A). Kill switch mirrors
+        // enrichment.enabled; cue/allowlist lists are operational config.
+        'text_signals' => [
+            'enabled' => env('QDS_ENRICHMENT_TEXT_SIGNALS_ENABLED', false),
+            // Short brands that are safe to match despite the >=3-char noise
+            // guard (whole-word only). Extend per market.
+            'short_brand_allowlist' => ['dm', 'so', 'kn'],
+            // Gifting/PR disclosure phrases per language (normalized lower-case,
+            // matched whole-word/diacritic-folded on the caption).
+            'gifting_cues' => [
+                'de' => ['pr-paket', 'pr paket', 'unbezahlt', 'gratis', 'geschenkt', 'werbung'],
+                'en' => ['gifted', 'gift', 'pr', 'pr package', 'c/o', 'thanks to', 'thank you'],
+                'fr' => ['offert', 'cadeau', 'collab', 'colis presse'],
+            ],
+        ],
+
         'metrics' => [
             // MET-EngagementRate divisor: "followers or views per the
             // configured model" (metrics catalog). The choice is part of

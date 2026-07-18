@@ -34,5 +34,13 @@ final readonly class ContentData
          * null when the provider payload does not carry it.
          */
         public ?string $permalink = null,
+        /** @var list<string> handles referenced by the post (without '@') */
+        public array $mentions = [],
+        /** @var list<ProductTag> platform-native product tags */
+        public array $productTags = [],
+        /** @var list<string> collaborator/co-author handles */
+        public array $collaborators = [],
+        /** Tri-state paid/branded-content disclosure: true=paid, false=explicitly not, null=unknown. */
+        public ?bool $brandedContentLabel = null,
     ) {}
 }

@@ -7,6 +7,7 @@ use App\Modules\CRM\Livewire\Users\UsersIndex;
 use App\Shared\Audit\AuditLog;
 use App\Shared\Enums\RoleName;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Gate;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -273,6 +274,30 @@ class UsersCrudTest extends TestCase
             ->assertSet('confirmingDeleteId', null);
 
         $this->assertDatabaseHas('users', ['id' => $admin->id]);
+    }
+
+    public function test_the_tenant_owner_cannot_be_deleted(): void
+    {
+        // H3: tenants.owner_user_id is a RESTRICT foreign key, so deleting the
+        // founding owner would crash the request with a 500. A second admin
+        // must be refused at the authorization layer, and the owner left intact.
+        [$tenantA] = $this->makeTenantPair();
+        $ownerA = $tenantA->owner;
+        $adminB = $this->withTenant($tenantA, fn (): User => $this->makeUser(RoleName::Admin));
+
+        $this->actingAsTenant($tenantA);
+        $this->actingAs($adminB);
+
+        // The policy denies (authoritative) — even though B holds users.manage
+        // and A is not B.
+        $this->assertTrue(Gate::forUser($adminB)->denies('delete', $ownerA));
+
+        Livewire::test(UsersIndex::class)
+            ->call('confirmDelete', $ownerA->id)
+            ->assertForbidden()
+            ->assertSet('confirmingDeleteId', null);
+
+        $this->assertDatabaseHas('users', ['id' => $ownerA->id]);
     }
 
     public function test_bulk_deactivation_skips_the_current_admin(): void

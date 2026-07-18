@@ -355,6 +355,9 @@ class UsersIndex extends Component
         return view('livewire.crm.users-index', [
             'users' => $this->usersQuery()->paginate($this->perPage()),
             'roles' => $this->allowedRoles(),
+            // The tenant's billing owner cannot be deleted (RESTRICT FK) —
+            // resolved once here so the row template needs no per-row query.
+            'ownerUserId' => auth()->user()->tenant()->value('owner_user_id'),
         ]);
     }
 }

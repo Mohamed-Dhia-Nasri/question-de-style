@@ -8,15 +8,20 @@ use App\Modules\CRM\Models\Client;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\Monitoring\Models\ContentItem;
+use App\Modules\Monitoring\Models\EmvConfiguration;
+use App\Modules\Monitoring\Models\EmvResult;
 use App\Modules\Monitoring\Models\Mention;
 use App\Modules\Monitoring\Models\MetricSnapshot;
 use App\Modules\Monitoring\Models\MonitoredSubject;
+use App\Modules\Monitoring\Models\ReachConfiguration;
+use App\Modules\Monitoring\Models\ReachResult;
 use App\Platform\Analytics\Contracts\AnalyticsService;
 use App\Platform\Analytics\NeonAnalyticsService;
 use App\Shared\Enums\MetricTier;
 use App\Shared\Enums\Platform;
 use App\Shared\ValueObjects\MetricValue;
 use App\Shared\ValueObjects\Provenance;
+use App\Shared\ValueObjects\ReachEstimate;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -186,6 +191,78 @@ class AnalyticsRollupTest extends TestCase
         $this->assertSame('ESTIMATED', $rows[$brandA->id]->total_estimated_reach_tier);
         $this->assertNull($rows[$brandA->id]->total_emv);
         $this->assertSame('ESTIMATED', $rows[$brandA->id]->total_emv_tier);
+    }
+
+    public function test_content_measures_are_not_double_counted_across_multiple_mentions(): void
+    {
+        // H4: the mentions unique index is (monitored_subject_id, content_item_id),
+        // so ONE content item legitimately yields multiple mention rows when two
+        // monitored subjects tie it to the same campaign. Each fact_mention row
+        // carries the SAME content-level views/reach/EMV, so the rollup must
+        // count those measures ONCE per content — not once per mention.
+        $client = Client::factory()->create();
+        $brand = Brand::factory()->create(['client_id' => $client->id]);
+        $campaign = Campaign::factory()->create(['brand_id' => $brand->id]);
+
+        $creator = Creator::factory()->create();
+        $account = PlatformAccount::factory()->create(['creator_id' => $creator->id]);
+        $content = ContentItem::factory()->create(['platform_account_id' => $account->id]);
+
+        // One set of content-level measures on the single post.
+        $this->contentSnapshot($content, [new MetricValue(500, MetricTier::Public, 'views')], '2026-07-03 09:00:00');
+
+        $emvConfig = EmvConfiguration::factory()->active()->create();
+        EmvResult::query()->create([
+            'content_item_id' => $content->id,
+            'emv_configuration_id' => $emvConfig->id,
+            'formula_version' => $emvConfig->formula_version,
+            'rate_card_version' => $emvConfig->rate_card_version,
+            'currency' => 'EUR',
+            'value' => new MetricValue(1234.0, MetricTier::Estimated, 'qds-emv v1'),
+            'inputs' => [],
+            'calculated_at' => now(),
+        ]);
+
+        $reachConfig = ReachConfiguration::factory()->active()->create();
+        ReachResult::query()->create([
+            'content_item_id' => $content->id,
+            'reach_configuration_id' => $reachConfig->id,
+            'formula_version' => $reachConfig->formula_version,
+            'value' => new ReachEstimate(1000.0, MetricTier::Estimated, 'qds-estimated-reach v1'),
+            'inputs' => [],
+            'calculated_at' => now(),
+        ]);
+
+        // Two monitored subjects both mention the SAME content on the SAME campaign.
+        foreach ([1, 2] as $ignored) {
+            $subject = MonitoredSubject::factory()->create(['creator_id' => $creator->id]);
+            Mention::factory()->create([
+                'monitored_subject_id' => $subject->id,
+                'content_item_id' => $content->id,
+                'story_id' => null,
+                'campaign_id' => $campaign->id,
+            ]);
+        }
+
+        app(AnalyticsService::class)->refreshRollups();
+
+        $brandRow = DB::table('rollup_mention_by_brand')
+            ->where('grain', 'month')->where('brand_id', $brand->id)->first();
+        $campaignRow = DB::table('rollup_mention_by_campaign')
+            ->where('grain', 'month')->where('campaign_id', $campaign->id)->first();
+
+        // Two mentions of the content...
+        $this->assertSame(2, (int) $brandRow->mention_count);
+        $this->assertSame(2, (int) $campaignRow->mention_count);
+        $this->assertSame(1, (int) $campaignRow->content_count);
+
+        // ...but the single post's audience/value is counted ONCE, not doubled.
+        $this->assertSame(500.0, (float) $brandRow->total_views);
+        $this->assertSame(1000.0, (float) $brandRow->total_estimated_reach);
+        $this->assertSame(1234.0, (float) $brandRow->total_emv);
+        $this->assertSame(500.0, (float) $campaignRow->total_views);
+        $this->assertSame(1000.0, (float) $campaignRow->total_estimated_reach);
+        $this->assertSame(1234.0, (float) $campaignRow->total_emv);
     }
 
     public function test_analytics_schema_contains_no_personal_data_columns(): void

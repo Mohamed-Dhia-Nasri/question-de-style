@@ -81,6 +81,28 @@ class User extends Authenticatable
         return $this->roleName() === RoleName::ClientViewer;
     }
 
+    /**
+     * True when this user is their tenant's billing owner (a tenant
+     * attribute, not a role). The owner is RESTRICT-referenced by
+     * tenants.owner_user_id, so they can never be deleted until ownership is
+     * reassigned — deleting them would fail at the database.
+     */
+    public function isTenantOwner(): bool
+    {
+        if ($this->tenant_id === null) {
+            return false;
+        }
+
+        // Read the owner id via the relation QUERY (not a lazy attribute
+        // access) so it also holds under preventLazyLoading; use the loaded
+        // relation when it is already present.
+        $ownerId = $this->relationLoaded('tenant')
+            ? $this->getRelation('tenant')?->owner_user_id
+            : $this->tenant()->value('owner_user_id');
+
+        return $ownerId !== null && (int) $ownerId === (int) $this->id;
+    }
+
     public function initials(): string
     {
         return Str::of($this->display_name)

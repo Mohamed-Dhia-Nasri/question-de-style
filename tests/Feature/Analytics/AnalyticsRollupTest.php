@@ -17,6 +17,7 @@ use App\Modules\Monitoring\Models\ReachConfiguration;
 use App\Modules\Monitoring\Models\ReachResult;
 use App\Platform\Analytics\Contracts\AnalyticsService;
 use App\Platform\Analytics\NeonAnalyticsService;
+use App\Platform\Analytics\RollupReader;
 use App\Shared\Enums\MetricTier;
 use App\Shared\Enums\Platform;
 use App\Shared\ValueObjects\MetricValue;
@@ -313,5 +314,80 @@ class AnalyticsRollupTest extends TestCase
         ] as $rollup) {
             $this->assertSame(0, DB::table($rollup)->count(), "{$rollup} must exist and be empty in P1.");
         }
+    }
+
+    /** @param array{brand: Brand, campaign: Campaign, account: PlatformAccount, creator: Creator, emvConfig: EmvConfiguration} $ctx */
+    private function seedEmvMention(array $ctx, string $currency): void
+    {
+        $content = ContentItem::factory()->create(['platform_account_id' => $ctx['account']->id]);
+        $this->contentSnapshot($content, [new MetricValue(100, MetricTier::Public, 'views')], '2026-07-03 09:00:00');
+        EmvResult::query()->create([
+            'content_item_id' => $content->id,
+            'emv_configuration_id' => $ctx['emvConfig']->id,
+            'formula_version' => $ctx['emvConfig']->formula_version,
+            'rate_card_version' => $ctx['emvConfig']->rate_card_version,
+            'currency' => $currency,
+            'value' => new MetricValue(1000.0, MetricTier::Estimated, 'qds-emv v1'),
+            'inputs' => [],
+            'calculated_at' => now(),
+        ]);
+        $subject = MonitoredSubject::factory()->create(['creator_id' => $ctx['creator']->id]);
+        Mention::factory()->create([
+            'monitored_subject_id' => $subject->id,
+            'content_item_id' => $content->id,
+            'story_id' => null,
+            'campaign_id' => $ctx['campaign']->id,
+        ]);
+    }
+
+    /** @return array{brand: Brand, campaign: Campaign, account: PlatformAccount, creator: Creator, emvConfig: EmvConfiguration} */
+    private function emvContext(): array
+    {
+        $client = Client::factory()->create();
+        $brand = Brand::factory()->create(['client_id' => $client->id]);
+        $creator = Creator::factory()->create();
+
+        return [
+            'brand' => $brand,
+            'campaign' => Campaign::factory()->create(['brand_id' => $brand->id]),
+            'account' => PlatformAccount::factory()->create(['creator_id' => $creator->id]),
+            'creator' => $creator,
+            'emvConfig' => EmvConfiguration::factory()->active()->create(),
+        ];
+    }
+
+    public function test_mixed_currency_emv_is_reported_as_unavailable_not_summed(): void
+    {
+        $ctx = $this->emvContext();
+        $this->seedEmvMention($ctx, 'EUR');
+        $this->seedEmvMention($ctx, 'USD');
+
+        app(AnalyticsService::class)->refreshRollups();
+
+        // Summing EUR + USD into one number is meaningless — the bucket must
+        // report EMV as unavailable and carry no currency label (M24).
+        $brandRow = DB::table('rollup_mention_by_brand')
+            ->where('grain', 'month')->where('brand_id', $ctx['brand']->id)->first();
+
+        $this->assertNull($brandRow->total_emv);
+        $this->assertNull($brandRow->total_emv_currency);
+    }
+
+    public function test_single_currency_emv_carries_its_currency_label(): void
+    {
+        $ctx = $this->emvContext();
+        $this->seedEmvMention($ctx, 'EUR');
+
+        app(AnalyticsService::class)->refreshRollups();
+
+        $brandRow = DB::table('rollup_mention_by_brand')
+            ->where('grain', 'month')->where('brand_id', $ctx['brand']->id)->first();
+
+        $this->assertSame('EUR', $brandRow->total_emv_currency);
+        $this->assertSame(1000.0, (float) $brandRow->total_emv);
+
+        // The reader surfaces the currency for the KPI card.
+        $totals = app(RollupReader::class)->mentionTotals(null, null, $ctx['brand']->id);
+        $this->assertSame('EUR', $totals->total_emv_currency);
     }
 }

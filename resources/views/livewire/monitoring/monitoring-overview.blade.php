@@ -111,7 +111,7 @@
                 @if ($activeSeedingOnly)
                     <x-states.unavailable reason="Aggregated by brand — not available for the seeding filter." />
                 @elseif ($mentionTotals->total_emv !== null)
-                    <span class="text-2xl font-semibold text-gray-800 dark:text-white/90">{{ number_format((float) $mentionTotals->total_emv, 2) }}</span>
+                    <span class="text-2xl font-semibold text-gray-800 dark:text-white/90">{{ number_format((float) $mentionTotals->total_emv, 2) }}@if ($mentionTotals->total_emv_currency) <span class="text-base font-normal text-gray-500 dark:text-gray-400">{{ $mentionTotals->total_emv_currency }}</span>@endif</span>
                     <x-metric.tier-badge tier="ESTIMATED" />
                 @else
                     <x-states.unavailable reason="EMV requires an active, user-managed EMV configuration (REQ-M1-011) and calculated results." />

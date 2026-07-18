@@ -127,9 +127,18 @@ class RollupReader
             ->selectRaw('sum(total_views) as total_views')
             ->selectRaw('sum(total_estimated_reach) as total_estimated_reach')
             ->selectRaw('sum(total_emv) as total_emv')
+            ->selectRaw('count(DISTINCT total_emv_currency) as emv_currency_variants')
+            ->selectRaw('max(total_emv_currency) as total_emv_currency')
             ->first();
 
         $totals->mention_count = $totals->mention_count === null ? null : (int) $totals->mention_count;
+
+        // Never present an EMV total that spans currencies across buckets (M24).
+        if ((int) $totals->emv_currency_variants > 1) {
+            $totals->total_emv = null;
+            $totals->total_emv_currency = null;
+        }
+        unset($totals->emv_currency_variants);
 
         return $totals;
     }
@@ -284,10 +293,19 @@ class RollupReader
             ->selectRaw('max(total_estimated_reach_tier) as total_estimated_reach_tier')
             ->selectRaw('sum(total_emv) as total_emv')
             ->selectRaw('max(total_emv_tier) as total_emv_tier')
+            ->selectRaw('count(DISTINCT total_emv_currency) as emv_currency_variants')
+            ->selectRaw('max(total_emv_currency) as total_emv_currency')
             ->first();
 
         $totals->mention_count = $totals->mention_count === null ? null : (int) $totals->mention_count;
         $totals->content_count = $totals->content_count === null ? null : (int) $totals->content_count;
+
+        // Never present an EMV total that spans currencies across buckets (M24).
+        if ((int) $totals->emv_currency_variants > 1) {
+            $totals->total_emv = null;
+            $totals->total_emv_currency = null;
+        }
+        unset($totals->emv_currency_variants);
 
         return $totals;
     }

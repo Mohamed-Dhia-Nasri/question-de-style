@@ -4,17 +4,21 @@ namespace Tests\Feature\Export;
 
 use App\Models\User;
 use App\Modules\CRM\Models\Brand;
+use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\Product;
 use App\Modules\Monitoring\Livewire\Exports\ExportsIndex;
 use App\Platform\Analytics\Contracts\AnalyticsService;
 use App\Platform\Export\ExportManager;
+use App\Platform\Export\Jobs\GenerateExportJob;
 use App\Platform\Export\Models\ExportJob;
 use App\Platform\Export\ReportBuilder;
 use App\Platform\Export\Support\ExportJobStatus;
 use App\Shared\Audit\AuditLog;
 use App\Shared\Enums\ExportFormat;
 use App\Shared\Enums\RoleName;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\ValidationException;
@@ -296,5 +300,80 @@ class ExportFlowTest extends TestCase
         $this->assertSame(ExportJobStatus::Completed, $job->fresh()->status);
         $this->assertSame($dirPath, $job->fresh()->file_path);
         Storage::disk($job->disk)->assertExists($dirPath);
+    }
+
+    public function test_monitoring_summary_export_discloses_when_a_section_hits_the_row_cap(): void
+    {
+        $user = $this->analyst();
+        $this->actingAs($user);
+
+        $creator = Creator::factory()->create();
+
+        // Exactly ROW_CAP distinct weekly buckets for one creator → the
+        // creator-by-period section caps at ROW_CAP and must disclose it (M18).
+        $rows = [];
+        $start = CarbonImmutable::parse('2024-01-01');
+        for ($i = 0; $i < ReportBuilder::ROW_CAP; $i++) {
+            $day = $start->addWeeks($i);
+            $rows[] = [
+                'tenant_id' => $this->defaultTenant->id,
+                'date_key' => $day->toDateString(),
+                'metric_snapshot_id' => 900_000 + $i,
+                'platform_account_id' => 1,
+                'creator_id' => $creator->id,
+                'platform' => 'INSTAGRAM',
+                'captured_at' => $day->toDateTimeString(),
+                'followers' => 1000,
+            ];
+        }
+        foreach (array_chunk($rows, 500) as $chunk) {
+            DB::table('fact_creator_account')->insert($chunk);
+        }
+
+        app(AnalyticsService::class)->refreshRollups();
+
+        $job = app(ExportManager::class)
+            ->request($user, ReportBuilder::MONITORING_SUMMARY, ExportFormat::Csv, ['grain' => 'week'])
+            ->fresh();
+
+        $csv = Storage::disk('exports')->get($job->file_path);
+
+        $this->assertStringContainsString('reached the 5,000-row export cap', $csv);
+    }
+
+    public function test_stale_running_export_jobs_are_reaped_as_failed_and_re_requesting_is_unblocked(): void
+    {
+        config(['qds.exports.run_stale_after_minutes' => 180]);
+        $user = $this->analyst();
+        $this->actingAs($user);
+
+        $stale = ExportJob::factory()->create(['user_id' => $user->id, 'status' => ExportJobStatus::Running]);
+        DB::table('export_jobs')->where('id', $stale->id)->update(['updated_at' => now()->subHours(6)]);
+
+        $fresh = ExportJob::factory()->create(['status' => ExportJobStatus::Running]);
+
+        $this->artisan('qds:prune-expired-exports')->assertSuccessful();
+
+        // The stale row is failed; a genuinely-live run is left alone.
+        $this->assertSame(ExportJobStatus::Failed, $stale->fresh()->status);
+        $this->assertNotNull($stale->fresh()->failed_at);
+        $this->assertStringContainsString('Reaped', (string) $stale->fresh()->error);
+        $this->assertSame(ExportJobStatus::Running, $fresh->fresh()->status);
+
+        // With the stale row out of the live partial index, the same request
+        // is no longer collapsed onto it — a new job is created.
+        $new = $this->requestCsv($user);
+        $this->assertNotSame($stale->id, $new->id);
+    }
+
+    public function test_a_killed_export_job_marks_itself_failed_via_the_failed_hook(): void
+    {
+        $user = $this->analyst();
+        $row = ExportJob::factory()->create(['user_id' => $user->id, 'status' => ExportJobStatus::Running]);
+
+        (new GenerateExportJob($row->id))->failed(new \RuntimeException('killed'));
+
+        $this->assertSame(ExportJobStatus::Failed, $row->fresh()->status);
+        $this->assertNotNull($row->fresh()->failed_at);
     }
 }

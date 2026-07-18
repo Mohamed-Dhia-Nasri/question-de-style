@@ -97,6 +97,33 @@ class ExportManager
         );
     }
 
+    /**
+     * Fail PENDING/RUNNING jobs abandoned by a dead worker (M19). A hard
+     * kill (OOM/SIGKILL) or queue timeout bypasses GenerateExportJob's
+     * in-handle catch, leaving the row live forever — which also pins the
+     * live partial unique index and blocks every identical re-request. This
+     * flips stale rows to FAILED, freeing the index. Bounded on updated_at
+     * (bumped at creation and at PENDING→RUNNING), so it covers both
+     * never-picked-up PENDING and stuck-RUNNING rows.
+     */
+    public function reapStale(): int
+    {
+        $staleMinutes = (int) config('qds.exports.run_stale_after_minutes');
+
+        if ($staleMinutes <= 0) {
+            return 0;
+        }
+
+        return ExportJob::query()
+            ->whereIn('status', [ExportJobStatus::Pending->value, ExportJobStatus::Running->value])
+            ->where('updated_at', '<', now()->subMinutes($staleMinutes))
+            ->update([
+                'status' => ExportJobStatus::Failed->value,
+                'failed_at' => now(),
+                'error' => sprintf('Reaped by export retention: still live after %d minutes (worker died mid-run).', $staleMinutes),
+            ]);
+    }
+
     /** Delete expired artifacts and close their ledger rows (DP-005 retention). */
     public function pruneExpired(): int
     {

@@ -67,16 +67,41 @@ class ReportBuilder
 
     private function monitoringSummary(ReportFilters $filters): ReportDocument
     {
+        $sections = [
+            $this->creatorSection($filters),
+            $this->brandMentionSection($filters),
+        ];
+
         return new ReportDocument(
             title: 'QDS — Module 1 Monitoring Report',
             generatedAt: now()->toIso8601String(),
             filters: $this->disclosedFilters($filters),
-            disclosures: $this->disclosures(),
-            sections: [
-                $this->creatorSection($filters),
-                $this->brandMentionSection($filters),
-            ],
+            disclosures: $this->withTruncationDisclosures($this->disclosures(), $sections),
+            sections: $sections,
         );
+    }
+
+    /**
+     * Append a truncation disclosure for every section that hit ROW_CAP —
+     * silent truncation would read as "covered everything" when it didn't.
+     *
+     * @param  list<string>  $disclosures
+     * @param  list<array{title: string, columns: list<string>, rows: list<list<string|int|float|null>>}>  $sections
+     * @return list<string>
+     */
+    private function withTruncationDisclosures(array $disclosures, array $sections): array
+    {
+        foreach ($sections as $section) {
+            if (count($section['rows']) === self::ROW_CAP) {
+                $disclosures[] = sprintf(
+                    'Section "%s" reached the %s-row export cap and may be incomplete — narrow the filters for a complete export.',
+                    $section['title'],
+                    number_format(self::ROW_CAP),
+                );
+            }
+        }
+
+        return $disclosures;
     }
 
     /** @return array<string, string> */
@@ -245,15 +270,7 @@ class ReportBuilder
             $disclosures[] = 'Slice filters (platform / content type / country / city) narrow the product-totals and slice sections only; the per-shipment detail is slice-agnostic — shipments carry no content dimension.';
         }
 
-        foreach ($sections as $section) {
-            if (count($section['rows']) === self::ROW_CAP) {
-                $disclosures[] = sprintf(
-                    'Section "%s" reached the %s-row export cap and may be incomplete — narrow the filters for a complete export.',
-                    $section['title'],
-                    number_format(self::ROW_CAP),
-                );
-            }
-        }
+        $disclosures = $this->withTruncationDisclosures($disclosures, $sections);
 
         return new ReportDocument(
             title: 'QDS — Module 3 Seeding Results Report',

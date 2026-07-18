@@ -40,4 +40,23 @@ enum SeedingCampaignStatus: string
             self::Cancelled => 'Called off — kept for the records.',
         };
     }
+
+    /**
+     * Lifecycle guard, symmetric to CampaignStatus (M04 twin). Completed and
+     * Cancelled are terminal — a finished or called-off run is never revived —
+     * and nothing returns to the setup-only Draft state once it has left it.
+     * Every other forward/lateral move (and a no-op) is allowed.
+     */
+    public function canTransitionTo(self $to): bool
+    {
+        if ($to === $this) {
+            return true;
+        }
+
+        if ($this === self::Completed || $this === self::Cancelled) {
+            return false;
+        }
+
+        return $to !== self::Draft;
+    }
 }

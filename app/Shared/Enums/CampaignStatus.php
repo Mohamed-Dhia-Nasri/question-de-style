@@ -40,4 +40,23 @@ enum CampaignStatus: string
             self::Cancelled => 'Called off — kept for the records.',
         };
     }
+
+    /**
+     * Lifecycle guard (M04). Completed and Cancelled are terminal — a
+     * finished or called-off campaign is never revived — and nothing returns
+     * to the setup-only Draft state once it has left it. Every other
+     * forward/lateral move (and a no-op to the same status) is allowed.
+     */
+    public function canTransitionTo(self $to): bool
+    {
+        if ($to === $this) {
+            return true;
+        }
+
+        if ($this === self::Completed || $this === self::Cancelled) {
+            return false;
+        }
+
+        return $to !== self::Draft;
+    }
 }

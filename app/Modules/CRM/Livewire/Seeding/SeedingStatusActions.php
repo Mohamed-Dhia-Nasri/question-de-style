@@ -42,7 +42,13 @@ class SeedingStatusActions extends Component
      */
     public function suggestion(): ?array
     {
-        if ($this->seedingCampaign->status === SeedingCampaignStatus::Completed) {
+        // A terminal run (Completed OR Cancelled) is never nudged onward — the
+        // guard must cover the whole terminal set, not just Completed, or a
+        // Cancelled run with all shipments delivered would be resurrected (M09).
+        if (in_array($this->seedingCampaign->status, [
+            SeedingCampaignStatus::Completed,
+            SeedingCampaignStatus::Cancelled,
+        ], true)) {
             return null;
         }
 

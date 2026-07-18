@@ -172,6 +172,39 @@ class StatusSuggestionTest extends TestCase
         ]);
     }
 
+    public function test_a_cancelled_seeding_run_gets_no_completed_nudge(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $brand = Brand::factory()->create();
+        $run = SeedingCampaign::factory()->create([
+            'brand_id' => $brand->id,
+            'status' => SeedingCampaignStatus::Cancelled,
+        ]);
+        $product = Product::factory()->create(['brand_id' => $brand->id]);
+        $creator = Creator::factory()->create();
+        $run->creators()->attach($creator->id);
+        Shipment::factory()->create([
+            'seeding_campaign_id' => $run->id,
+            'creator_id' => $creator->id,
+            'product_id' => $product->id,
+            'status' => ShipmentStatus::Delivered,
+        ]);
+
+        // A terminal (Cancelled) run must not be nudged back to Completed.
+        Livewire::test(SeedingStatusActions::class, ['seedingCampaign' => $run])
+            ->assertOk()
+            ->assertDontSee('mark this seeding run as Completed')
+            ->call('applyStatus')
+            ->assertOk();
+
+        $this->assertSame(SeedingCampaignStatus::Cancelled, $run->fresh()->status);
+        $this->assertDatabaseMissing('audit_logs', [
+            'action' => 'seeding_campaign.status_changed',
+            'subject_id' => $run->id,
+        ]);
+    }
+
     public function test_a_seeding_run_with_a_non_delivered_shipment_shows_no_banner(): void
     {
         $this->actingAsCrmStaff();

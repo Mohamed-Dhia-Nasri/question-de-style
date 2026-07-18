@@ -219,6 +219,21 @@ class CampaignsCrudTest extends TestCase
         $this->assertSame('ACTIVE', $log->context['to']);
     }
 
+    public function test_a_terminal_campaign_cannot_be_revived(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $campaign = Campaign::factory()->create(['status' => CampaignStatus::Completed]);
+
+        Livewire::test(CampaignsIndex::class)
+            ->call('edit', $campaign->id)
+            ->set('campaign_status', CampaignStatus::Draft->value)
+            ->call('save')
+            ->assertHasErrors(['campaign_status']);
+
+        $this->assertSame(CampaignStatus::Completed, $campaign->fresh()->status);
+    }
+
     public function test_editing_without_a_status_change_records_no_transition(): void
     {
         $this->actingAsCrmStaff();

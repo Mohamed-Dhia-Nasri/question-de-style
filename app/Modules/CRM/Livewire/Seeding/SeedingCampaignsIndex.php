@@ -260,6 +260,33 @@ class SeedingCampaignsIndex extends Component
             ]);
         }
 
+        // M08: shipments and the roster denormalize — and were vetted against —
+        // the run's CURRENT brand (BrandRestrictionGuard keys off it on attach).
+        // Changing the brand out from under them would silently desync them and
+        // bypass do-not-contact vetting. Block-and-tell, mirroring
+        // CampaignWriter's F14 brand lock. Only a genuine change with children
+        // present is refused; a no-op same-brand edit passes.
+        if ($editing
+            && (int) $validated['seeding_brand_id'] !== $seeding->brand_id
+            && ($seeding->shipments()->exists() || $seeding->creators()->exists())) {
+            throw ValidationException::withMessages([
+                'seeding_brand_id' => 'This run already has shipments or a roster under its current brand. Move or clear them before changing the brand.',
+            ]);
+        }
+
+        // Lifecycle guard, twin of the campaign state machine (M04). Completed
+        // and Cancelled are terminal and a run never returns to Draft; the
+        // closed-set Rule::in only proves the target is a valid status.
+        if ($editing) {
+            $newStatus = SeedingCampaignStatus::from($validated['seeding_status']);
+
+            if ($newStatus !== $seeding->status && ! $seeding->status->canTransitionTo($newStatus)) {
+                throw ValidationException::withMessages([
+                    'seeding_status' => "A {$seeding->status->label()} seeding run cannot be moved to {$newStatus->label()}.",
+                ]);
+            }
+        }
+
         $previousStatus = $seeding?->status;
 
         $attributes = [

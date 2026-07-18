@@ -3,6 +3,7 @@
 namespace App\Modules\CRM\Livewire\Campaigns;
 
 use App\Modules\CRM\Exceptions\CampaignBrandLocked;
+use App\Modules\CRM\Exceptions\CampaignStatusTransitionNotAllowed;
 use App\Modules\CRM\Livewire\Concerns\WithInlineCreate;
 use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Campaign;
@@ -224,6 +225,10 @@ class CampaignsIndex extends Component
                 // Block-and-tell: surface the coherence refusal on the brand
                 // field instead of silently rewriting the runs' brand_id.
                 throw ValidationException::withMessages(['campaign_brand_id' => $e->getMessage()]);
+            } catch (CampaignStatusTransitionNotAllowed $e) {
+                // Block-and-tell: an illegal lifecycle move surfaces on the
+                // status field (M04).
+                throw ValidationException::withMessages(['campaign_status' => $e->getMessage()]);
             }
         } else {
             $campaign = $writer->createCampaign($attributes, $audit);

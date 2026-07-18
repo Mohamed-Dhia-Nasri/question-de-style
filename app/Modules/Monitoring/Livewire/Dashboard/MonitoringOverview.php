@@ -2,7 +2,6 @@
 
 namespace App\Modules\Monitoring\Livewire\Dashboard;
 
-use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Services\ActiveSeedingCreatorIds;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\Mention;
@@ -47,9 +46,6 @@ class MonitoringOverview extends Component
     #[Url(except: '')]
     public string $to = '';
 
-    #[Url(except: 0)]
-    public int $brandId = 0;
-
     #[Url(except: false)]
     public bool $activeSeedingOnly = false;
 
@@ -70,13 +66,6 @@ class MonitoringOverview extends Component
         } catch (\Throwable) {
             return null;
         }
-    }
-
-    private function brandFilter(): ?int
-    {
-        return $this->brandId > 0 && Brand::query()->whereKey($this->brandId)->exists()
-            ? $this->brandId
-            : null;
     }
 
     /**
@@ -105,7 +94,6 @@ class MonitoringOverview extends Component
         // week-aligned window instead of silently disagreeing (M14/M25).
         $from = $this->dateFilter($this->from)?->startOfWeek();
         $to = $this->dateFilter($this->to)?->endOfWeek();
-        $brandId = $this->brandFilter();
 
         // "Active seeding only" (spec 2026-07-17): resolve the enrolled
         // creator set ONCE per render. Cards gate on the boolean — an empty
@@ -150,10 +138,6 @@ class MonitoringOverview extends Component
             ->when($platform, fn ($q) => $q->where(fn ($w) => $w
                 ->whereHas('contentItem', fn ($c) => $c->where('platform', $platform->value))
                 ->orWhereHas('story', fn ($s) => $s->where('platform', $platform->value))))
-            ->when($brandId !== null, fn ($q) => $q->whereHas(
-                'campaign',
-                fn ($c) => $c->where('brand_id', $brandId),
-            ))
             ->when($this->activeSeedingOnly, fn ($q) => $q->whereHas(
                 'monitoredSubject',
                 fn ($subject) => $subject->whereIn('creator_id', $seedingCreatorIds),
@@ -174,13 +158,12 @@ class MonitoringOverview extends Component
             'mentionsByType' => $mentionsByType,
             'pendingReviews' => array_sum($reviewCounts),
             'reviewCounts' => $reviewCounts,
-            'mentionTotals' => $rollups->mentionTotals($from, $to, $brandId, $platform?->value),
+            'mentionTotals' => $rollups->mentionTotals($from, $to, null, $platform?->value),
             'creatorTotals' => $rollups->creatorTotals($from, $to, $seedingCreatorIds, $platform?->value),
             'seedingSetEmpty' => $seedingCreatorIds === [],
             'rollupsRefreshedAt' => $rollups->lastRefreshedAt(),
             'providerRows' => $providerRows,
             'platforms' => Platform::cases(),
-            'brands' => Brand::query()->orderBy('name')->get(['id', 'name']),
         ]);
     }
 }

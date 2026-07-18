@@ -11,15 +11,6 @@
             </x-form.select>
         </div>
         <div>
-            <x-form.label for="overview-brand">Brand</x-form.label>
-            <x-form.select id="overview-brand" wire:model.live="brandId">
-                <option value="0">All brands</option>
-                @foreach ($brands as $brand)
-                    <option value="{{ $brand->id }}">{{ $brand->name }}</option>
-                @endforeach
-            </x-form.select>
-        </div>
-        <div>
             <x-form.label for="overview-from">From</x-form.label>
             <x-form.input id="overview-from" type="date" wire:model.blur="from" />
         </div>

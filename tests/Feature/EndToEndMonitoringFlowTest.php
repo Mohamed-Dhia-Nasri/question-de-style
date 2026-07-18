@@ -28,6 +28,7 @@ use App\Shared\Enums\MentionType;
 use App\Shared\Enums\MetricTier;
 use App\Shared\Enums\MonitoredSubjectType;
 use App\Shared\Enums\Platform;
+use App\Shared\Enums\RecognitionType;
 use App\Shared\Enums\RoleName;
 use App\Shared\Enums\VerificationStatus;
 use App\Shared\ValueObjects\ConfidenceAssessment;
@@ -104,9 +105,15 @@ class EndToEndMonitoringFlowTest extends TestCase
         // 5. AI enrichment (SVC-EnrichmentAI) with a low-confidence
         //    recognition signal → the attribution stage yields an UNKNOWN
         //    mention at LOW confidence, AI_ASSESSED (DP-003).
+        //    Uses IMAGE_TEXT_OCR (not LOGO): the precision gate (Task 13)
+        //    drops unmatched/low-confidence LOGO detections as having no
+        //    attribution relevance, but a weak non-logo recognition still
+        //    carries evidence (just not enough to clear the review bar).
         RecognitionDetection::factory()->create([
             'content_item_id' => $content->id,
             'story_id' => null,
+            'recognition_type' => RecognitionType::ImageTextOcr,
+            'detected_text' => 'Maison Lumière',
             'detected_brand' => 'Maison Lumière',
             'assessment' => new ConfidenceAssessment(
                 value: 'Maison Lumière',

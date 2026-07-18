@@ -12,9 +12,11 @@ use App\Modules\Monitoring\Models\RecognitionDetection;
 use App\Modules\Monitoring\Models\Story;
 use App\Platform\Enrichment\Contracts\SeedingEvidenceSource;
 use App\Platform\Enrichment\Support\HumanPrecedence;
+use App\Platform\Enrichment\TextSignals\ContextualCueDetector;
 use App\Shared\Enums\ConfidenceLevel;
 use App\Shared\Enums\MentionType;
 use App\Shared\Enums\MonitoredSubjectType;
+use App\Shared\Enums\RecognitionType;
 use App\Shared\Enums\VerificationStatus;
 use App\Shared\ValueObjects\ConfidenceAssessment;
 use App\Shared\ValueObjects\Provenance;
@@ -218,10 +220,21 @@ class AttributionService
                 continue;
             }
 
+            // Precision gate: an UNMATCHED logo (brand not in the lexicon) or a
+            // low-confidence logo carries no attribution relevance.
+            if ($detection->recognition_type === RecognitionType::Logo
+                && (in_array('brand-lexicon:unmatched', $assessment->signals, true)
+                    || $assessment->confidenceLevel === ConfidenceLevel::Low
+                    || $assessment->confidenceLevel === ConfidenceLevel::Unknown)) {
+                continue;
+            }
+
             $recognitions[] = [
                 'type' => $detection->recognition_type->value,
                 'brand' => $detection->detected_brand,
                 'level' => $assessment->confidenceLevel,
+                'productId' => $detection->product_id,
+                'product' => $detection->detected_product,
             ];
         }
 
@@ -234,7 +247,10 @@ class AttributionService
             hashtagMatches: $hashtagMatches,
             ambiguousHashtags: $ambiguous,
             shipments: $this->seedingEvidence->forTarget($target),
-            paidPartnershipLabel: false,
+            paidPartnershipLabel: $target instanceof ContentItem ? $target->branded_content_label : null,
+            contextualCues: $target instanceof ContentItem
+                ? app(ContextualCueDetector::class)->detect($target->caption)
+                : [],
             publishedAt: $this->publicationDate($target),
         );
     }

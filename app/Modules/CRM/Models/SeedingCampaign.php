@@ -111,4 +111,16 @@ class SeedingCampaign extends Model
     {
         return $this->hasMany(DocumentAttachment::class);
     }
+
+    /** @return HasMany<Task, $this> */
+    public function tasks(): HasMany
+    {
+        return $this->hasMany(Task::class);
+    }
+
+    /** @return HasMany<CommunicationLog, $this> */
+    public function communicationLogs(): HasMany
+    {
+        return $this->hasMany(CommunicationLog::class);
+    }
 }

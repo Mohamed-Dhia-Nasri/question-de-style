@@ -6,6 +6,7 @@ use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\SeedingCampaign;
 use App\Shared\Authorization\PermissionsCatalog;
+use App\Shared\Enums\ShipmentStatus;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['web', 'auth', 'can:'.PermissionsCatalog::CRM_VIEW, 'subscribed'])
@@ -37,8 +38,17 @@ Route::middleware(['web', 'auth', 'can:'.PermissionsCatalog::CRM_VIEW, 'subscrib
             'campaign' => $campaign->load('brand.client')->loadCount(['creators', 'seedingCampaigns']),
         ]))->name('campaigns.show');
         Route::view('/seeding', 'crm.seeding')->name('seeding.index');
+        // Item 6a: the progress strip's sub-counts are computed live here
+        // from the Shipment table (never rollups, which lag) and are
+        // read-only display — the closure never writes posted/posted_at.
         Route::get('/seeding/{seedingCampaign}', fn (SeedingCampaign $seedingCampaign) => view('crm.seeding-detail', [
-            'seedingCampaign' => $seedingCampaign->load(['brand.client', 'campaign', 'product'])->loadCount(['creators', 'shipments']),
+            'seedingCampaign' => $seedingCampaign->load(['brand.client', 'campaign', 'product'])->loadCount([
+                'creators', 'shipments',
+                'shipments as shipped_count' => fn ($q) => $q->where(fn ($w) => $w->whereIn('status', [ShipmentStatus::Shipped, ShipmentStatus::InTransit, ShipmentStatus::Delivered])->orWhereNotNull('shipped_at')),
+                'shipments as delivered_count' => fn ($q) => $q->where(fn ($w) => $w->where('status', ShipmentStatus::Delivered)->orWhereNotNull('delivered_at')),
+                'shipments as posted_count' => fn ($q) => $q->where('posted', true),
+                'shipments as expected_posts_count' => fn ($q) => $q->where('posting_required', true),
+            ]),
         ]))->name('seeding.show');
 
         // Step 4 — the cross-influencer product results dashboard

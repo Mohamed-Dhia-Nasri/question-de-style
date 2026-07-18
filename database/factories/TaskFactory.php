@@ -33,6 +33,7 @@ class TaskFactory extends Factory
             'creator_id' => null,
             'campaign_id' => null,
             'reminder_sent_at' => null,
+            'seeding_campaign_id' => null,
         ];
     }
 }

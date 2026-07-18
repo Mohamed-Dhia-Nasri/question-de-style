@@ -177,6 +177,20 @@
                     @endif
                 </div>
 
+                {{-- Soft field→status nudge: a date entered ahead of the status.
+                     One tap lifts the status; the operator still saves the form. --}}
+                @php($statusHint = $this->statusHint())
+                @if ($statusHint)
+                    <x-ui.alert variant="info">
+                        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <span>This date is ahead of the current status.</span>
+                            <x-ui.button size="sm" wire:click="acceptStatusHint('{{ $statusHint['status'] }}')">
+                                Set status to {{ $statusHint['label'] }}?
+                            </x-ui.button>
+                        </div>
+                    </x-ui.alert>
+                @endif
+
                 @if ($this->showsTrackingFields() || $this->showsDeliveryFields())
                     <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
                         @if ($this->showsTrackingFields())

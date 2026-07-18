@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Modules\CRM\Livewire\Tasks\Concerns\PresentsTaskStatus;
 use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\Creator;
+use App\Modules\CRM\Models\SeedingCampaign;
 use App\Modules\CRM\Models\Task;
 use App\Shared\Audit\AuditLogger;
 use App\Shared\Enums\TaskStatus;
@@ -63,6 +64,8 @@ class TasksIndex extends Component
 
     public string $task_campaign_id = '';
 
+    public string $task_seeding_campaign_id = '';
+
     // --- delete confirmation state ---
     public ?int $confirmingDeleteId = null;
 
@@ -90,7 +93,7 @@ class TasksIndex extends Component
     {
         return $this->applySort(
             Task::query()
-                ->with(['assignee', 'creator', 'campaign'])
+                ->with(['assignee', 'creator', 'campaign', 'seedingCampaign'])
                 ->when($this->search !== '', function (Builder $query) {
                     $query->where('title', 'ilike', '%'.$this->search.'%');
                 })
@@ -173,6 +176,7 @@ class TasksIndex extends Component
         $this->task_due_at = $task->due_at?->format('Y-m-d\TH:i') ?? '';
         $this->task_creator_id = $task->creator_id !== null ? (string) $task->creator_id : '';
         $this->task_campaign_id = $task->campaign_id !== null ? (string) $task->campaign_id : '';
+        $this->task_seeding_campaign_id = $task->seeding_campaign_id !== null ? (string) $task->seeding_campaign_id : '';
         $this->showForm = true;
     }
 
@@ -186,6 +190,7 @@ class TasksIndex extends Component
             'task_due_at' => 'due date',
             'task_creator_id' => 'creator',
             'task_campaign_id' => 'campaign',
+            'task_seeding_campaign_id' => 'seeding run',
         ];
     }
 
@@ -204,6 +209,7 @@ class TasksIndex extends Component
             'task_due_at' => ['nullable', 'date'],
             'task_creator_id' => ['nullable', 'integer', TenantRule::exists('creators', 'id')],
             'task_campaign_id' => ['nullable', 'integer', TenantRule::exists('campaigns', 'id')],
+            'task_seeding_campaign_id' => ['nullable', 'integer', TenantRule::exists('seeding_campaigns', 'id')],
         ]);
 
         $previousStatus = $task?->status;
@@ -215,6 +221,7 @@ class TasksIndex extends Component
             'due_at' => ($validated['task_due_at'] ?? '') !== '' ? $validated['task_due_at'] : null,
             'creator_id' => ($validated['task_creator_id'] ?? '') !== '' ? (int) $validated['task_creator_id'] : null,
             'campaign_id' => ($validated['task_campaign_id'] ?? '') !== '' ? (int) $validated['task_campaign_id'] : null,
+            'seeding_campaign_id' => ($validated['task_seeding_campaign_id'] ?? '') !== '' ? (int) $validated['task_seeding_campaign_id'] : null,
         ];
 
         if ($editing) {
@@ -301,6 +308,7 @@ class TasksIndex extends Component
         $this->task_due_at = '';
         $this->task_creator_id = '';
         $this->task_campaign_id = '';
+        $this->task_seeding_campaign_id = '';
     }
 
     public function render(): View
@@ -316,6 +324,7 @@ class TasksIndex extends Component
             'users' => User::query()->orderBy('display_name')->get(),
             'creators' => Creator::query()->orderBy('display_name')->get(),
             'campaigns' => Campaign::query()->orderBy('name')->get(),
+            'seedingCampaigns' => SeedingCampaign::query()->orderBy('name')->get(),
         ]);
     }
 }

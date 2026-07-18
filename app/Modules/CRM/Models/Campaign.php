@@ -38,6 +38,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property CarbonImmutable|null $start_at
  * @property CarbonImmutable|null $end_at
  * @property MetricValue|null $spend
+ * @property string|null $objective
+ * @property array|null $markets
  */
 class Campaign extends Model
 {
@@ -53,6 +55,8 @@ class Campaign extends Model
         'start_at',
         'end_at',
         'spend',
+        'objective',
+        'markets',
     ];
 
     /** @return array<string, string> */
@@ -63,6 +67,7 @@ class Campaign extends Model
             'start_at' => 'immutable_datetime',
             'end_at' => 'immutable_datetime',
             'spend' => AsValueObject::class.':'.MetricValue::class,
+            'markets' => 'array',
         ];
     }
 

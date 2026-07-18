@@ -10,6 +10,7 @@ use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\SeedingCampaign;
 use App\Shared\Authorization\PermissionsCatalog;
+use App\Shared\Enums\RelationshipStatus;
 use App\Shared\Enums\RoleName;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -72,6 +73,34 @@ class SeedingRosterPickerTest extends TestCase
             'action' => 'seeding_campaign_creator.attached',
             'subject_id' => $run->id,
         ]);
+    }
+
+    public function test_a_blocklisted_candidate_is_skipped_at_attach(): void
+    {
+        $this->actingAsCrmStaff();
+        $run = $this->seedingForBrand('Aurelia Cosmetics');
+        $blocked = Creator::factory()->create([
+            'display_name' => 'Blocklisted Bea',
+            'relationship_status' => RelationshipStatus::Blocklisted,
+        ]);
+
+        // Still shown and selectable in the picker, flagged with its
+        // "do not contact" note…
+        Livewire::test(SeedingCreatorsPanel::class, ['seedingCampaign' => $run])
+            ->call('openPicker')
+            ->assertSee('Blocklisted Bea')
+            ->assertSee('do not contact or book')
+            ->assertSeeHtml('wire:key="picker-'.$blocked->id.'"')
+            // …but adding it skips it with a "do not contact" notice (item 5b
+            // flips F06 from flag-only to enforced on the seeding path too).
+            ->set('selectedCreatorIds', [(string) $blocked->id])
+            ->call('attachSelected')
+            ->assertDispatched(
+                'notify',
+                fn (string $event, array $params) => str_contains($params['message'], 'do not contact'),
+            );
+
+        $this->assertFalse($run->creators()->whereKey($blocked->id)->exists());
     }
 
     public function test_a_view_only_user_cannot_open_the_picker(): void

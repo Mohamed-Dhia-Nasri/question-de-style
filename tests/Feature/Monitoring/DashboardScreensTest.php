@@ -70,11 +70,12 @@ class DashboardScreensTest extends TestCase
             // Estimated reach now has a documented method (ADR-0022); no
             // rollups yet means an honest "not yet", never DEF-003 (that's
             // CONFIRMED-reach only, no longer surfaced on this page).
-            ->assertSee('No estimated reach in the rollups for this period yet', false)
+            ->assertSee('No estimated reach for the selected dates yet', false)
             ->assertSee('REQ-M1-006', false)
-            ->assertDontSee('DEF-003')
-            ->assertSee('DEF-005', false)       // comment analysis deferred
-            ->assertSee('DEF-006', false);      // open-web listening deferred
+            ->assertDontSee('DEF-003');
+        // The "Comment analysis" (DEF-005) and "Open-web listening" (DEF-006)
+        // deferred placeholder panels were removed from this overview at the
+        // user's request (2026-07-18); they are no longer surfaced here.
     }
 
     public function test_creators_index_searches_sorts_and_rejects_unknown_sort_columns(): void

@@ -2,10 +2,12 @@
 
 namespace App\Modules\CRM\Livewire\Campaigns;
 
+use App\Modules\CRM\Exceptions\CampaignBrandLocked;
 use App\Modules\CRM\Livewire\Concerns\WithInlineCreate;
 use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\Client;
+use App\Modules\CRM\Services\CampaignWriter;
 use App\Shared\Audit\AuditLogger;
 use App\Shared\Enums\CampaignStatus;
 use App\Shared\Enums\MetricTier;
@@ -17,6 +19,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
@@ -52,6 +55,11 @@ class CampaignsIndex extends Component
     public string $campaign_end_at = '';
 
     public string $campaign_spend = '';
+
+    public string $campaign_objective = '';
+
+    /** One market per line (ENT-Campaign.markets — list of string). */
+    public string $campaign_markets = '';
 
     // --- delete confirmation state ---
     public ?int $confirmingDeleteId = null;
@@ -124,6 +132,8 @@ class CampaignsIndex extends Component
         $this->campaign_start_at = $campaign->start_at?->format('Y-m-d\TH:i') ?? '';
         $this->campaign_end_at = $campaign->end_at?->format('Y-m-d\TH:i') ?? '';
         $this->campaign_spend = $campaign->spend !== null ? (string) $campaign->spend->amount : '';
+        $this->campaign_objective = $campaign->objective ?? '';
+        $this->campaign_markets = implode("\n", $campaign->markets ?? []);
         $this->showForm = true;
     }
 
@@ -137,6 +147,8 @@ class CampaignsIndex extends Component
             'campaign_start_at' => 'start date',
             'campaign_end_at' => 'end date',
             'campaign_spend' => 'spend',
+            'campaign_objective' => 'objective',
+            'campaign_markets' => 'markets',
         ], $this->inlineValidationAttributes());
     }
 
@@ -151,7 +163,7 @@ class CampaignsIndex extends Component
         $this->campaign_brand_id = (string) $id;
     }
 
-    public function save(AuditLogger $audit): void
+    public function save(AuditLogger $audit, CampaignWriter $writer): void
     {
         $editing = $this->editingCampaignId !== null;
         $campaign = $editing ? Campaign::findOrFail($this->editingCampaignId) : null;
@@ -170,6 +182,8 @@ class CampaignsIndex extends Component
         if (! $creating) {
             $rules['campaign_status'] = ['required', Rule::in(array_column(CampaignStatus::cases(), 'value'))];
             $rules['campaign_spend'] = ['nullable', 'numeric', 'min:0'];
+            $rules['campaign_objective'] = ['nullable', 'string', 'max:2000'];
+            $rules['campaign_markets'] = ['nullable', 'string', 'max:2000'];
         }
 
         $validated = $this->validate($rules);
@@ -179,8 +193,6 @@ class CampaignsIndex extends Component
             $validated['campaign_status'] = CampaignStatus::Draft->value;
             $validated['campaign_spend'] = '';
         }
-
-        $previousStatus = $campaign?->status;
 
         $attributes = [
             'name' => $validated['campaign_name'],
@@ -194,20 +206,24 @@ class CampaignsIndex extends Component
                 : null,
         ];
 
+        // ENT-Campaign writes route through the single sanctioned service
+        // (CampaignWriter): it houses the brand-coherence guard (F14) and the
+        // campaign.updated / campaign.status_changed audit events.
         if ($editing) {
-            $campaign->update($attributes);
+            $objective = trim($validated['campaign_objective'] ?? '');
+            $markets = $this->parseMarkets($validated['campaign_markets'] ?? '');
+            $attributes['objective'] = $objective !== '' ? $objective : null;
+            $attributes['markets'] = $markets !== [] ? $markets : null;
+
+            try {
+                $writer->updateCampaign($campaign, $attributes, $audit);
+            } catch (CampaignBrandLocked $e) {
+                // Block-and-tell: surface the coherence refusal on the brand
+                // field instead of silently rewriting the runs' brand_id.
+                throw ValidationException::withMessages(['campaign_brand_id' => $e->getMessage()]);
+            }
         } else {
-            $campaign = Campaign::create($attributes);
-        }
-
-        $audit->record($editing ? 'campaign.updated' : 'campaign.created', $campaign, ['name' => $campaign->name]);
-
-        // AC-M3-009: lifecycle transitions are recorded.
-        if ($editing && $previousStatus !== $campaign->status) {
-            $audit->record('campaign.status_changed', $campaign, [
-                'from' => $previousStatus->value,
-                'to' => $campaign->status->value,
-            ]);
+            $campaign = $writer->createCampaign($attributes, $audit);
         }
 
         $this->showForm = false;
@@ -279,6 +295,16 @@ class CampaignsIndex extends Component
 
     // -------------------------------------------------------------------------
 
+    /**
+     * One market per line, blanks dropped — mirrors BrandsIndex::parseLines.
+     *
+     * @return list<string>
+     */
+    private function parseMarkets(string $raw): array
+    {
+        return array_values(array_filter(array_map('trim', preg_split('/\R/', $raw) ?: [])));
+    }
+
     protected function resetForm(): void
     {
         $this->resetValidation();
@@ -289,6 +315,8 @@ class CampaignsIndex extends Component
         $this->campaign_start_at = '';
         $this->campaign_end_at = '';
         $this->campaign_spend = '';
+        $this->campaign_objective = '';
+        $this->campaign_markets = '';
     }
 
     public function render(): View

@@ -660,3 +660,26 @@ Three long-flagged open decisions needed an owner call, gathered 2026-07-17.
 - ConfidenceScore/config comments drop the "flagged missing decision" wording and cite this ADR.
 - The glossary PAID row gains the inert-compatibility note; AC-M1-002/003 stand unchanged.
 - Sentiment surfaces keep rendering "unavailable" honestly until a model ADR supersedes point 3.
+
+## ADR-0027 — CRM lifecycle & restriction hardening (Stage D)
+
+**Context.**
+
+The CRM UX redesign audit (`docs/superpowers/specs/2026-07-16-crm-ux-redesign-audit-and-plan.md`) surfaced data-model and enforcement gaps: brand no-go lists matched a brand's canonical name only (F06), the BLOCKLISTED relationship status blocked nothing (F06), a campaign's brand could be changed out from under its seeding runs and silently corrupt their denormalized `brand_id` (F14), tasks and communication logs could not anchor to a seeding run (F18), campaigns had no brief, and statuses were free-pick labels with no progress or next-step guidance (F07/F27/F24). Stage D closes these. Three of the changes alter behaviour that existed before, so they are recorded here as a release note. (The F03 seeding-roster/shipment self-heal shipped earlier in Stage A and is unchanged.)
+
+**Decision.**
+
+1. **Brand no-go matching now folds a brand's aliases**, not just its canonical name. `BrandRestrictionGuard` builds one folded needle set (name + `brands.aliases`, `mb_strtolower(trim(...))`) shared by the throwing path and the bulk matchers, so they cannot diverge. The typed-name path used by the campaign wizard (where the brand may not exist yet) stays name-only by design. Case-folding stays in PHP, never SQL `lower()`.
+2. **The BLOCKLISTED relationship status is now enforced at attach**, where it was previously display-only. A creator marked "do not contact or book" is skipped when added through a bulk roster path (campaign/seeding picker, copy-campaign-roster, the campaign wizard) with a distinct notice, and hard-blocked as a shipment recipient. The soft-skip / hard-block asymmetry mirrors the existing brand-restriction handling.
+3. **A campaign's brand can no longer be changed while it has seeding runs.** The rule lives in a new `CampaignWriter` service (the choke point both the edit form and the wizard write through), which throws `CampaignBrandLocked` — surfaced as a validation error naming the run count. Block-and-tell, never cascade: child `brand_id`s are never auto-rewritten; the operator moves or re-brands the runs first.
+4. **Additive, zero-downtime schema** (nullable): `tasks.seeding_campaign_id`, `communication_logs.seeding_campaign_id` (both with composite `(col, tenant_id) → seeding_campaigns(id, tenant_id)` FKs per ADR-0019), and `campaigns.objective` (text) + `campaigns.markets` (jsonb). No data migration.
+5. **Statuses gain read-only progress and one-click suggestions, never automation.** A seeding run shows a live progress strip (roster/shipped/delivered/posted, computed from the Shipment table, not rollups). Campaign and seeding detail pages offer at most one next-step prompt (mark Planned/start/complete; close a fully-delivered run), each a confirmed one-click action behind `crm.manage`; logging an outbound message to a new contact suggests marking them Contacted; entering a shipment date ahead of its status suggests advancing it. Every prompt is optional and re-checks its trigger before acting.
+
+**Status.** APPROVED ([`ENUM-DocStatus`](../00-meta/03-glossary.md#enum-docstatus)).
+
+**Consequences.**
+
+- **Release note (behaviour changes):** (1) attaches that previously succeeded only because a creator's no-go list named an *alias* rather than the canonical brand name are now blocked; (2) blocklisted creators that used to attach are now skipped/blocked; (3) editing a campaign's brand now fails while it has seeding runs. All three are intended corrections of audit-flagged defects, not regressions.
+- No new permission classes; new writes stay behind `crm.manage`, reads behind `crm.view`.
+- Two tests that asserted the old "blocklisted is flagged but still selectable" behaviour were rewritten to assert the skip; the campaign-brand-change guard added its own regression coverage.
+- The comms-log write path still records no audit event (a pre-existing gap, unchanged here) — flagged for a later hardening pass.

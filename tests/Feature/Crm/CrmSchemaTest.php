@@ -55,9 +55,9 @@ class CrmSchemaTest extends TestCase
                 'delivered_at', 'product_id', 'quantity', 'product_value_at_ship', 'posting_required',
                 'posted', 'posted_at',
             ],
-            'communication_logs' => ['id', 'creator_id', 'campaign_id', 'channel', 'direction', 'summary', 'occurred_at'],
+            'communication_logs' => ['id', 'creator_id', 'campaign_id', 'seeding_campaign_id', 'channel', 'direction', 'summary', 'occurred_at'],
             'document_attachments' => ['id', 'creator_id', 'campaign_id', 'seeding_campaign_id', 'file_name', 'storage_url', 'uploaded_at'],
-            'tasks' => ['id', 'title', 'status', 'assignee_user_id', 'due_at', 'creator_id', 'campaign_id', 'reminder_sent_at'],
+            'tasks' => ['id', 'title', 'status', 'assignee_user_id', 'due_at', 'creator_id', 'campaign_id', 'reminder_sent_at', 'seeding_campaign_id'],
             'campaign_creator' => ['id', 'campaign_id', 'creator_id'],
             'seeding_campaign_creator' => ['id', 'seeding_campaign_id', 'creator_id'],
             'shipment_resulting_content' => ['id', 'shipment_id', 'content_item_id'],
@@ -70,8 +70,9 @@ class CrmSchemaTest extends TestCase
             );
         }
 
-        // campaigns is P0-owned, but its Step-4 spend column (D1) lives here too.
-        $this->assertTrue(Schema::hasColumn('campaigns', 'spend'));
+        // campaigns is P0-owned, but its Step-4 spend column (D1) and Stage D
+        // brief columns (objective, markets) live here too.
+        $this->assertTrue(Schema::hasColumns('campaigns', ['spend', 'objective', 'markets']));
     }
 
     public function test_contacts_has_no_soft_delete_column(): void

@@ -12,6 +12,23 @@
         @endcan
     </div>
 
+    {{-- Soft one-tap nudge after an outbound message to a creator with no
+         relationship stage yet. Suggestion only — never automatic. --}}
+    @if ($suggestContacted)
+        <div class="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
+            <x-ui.alert variant="info">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <span>You logged a message to {{ $creator->display_name }}. Mark them as Contacted?</span>
+                    <div class="flex shrink-0 items-center gap-2">
+                        <x-ui.button size="sm" wire:click="markContacted" wire:target="markContacted"
+                            wire:loading.attr="disabled">Mark as Contacted</x-ui.button>
+                        <x-ui.button size="sm" variant="outline" wire:click="dismissContacted">Not now</x-ui.button>
+                    </div>
+                </div>
+            </x-ui.alert>
+        </div>
+    @endif
+
     @if ($logs->isEmpty())
         <x-states.empty title="No conversations logged yet">
             Keep the relationship history — outreach, replies, calls.
@@ -101,6 +118,32 @@
                     <x-form.textarea id="log_summary" wire:model="log_summary" rows="3"
                         :error="$errors->has('log_summary')" placeholder="What happened" />
                     <x-form.error for="log_summary" />
+                </div>
+
+                <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                    <div>
+                        <x-form.label for="log_campaign_id">Campaign (optional)</x-form.label>
+                        <x-form.select id="log_campaign_id" wire:model="log_campaign_id"
+                            :error="$errors->has('log_campaign_id')">
+                            <option value="">No campaign</option>
+                            @foreach ($campaigns as $campaignOption)
+                                <option value="{{ $campaignOption->id }}">{{ $campaignOption->name }}</option>
+                            @endforeach
+                        </x-form.select>
+                        <x-form.error for="log_campaign_id" />
+                    </div>
+
+                    <div>
+                        <x-form.label for="log_seeding_campaign_id">Seeding run (optional)</x-form.label>
+                        <x-form.select id="log_seeding_campaign_id" wire:model="log_seeding_campaign_id"
+                            :error="$errors->has('log_seeding_campaign_id')">
+                            <option value="">No seeding run</option>
+                            @foreach ($seedingRuns as $seedingRunOption)
+                                <option value="{{ $seedingRunOption->id }}">{{ $seedingRunOption->name }}</option>
+                            @endforeach
+                        </x-form.select>
+                        <x-form.error for="log_seeding_campaign_id" />
+                    </div>
                 </div>
             </form>
 

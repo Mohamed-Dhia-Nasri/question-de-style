@@ -4,6 +4,7 @@ namespace App\Modules\CRM\Livewire\Creators;
 
 use App\Modules\CRM\Models\BrandPreference;
 use App\Modules\CRM\Models\Creator;
+use App\Modules\CRM\Services\BrandRestrictionGuard;
 use Illuminate\Contracts\View\View;
 use Livewire\Component;
 
@@ -73,7 +74,7 @@ class BrandPreferencesPanel extends Component
         ];
     }
 
-    public function save(): void
+    public function save(BrandRestrictionGuard $guard): void
     {
         $editing = $this->editingPreferenceId !== null;
         $preference = $editing ? $this->creator->brandPreferences()->findOrFail($this->editingPreferenceId) : null;
@@ -86,9 +87,15 @@ class BrandPreferencesPanel extends Component
             'preference_notes' => ['nullable', 'string', 'max:5000'],
         ]);
 
+        // Captured BEFORE persisting — item 5c needs the pre-save state to
+        // tell which restricted names are newly added, never auto-detaching
+        // any roster the creator already sits on.
+        $oldRestricted = $preference->restricted_brands ?? [];
+        $newRestricted = $this->parseBrandList($validated['preference_restricted'] ?? '');
+
         $attributes = [
             'preferred_brands' => $this->parseBrandList($validated['preference_preferred'] ?? ''),
-            'restricted_brands' => $this->parseBrandList($validated['preference_restricted'] ?? ''),
+            'restricted_brands' => $newRestricted,
             'notes' => ($validated['preference_notes'] ?? '') !== '' ? $validated['preference_notes'] : null,
         ];
 
@@ -101,7 +108,15 @@ class BrandPreferencesPanel extends Component
         $this->creator->refresh();
         $this->showForm = false;
         $this->resetForm();
-        $this->dispatch('notify', type: 'success', message: $editing ? 'Brand preference updated.' : 'Brand preference added.');
+
+        $addedNames = $this->newlyAddedFoldedNames($newRestricted, $oldRestricted);
+        $matchedRosterNames = $addedNames === [] ? [] : $this->rostersMatchingAddedNames($guard, $addedNames);
+
+        if ($matchedRosterNames !== []) {
+            $this->dispatch('notify', type: 'error', message: $this->rosterWarningMessage($matchedRosterNames));
+        } else {
+            $this->dispatch('notify', type: 'success', message: $editing ? 'Brand preference updated.' : 'Brand preference added.');
+        }
     }
 
     public function cancelForm(): void
@@ -149,6 +164,77 @@ class BrandPreferencesPanel extends Component
     protected function parseBrandList(string $raw): array
     {
         return array_values(array_filter(array_map('trim', preg_split('/\R/', $raw) ?: [])));
+    }
+
+    /**
+     * Item 5c: which restricted names are NEW in this save, folded the
+     * same way as BrandRestrictionGuard (mb_strtolower(trim())) so the
+     * roster re-check cannot diverge from the enforcement paths.
+     *
+     * @param  list<string>  $new
+     * @param  list<string>  $old
+     * @return list<string> folded, de-duplicated, newly-added names
+     */
+    protected function newlyAddedFoldedNames(array $new, array $old): array
+    {
+        $fold = fn (string $name): string => mb_strtolower(trim($name));
+
+        $oldFolded = array_map($fold, $old);
+
+        return collect($new)
+            ->map($fold)
+            ->filter()
+            ->unique()
+            ->reject(fn (string $name) => in_array($name, $oldFolded, true))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Item 5c: which of the creator's existing rosters (campaigns/seeding
+     * runs) are for a brand that now matches a newly-added restriction —
+     * by name OR alias. Read-only: never detaches anything, only reports.
+     *
+     * @param  list<string>  $addedFoldedNames
+     * @return list<string> roster names, in first-seen order
+     */
+    protected function rostersMatchingAddedNames(BrandRestrictionGuard $guard, array $addedFoldedNames): array
+    {
+        $matches = [];
+
+        foreach ($this->creator->campaigns()->with('brand')->get() as $campaign) {
+            if ($guard->matchesAnyNeedle($campaign->brand, $addedFoldedNames)) {
+                $matches[] = $campaign->name;
+            }
+        }
+
+        foreach ($this->creator->seedingCampaigns()->with('brand')->get() as $seedingCampaign) {
+            if ($guard->matchesAnyNeedle($seedingCampaign->brand, $addedFoldedNames)) {
+                $matches[] = $seedingCampaign->name;
+            }
+        }
+
+        return $matches;
+    }
+
+    /**
+     * @param  list<string>  $rosterNames
+     */
+    protected function rosterWarningMessage(array $rosterNames): string
+    {
+        $shown = array_slice($rosterNames, 0, 3);
+        $remaining = count($rosterNames) - count($shown);
+
+        $list = implode(', ', $shown);
+        if ($remaining > 0) {
+            $list .= " and {$remaining} more";
+        }
+
+        return sprintf(
+            'Heads up: this creator is already on %d roster(s) for a brand you just restricted: %s.',
+            count($rosterNames),
+            $list
+        );
     }
 
     protected function resetForm(): void

@@ -157,7 +157,7 @@ class MonitoringSeedingFilterTest extends TestCase
             // Reach/EMV: message only, no brand-wide number, distinct from
             // the generic rollup-unavailable copy.
             ->assertSee('Aggregated by brand — not available for the seeding filter.')
-            ->assertDontSee('No estimated reach in the rollups for this period yet');
+            ->assertDontSee('No estimated reach for the selected dates yet');
     }
 
     public function test_empty_set_notice_shows_only_when_toggled_on_with_no_active_seeding(): void

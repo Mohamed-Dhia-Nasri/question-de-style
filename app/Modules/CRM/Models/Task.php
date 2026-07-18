@@ -33,6 +33,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int|null $creator_id
  * @property int|null $campaign_id
  * @property CarbonImmutable|null $reminder_sent_at
+ * @property int|null $seeding_campaign_id
  */
 class Task extends Model
 {
@@ -49,6 +50,7 @@ class Task extends Model
         'creator_id',
         'campaign_id',
         'reminder_sent_at',
+        'seeding_campaign_id',
     ];
 
     /** @return array<string, string> */
@@ -77,5 +79,11 @@ class Task extends Model
     public function campaign(): BelongsTo
     {
         return $this->belongsTo(Campaign::class);
+    }
+
+    /** @return BelongsTo<SeedingCampaign, $this> */
+    public function seedingCampaign(): BelongsTo
+    {
+        return $this->belongsTo(SeedingCampaign::class);
     }
 }

@@ -35,6 +35,8 @@ class CampaignFactory extends Factory
             'start_at' => now()->subDays(14),
             'end_at' => now()->addDays(14),
             'spend' => null,
+            'objective' => null,
+            'markets' => null,
         ];
     }
 }

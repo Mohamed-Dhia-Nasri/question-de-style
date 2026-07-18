@@ -9,6 +9,7 @@ use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\Product;
 use App\Modules\CRM\Models\SeedingCampaign;
 use App\Modules\CRM\Services\BrandRestrictionGuard;
+use App\Modules\CRM\Services\CampaignWriter;
 use App\Modules\CRM\Services\CreatorWriter;
 use App\Shared\Audit\AuditLogger;
 use App\Shared\Enums\CampaignStatus;
@@ -360,14 +361,17 @@ class CampaignWizard extends Component
                 )
                 : Brand::query()->where('client_id', $client->id)->findOrFail((int) $this->wizard_brand_id);
 
-            $campaign = Campaign::create([
+            // Through the single sanctioned write path (CampaignWriter). It
+            // opens no transaction of its own, so it composes inside this one;
+            // the brand-coherence guard (F14) only fires on a brand *change*,
+            // and a wizard-created campaign is coherent by construction.
+            $campaign = app(CampaignWriter::class)->createCampaign([
                 'brand_id' => $brand->id,
                 'name' => $this->campaign_name,
                 'status' => CampaignStatus::Draft,
                 'start_at' => $this->campaign_start_at !== '' ? $this->campaign_start_at : null,
                 'end_at' => $this->campaign_end_at !== '' ? $this->campaign_end_at : null,
-            ]);
-            $audit->record('campaign.created', $campaign, ['name' => $campaign->name]);
+            ], $audit);
 
             $run = null;
             if ($withExtras && $this->with_seeding) {
@@ -385,9 +389,14 @@ class CampaignWizard extends Component
             if ($withExtras && $this->selected_creator_ids !== []) {
                 $ids = array_values(array_unique(array_map('intval', $this->selected_creator_ids)));
                 // Brand exists by now, so the Brand overload is safe here.
+                // A "do not contact or book" creator is skipped just like a
+                // restricted one; both feed the single skipped-names list the
+                // Done screen reports.
                 $restricted = $guard->restrictedCreatorIds($ids, $brand);
-                $allowed = array_values(array_diff($ids, $restricted));
-                $this->skippedCreators = Creator::query()->whereIn('id', $restricted)->pluck('display_name')->all();
+                $blocklisted = $guard->blocklistedCreatorIds($ids);
+                $skipped = array_values(array_unique(array_merge($restricted, $blocklisted)));
+                $allowed = array_values(array_diff($ids, $skipped));
+                $this->skippedCreators = Creator::query()->whereIn('id', $skipped)->pluck('display_name')->all();
 
                 if ($allowed !== []) {
                     $attached = $campaign->creators()->syncWithoutDetaching($allowed);
@@ -447,6 +456,7 @@ class CampaignWizard extends Component
         // creators step — never run the queries on the other steps.
         $candidates = new Collection;
         $restrictedIds = [];
+        $blocklistedIds = [];
 
         if ($this->step === 4) {
             $candidates = Creator::query()
@@ -463,13 +473,26 @@ class CampaignWizard extends Component
                 ->limit(51)
                 ->get();
 
+            $candidateIds = $candidates->pluck('id')->map(fn ($id) => (int) $id)->all();
+
+            // An existing brand carries aliases, so fold them exactly as
+            // commit() does (the Brand overload) — a restriction keyed on an
+            // alias must flag here too. The typed-name matcher stays only for
+            // the new-brand case, where the brand may not exist yet.
             $brandName = $this->currentBrandName();
-            $restrictedIds = $brandName !== ''
-                ? $guard->restrictedCreatorIdsForName(
-                    $candidates->pluck('id')->map(fn ($id) => (int) $id)->all(),
-                    $brandName
-                )
-                : [];
+            $existingBrand = $selectedBrandId !== null
+                ? Brand::query()->whereKey($selectedBrandId)->first()
+                : null;
+
+            if ($existingBrand !== null) {
+                $restrictedIds = $guard->restrictedCreatorIds($candidateIds, $existingBrand);
+            } else {
+                $restrictedIds = $brandName !== ''
+                    ? $guard->restrictedCreatorIdsForName($candidateIds, $brandName)
+                    : [];
+            }
+
+            $blocklistedIds = $guard->blocklistedCreatorIds($candidateIds);
         }
 
         return view('livewire.crm.campaign-wizard', [
@@ -478,6 +501,7 @@ class CampaignWizard extends Component
             'products' => $products,
             'candidates' => $candidates,
             'restrictedIds' => $restrictedIds,
+            'blocklistedIds' => $blocklistedIds,
             'countries' => Country::cases(),
             'seedingTypes' => SeedingType::cases(),
             'typeDescriptions' => collect(SeedingType::cases())

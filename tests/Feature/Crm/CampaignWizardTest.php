@@ -13,6 +13,7 @@ use App\Modules\CRM\Models\SeedingCampaign;
 use App\Modules\Monitoring\Models\MonitoredSubject;
 use App\Shared\Authorization\PermissionsCatalog;
 use App\Shared\Enums\CampaignStatus;
+use App\Shared\Enums\RelationshipStatus;
 use App\Shared\Enums\RoleName;
 use App\Shared\Enums\SeedingType;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -164,6 +165,49 @@ class CampaignWizardTest extends TestCase
             ->call('next')
             ->assertSet('step', 4)
             ->assertSee('no-go');
+    }
+
+    public function test_a_blocklisted_candidate_shows_the_do_not_contact_warning_on_the_creators_step(): void
+    {
+        $this->actingAsCrmStaff();
+        Creator::factory()->create([
+            'display_name' => 'Nora NoContact',
+            'relationship_status' => RelationshipStatus::Blocklisted,
+        ]);
+
+        Livewire::test(CampaignWizard::class)
+            ->set('client_mode', 'new')->set('new_client_name', 'Brückner GmbH')
+            ->set('brand_mode', 'new')->set('new_brand_name', 'Atelier Nord')
+            ->call('next')
+            ->set('campaign_name', 'Creator Week')->call('next')
+            ->call('next')
+            ->assertSet('step', 4)
+            ->assertSee('do not contact');
+    }
+
+    public function test_an_existing_brand_alias_match_flags_a_restricted_candidate_at_step_four(): void
+    {
+        $this->actingAsCrmStaff();
+        $client = Client::factory()->create();
+        // The restriction is keyed on an ALIAS, not the canonical name — so a
+        // name-only match would miss it. Step 4 must fold aliases exactly as
+        // commit() does (the Brand overload).
+        $brand = Brand::factory()->create([
+            'client_id' => $client->id,
+            'name' => 'Aurelia Cosmetics',
+            'aliases' => ['Aurelia'],
+        ]);
+        $creator = Creator::factory()->create(['display_name' => 'Nora NoGo']);
+        BrandPreference::factory()->create(['creator_id' => $creator->id, 'restricted_brands' => ['Aurelia']]);
+
+        Livewire::test(CampaignWizard::class)
+            ->set('client_mode', 'existing')->set('wizard_client_id', (string) $client->id)
+            ->set('brand_mode', 'existing')->set('wizard_brand_id', (string) $brand->id)
+            ->call('next')
+            ->set('campaign_name', 'Creator Week')->call('next')
+            ->set('with_seeding', false)->call('next')
+            ->assertSet('step', 4)
+            ->assertSee('On their no-go list for Aurelia Cosmetics');
     }
 
     public function test_creating_a_creator_inline_on_the_creators_step_enrolls_preselects_and_attaches_on_finish(): void

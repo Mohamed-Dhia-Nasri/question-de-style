@@ -731,7 +731,9 @@ class BrandLexicon
         $n = \Normalizer::normalize($s, \Normalizer::FORM_KD);
         $n = is_string($n) ? $n : $s;
 
-        return mb_strtolower(preg_replace('/\p{Mn}+/u', '', $n) ?? $n);
+        // Strip combining marks (é→e) AND apostrophes (straight U+0027 /
+        // curly U+2019) so "L'Oréal", "LOréal" and "loreal" all fold equal.
+        return mb_strtolower(preg_replace('/[\p{Mn}\x{2019}\x{0027}]+/u', '', $n) ?? $n);
     }
 
     /** @return array<string, string> */
@@ -979,7 +981,9 @@ final class ContextualCueDetector
         $n = \Normalizer::normalize($s, \Normalizer::FORM_KD);
         $n = is_string($n) ? $n : $s;
 
-        return mb_strtolower(preg_replace('/\p{Mn}+/u', '', $n) ?? $n);
+        // Strip combining marks (é→e) AND apostrophes (straight U+0027 /
+        // curly U+2019) so "L'Oréal", "LOréal" and "loreal" all fold equal.
+        return mb_strtolower(preg_replace('/[\p{Mn}\x{2019}\x{0027}]+/u', '', $n) ?? $n);
     }
 }
 ```
@@ -1337,7 +1341,9 @@ final class ProductResolver
         $n = \Normalizer::normalize($s, \Normalizer::FORM_KD);
         $n = is_string($n) ? $n : $s;
 
-        return mb_strtolower(preg_replace('/\p{Mn}+/u', '', $n) ?? $n);
+        // Strip combining marks (é→e) AND apostrophes (straight U+0027 /
+        // curly U+2019) so "L'Oréal", "LOréal" and "loreal" all fold equal.
+        return mb_strtolower(preg_replace('/[\p{Mn}\x{2019}\x{0027}]+/u', '', $n) ?? $n);
     }
 }
 ```

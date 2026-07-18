@@ -132,6 +132,12 @@ class SeededContentLinker
         $assessment = $mention->classification;
 
         if ($assessment->verificationStatus === VerificationStatus::AiAssessed) {
+            // Brand-only (product-unconfirmed) SEEDED stays for human review;
+            // never auto-link a shipment on brand match alone.
+            if (in_array('product-unconfirmed', $assessment->signals, true)) {
+                return false;
+            }
+
             return in_array($assessment->confidenceLevel, [ConfidenceLevel::High, ConfidenceLevel::Medium], true);
         }
 

@@ -376,6 +376,34 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | AI budget governance (visual matching sub-project C, spec §10 — D reuses)
+    |--------------------------------------------------------------------------
+    | Capability-keyed spend budgets enforced by AiBudgetGuard: per-post,
+    | tenant daily/monthly (per-tenant overrides in tenant_ai_quotas, NULL
+    | column → these defaults), global daily/monthly with HARD variants.
+    | read_only is the emergency-stop default; the cached qds:ai-read-only
+    | flag wins over it either way.
+    */
+    'ai_budget' => [
+        'read_only' => (bool) env('QDS_AI_READ_ONLY', false),
+        'alert_thresholds' => [50, 80, 95, 100],
+        'capabilities' => [
+            'embedding' => [
+                'price_micro_usd_per_unit' => (int) env('QDS_AI_EMBEDDING_PRICE_MICRO_USD', 120), // $0.00012/image (verified 2026-07-19)
+                'per_post_units' => (int) env('QDS_AI_EMBEDDING_PER_POST', 12),
+                'tenant_daily_units' => (int) env('QDS_AI_EMBEDDING_TENANT_DAILY', 2000),
+                'tenant_monthly_units' => (int) env('QDS_AI_EMBEDDING_TENANT_MONTHLY', 40000),
+                'global_daily_units' => (int) env('QDS_AI_EMBEDDING_GLOBAL_DAILY', 50000),
+                'global_daily_hard_units' => (int) env('QDS_AI_EMBEDDING_GLOBAL_DAILY_HARD', 100000),
+                'global_monthly_units' => (int) env('QDS_AI_EMBEDDING_GLOBAL_MONTHLY', 1000000),
+                'global_monthly_hard_units' => (int) env('QDS_AI_EMBEDDING_GLOBAL_MONTHLY_HARD', 2000000),
+            ],
+            // 'vlm_verification' => reserved for sub-project D
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | SVC-Analytics (ADR-0010, amended by ADR-0013)
     |--------------------------------------------------------------------------
     | Scheduled rollup refresh (materialized views / rollup tables) driven by

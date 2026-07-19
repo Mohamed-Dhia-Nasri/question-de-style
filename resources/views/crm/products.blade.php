@@ -6,4 +6,5 @@
     ]" />
 
     @livewire('crm.products-index')
+    @livewire('crm.product-photos')
 </x-layouts.app>

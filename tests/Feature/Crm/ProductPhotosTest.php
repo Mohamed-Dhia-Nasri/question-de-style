@@ -117,4 +117,107 @@ class ProductPhotosTest extends TestCase
 
         $this->get($signed)->assertForbidden();
     }
+
+    public function test_upload_stores_the_blob_row_and_audit_event(): void
+    {
+        $staff = $this->actingAsCrmStaff();
+        $product = Product::factory()->create();
+
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('upload', UploadedFile::fake()->image('front.jpg', 40, 40))
+            ->set('view_label', 'front')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $photo = ProductReferencePhoto::query()->where('product_id', $product->id)->firstOrFail();
+
+        // Spec §4.1: tenant-pathed private blob, sha256 checksum,
+        // best-effort dimensions, uploader identity on the row.
+        $this->assertStringStartsWith("tenants/{$photo->tenant_id}/product-photos/{$product->id}/", $photo->storage_path);
+        Storage::disk((string) $photo->storage_disk)->assertExists($photo->storage_path);
+        $this->assertSame('front', $photo->view_label?->value);
+        $this->assertSame(
+            hash('sha256', (string) Storage::disk((string) $photo->storage_disk)->get($photo->storage_path)),
+            $photo->checksum,
+        );
+        $this->assertSame(40, $photo->width);
+        $this->assertSame(40, $photo->height);
+        $this->assertSame($staff->id, $photo->uploaded_by);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'product.photo_added', 'subject_id' => $photo->id]);
+    }
+
+    public function test_wrong_type_and_oversized_uploads_are_refused(): void
+    {
+        $this->actingAsCrmStaff();
+        $product = Product::factory()->create();
+
+        // Not an accepted image type (jpg/png/webp only in v1, spec §4.1).
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('upload', UploadedFile::fake()->create('brief.pdf', 12))
+            ->call('save')
+            ->assertHasErrors(['upload']);
+
+        // Above the 10 MB cap (max:10240 is kilobytes).
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('upload', UploadedFile::fake()->create('huge.jpg', 10_241))
+            ->call('save')
+            ->assertHasErrors(['upload']);
+
+        $this->assertDatabaseCount('product_reference_photos', 0);
+    }
+
+    public function test_the_photo_cap_is_enforced_server_side(): void
+    {
+        $this->actingAsCrmStaff();
+        $product = Product::factory()->create();
+        config()->set('qds.enrichment.visual_match.photo_cap', 2);
+
+        $this->makeStoredPhoto($product);
+        $this->makeStoredPhoto($product);
+
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('upload', UploadedFile::fake()->image('side.jpg', 40, 40))
+            ->call('save')
+            ->assertHasErrors(['upload']);
+
+        $this->assertSame(2, ProductReferencePhoto::query()->where('product_id', $product->id)->count());
+    }
+
+    public function test_upload_queues_the_embed_job_only_when_the_capability_can_spend(): void
+    {
+        Queue::fake();
+        $this->actingAsCrmStaff();
+        $product = Product::factory()->create();
+
+        // Switch off (default): stored for later — qds:embed-product-photos
+        // picks it up; no job, no spend.
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('upload', UploadedFile::fake()->image('front.jpg', 40, 40))
+            ->call('save')
+            ->assertHasNoErrors();
+        Queue::assertNothingPushed();
+
+        // Switch on + configured provider: embed via the queue.
+        config()->set('qds.enrichment.visual_match.enabled', true);
+        $this->app->instance(EmbeddingProvider::class, new FakeEmbeddingProvider);
+
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('upload', UploadedFile::fake()->image('back.jpg', 40, 40))
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $expected = ProductReferencePhoto::query()
+            ->where('product_id', $product->id)->orderByDesc('id')->firstOrFail();
+
+        Queue::assertPushed(
+            EmbedProductPhotoJob::class,
+            fn (EmbedProductPhotoJob $job): bool => $job->photoId === $expected->id && $job->queue === 'enrichment',
+        );
+    }
 }

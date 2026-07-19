@@ -26,6 +26,7 @@ use App\Modules\CRM\Livewire\Creators\ParticipationPanel;
 use App\Modules\CRM\Livewire\Creators\PlatformAccountsPanel;
 use App\Modules\CRM\Livewire\Documents\DocumentsPanel;
 use App\Modules\CRM\Livewire\Overview\CrmOverview;
+use App\Modules\CRM\Livewire\Products\ProductPhotos;
 use App\Modules\CRM\Livewire\Products\ProductsIndex;
 use App\Modules\CRM\Livewire\Results\CampaignResultsPanel;
 use App\Modules\CRM\Livewire\Results\SeedingResultsDashboard;
@@ -136,6 +137,9 @@ class CrmServiceProvider extends ServiceProvider
         Livewire::component('crm.brands-index', BrandsIndex::class);
         Livewire::component('crm.brand-detail', BrandDetail::class);
         Livewire::component('crm.products-index', ProductsIndex::class);
+
+        // Sub-project C (spec §6): reference-photo management modal.
+        Livewire::component('crm.product-photos', ProductPhotos::class);
         Livewire::component('crm.campaigns-index', CampaignsIndex::class);
         Livewire::component('crm.campaign-creators', CampaignCreatorsPanel::class);
         Livewire::component('crm.campaign-status-actions', CampaignStatusActions::class);

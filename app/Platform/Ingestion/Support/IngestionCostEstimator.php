@@ -55,10 +55,24 @@ class IngestionCostEstimator
 
     private const SPEECH_PER_MINUTE = 0.024;
 
+    /**
+     * Google Gemini Embedding 2 list price per image (USD) — verified
+     * against official pricing 2026-07-19 (visual-matching spec §18):
+     * $0.00012 per image, no output charge.
+     */
+    private const EMBEDDING_PER_IMAGE = 0.00012;
+
     /** Per-service table assumptions: fresh items enriched and video minutes analyzed per account per month. */
     private const ENRICHED_ITEMS_PER_ACCOUNT_MONTH = 20;
 
     private const VIDEO_MINUTES_PER_ACCOUNT_MONTH = 4.0;
+
+    /**
+     * ESTIMATE: billable frame embeddings per enriched item — the
+     * 12-frame budget minus typical quality-filter, dedup, and
+     * keyframe-cache savings. Real spend shows on /monitoring/operations.
+     */
+    private const EMBEDDED_FRAMES_PER_ITEM = 6;
 
     /**
      * Current roster composition, straight from the database.
@@ -231,6 +245,8 @@ class IngestionCostEstimator
         $videoOn = $enrichmentOn && (string) config('services.google_video_intelligence.api_key') !== '';
         $speechOn = $enrichmentOn && (string) config('services.google_speech.api_key') !== '';
         $videoMinutes = min($allAccounts * self::VIDEO_MINUTES_PER_ACCOUNT_MONTH, $sweepCeiling * self::VIDEO_MINUTES_PER_ACCOUNT_MONTH / max(1, self::ENRICHED_ITEMS_PER_ACCOUNT_MONTH));
+        $visualMatchOn = $enrichmentOn && (bool) config('qds.enrichment.visual_match.enabled');
+        $embeddedImages = $enrichedItems * self::EMBEDDED_FRAMES_PER_ITEM;
 
         return [
             [
@@ -325,6 +341,19 @@ class IngestionCostEstimator
                 'note' => match (true) {
                     $speechOn => 'Billed by Google, not Apify — not part of the total above.',
                     $enrichmentOn => 'Off — add a Google Speech API key to switch it on. Needs ffmpeg on the server.',
+                    default => 'Off — AI enrichment is disabled.',
+                },
+            ],
+            [
+                'service' => 'Visual product matching (embeddings)',
+                'detail' => 'Gemini image embeddings compare video frames with product reference photos',
+                'unit' => '$0.00012 per image embedded',
+                'monthly' => round($embeddedImages * self::EMBEDDING_PER_IMAGE, 2),
+                'per_creator' => $this->perAccount($embeddedImages * self::EMBEDDING_PER_IMAGE, $allAccounts),
+                'active' => $visualMatchOn,
+                'note' => match (true) {
+                    $visualMatchOn => 'Billed by Google, not Apify — frame embeddings are cached, so real spend is usually lower.',
+                    $enrichmentOn => 'Off — visual product matching is disabled (kill switch).',
                     default => 'Off — AI enrichment is disabled.',
                 },
             ],

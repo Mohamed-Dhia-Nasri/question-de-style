@@ -188,6 +188,58 @@ class MonitoringPlanTest extends TestCase
         $this->assertTrue($rows['Spoken brand mentions']['active']);
     }
 
+    public function test_the_per_service_sheet_prices_visual_product_matching(): void
+    {
+        config([
+            'qds.enrichment.enabled' => true,
+            'qds.enrichment.sweep_batch' => 50,
+            'qds.enrichment.visual_match.enabled' => false,
+        ]);
+
+        $settings = new CadenceSettings(new MonitoringPlanSetting([
+            'baseline_content_interval_hours' => 84,
+            'campaign_content_interval_hours' => 12,
+            'stories_per_day' => 0,
+            'profile_poll_interval_hours' => 168,
+            'apify_plan' => 'STARTER',
+        ]));
+
+        $roster = [
+            'ig_accounts' => 300,
+            'tt_accounts' => 150,
+            'campaign_ig' => 30,
+            'campaign_tt' => 15,
+            'story_active_ig' => 0,
+        ];
+
+        $estimator = app(IngestionCostEstimator::class);
+        $estimate = $estimator->estimate($settings, $roster);
+        $rows = collect($estimator->perService($settings, $roster, $estimate))->keyBy('service');
+
+        // Sweep-capped volume: 6,000 items × 6 frames × $0.00012 = $4.32.
+        $row = $rows['Visual product matching (embeddings)'];
+        $this->assertSame(4.32, $row['monthly']);
+        $this->assertSame(0.0096, $row['per_creator']); // ÷ 450 accounts
+        $this->assertStringContainsString('$0.00012 per image', $row['unit']);
+
+        // Kill switch off → visible but dimmed, priced for the decision.
+        $this->assertFalse($row['active']);
+        $this->assertStringContainsString('visual product matching is disabled', $row['note']);
+
+        config(['qds.enrichment.visual_match.enabled' => true]);
+        $rows = collect($estimator->perService($settings, $roster, $estimate))->keyBy('service');
+        $this->assertTrue($rows['Visual product matching (embeddings)']['active']);
+    }
+
+    public function test_the_plan_page_shows_the_visual_matching_row(): void
+    {
+        $this->actingAs($this->makeUser(RoleName::Admin));
+
+        $this->get('/monitoring/plan')
+            ->assertOk()
+            ->assertSee('Visual product matching (embeddings)');
+    }
+
     public function test_the_plan_page_lists_the_per_service_sheet(): void
     {
         $this->actingAs($this->makeUser(RoleName::Admin));

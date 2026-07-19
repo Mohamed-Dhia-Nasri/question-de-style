@@ -29,7 +29,9 @@ final class VectorLiteral
                 throw new InvalidArgumentException('Vector components must be finite (NAN/INF rejected).');
             }
 
-            $parts[] = (string) $component;
+            // json_encode uses serialize_precision=-1 for exact round-trip representation,
+            // whereas (string) uses the precision ini setting (lossy, default 14 digits).
+            $parts[] = json_encode($component);
         }
 
         return '['.implode(',', $parts).']';

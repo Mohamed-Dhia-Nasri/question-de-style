@@ -9,9 +9,13 @@ use App\Modules\Monitoring\Models\ContentTranscript;
 use App\Platform\Enrichment\Transcripts\YouTubeTranscriptEnricher;
 use App\Platform\Ingestion\Models\ProviderCall;
 use App\Platform\Ingestion\SourceRegistry;
+use App\Platform\Ingestion\Support\CallOutcome;
 use App\Shared\Enums\ContentType;
 use App\Shared\Enums\Platform;
+use App\Shared\ValueObjects\Provenance;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\Support\FakesProviderResponses;
 use Tests\TestCase;
@@ -64,8 +68,8 @@ class YouTubeTranscriptEnricherTest extends TestCase
             'content_item_id' => $item->id, 'language' => 'und',
             'status' => ContentTranscript::STATUS_AVAILABLE, 'text' => 'schon da',
             'provider' => SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT,
-            'provenance' => new \App\Shared\ValueObjects\Provenance(SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT, \Carbon\CarbonImmutable::now(), 'youtube-transcript-v1'),
-            'checksum' => hash('sha256', 'schon da'), 'fetched_at' => \Carbon\CarbonImmutable::now(),
+            'provenance' => new Provenance(SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT, CarbonImmutable::now(), 'youtube-transcript-v1'),
+            'checksum' => hash('sha256', 'schon da'), 'fetched_at' => CarbonImmutable::now(),
         ]);
 
         $this->assertSame('completed:cached', $this->enrich($item));
@@ -98,7 +102,74 @@ class YouTubeTranscriptEnricherTest extends TestCase
         $this->assertSame('skipped:provider-error', $this->enrich($item));
         $this->assertSame(0, ContentTranscript::query()->count());
         // Outcome value per the Task 0 CallOutcome audit (seam 1):
-        $this->assertSame(1, ProviderCall::query()->where('source', SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT)->where('outcome', \App\Platform\Ingestion\Support\CallOutcome::Failure->value)->count());
+        $this->assertSame(1, ProviderCall::query()->where('source', SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT)->where('outcome', CallOutcome::Failure->value)->count());
+    }
+
+    public function test_concurrent_run_wins_the_persist_race_and_this_run_recovers_instead_of_crashing(): void
+    {
+        $this->fakeProviderCredentials();
+        $this->fakeApifyActor((string) config('services.apify.actors.youtube_transcript'), $this->fixture('youtube-transcript'));
+        $item = $this->makeYouTubeItem();
+
+        // Deterministically reproduce the race WITHOUT any production
+        // testability seam. A single shared connection can't do it: our own
+        // save() runs inside a SAVEPOINT (withSavepointIfNeeded), so
+        // anything we insert on the SAME connection during the 'saving'
+        // hook gets erased by the ROLLBACK TO SAVEPOINT our own conflicting
+        // insert triggers — that is not how a real concurrent process
+        // behaves. A second, genuinely separate DB connection commits
+        // independently, so it survives our rollback-to-savepoint exactly
+        // like a real concurrent run would. The model's 'saving' event
+        // fires right after enrich()'s own null-check has passed and right
+        // before its INSERT — the same window a concurrent run's commit
+        // would land in.
+        config(['database.connections.pgsql_race' => config('database.connections.pgsql')]);
+
+        ContentTranscript::saving(function (ContentTranscript $model) use ($item) {
+            if ($model->exists || $model->content_item_id !== $item->id) {
+                return;
+            }
+
+            // RefreshDatabase keeps the whole test's fixtures (tenant,
+            // content item, ...) in ONE uncommitted transaction on the
+            // primary connection, invisible to this second session — so its
+            // insert would otherwise fail the tenant/content_item foreign
+            // keys, not the unique key we're actually racing. Skip FK
+            // enforcement for this session only (a standard bulk-load
+            // technique); the unique index we ARE testing is unaffected.
+            DB::connection('pgsql_race')->statement('SET session_replication_role = replica');
+            DB::connection('pgsql_race')->table('content_transcripts')->insert([
+                'tenant_id' => $item->tenant_id,
+                'content_item_id' => $item->id,
+                'language' => 'und',
+                'status' => ContentTranscript::STATUS_AVAILABLE,
+                'text' => 'winner text',
+                'segments' => null,
+                'provider' => SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT,
+                'provenance' => json_encode([
+                    'source' => SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT,
+                    'fetchedAt' => CarbonImmutable::now()->toIso8601String(),
+                    'sourceVersion' => 'youtube-transcript-v1',
+                ]),
+                'checksum' => hash('sha256', 'winner text'),
+                'fetched_at' => CarbonImmutable::now(),
+                'created_at' => CarbonImmutable::now(),
+                'updated_at' => CarbonImmutable::now(),
+            ]);
+            DB::connection('pgsql_race')->disconnect();
+        });
+
+        $summary = $this->enrich($item);
+
+        // The winner's row is AVAILABLE, so this run reports the winner's
+        // outcome, not its own — and never crashes on the collision.
+        $this->assertSame('completed:cached', $summary);
+        $this->assertSame(1, ContentTranscript::query()->where('content_item_id', $item->id)->count());
+        $row = ContentTranscript::query()->where('content_item_id', $item->id)->firstOrFail();
+        $this->assertSame('winner text', $row->text);
+        // Our own (losing) actor call still happened and must stay
+        // telemetered — recordOperation runs before the recovered return.
+        $this->assertSame(1, ProviderCall::query()->where('source', SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT)->where('operation', 'transcript.fetch')->count());
     }
 
     public function test_kill_switch_off_and_non_youtube_targets_skip_cleanly(): void

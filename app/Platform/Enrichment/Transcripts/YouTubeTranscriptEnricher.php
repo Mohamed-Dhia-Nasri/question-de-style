@@ -12,6 +12,7 @@ use App\Platform\Ingestion\SourceRegistry;
 use App\Shared\Enums\Platform;
 use App\Shared\ValueObjects\Provenance;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\UniqueConstraintViolationException;
 
 /**
  * The transcript pipeline stage (sub-project B, ADR-0028): ensures one
@@ -43,6 +44,19 @@ class YouTubeTranscriptEnricher
             return 'skipped:disabled';
         }
 
+        // Two-layer duplicate-bill guard (billing invariant: at most ONE
+        // successful actor run per video, ever). The queued path is
+        // protected by EnrichContentItemJob's ShouldBeUnique (one job per
+        // content item at a time); this synchronous EnrichmentService path
+        // has no such lock, so two concurrent callers can both pass this
+        // null check and both bill. The firstOrNew()+save() persists below
+        // (RecognitionService::persist()'s own catch-and-recover pattern —
+        // NOT updateOrCreate(), whose built-in createOrFirst() would just
+        // silently overwrite the winner's row with our stale data instead
+        // of reporting it) catch UniqueConstraintViolationException and
+        // recover by reporting the winning row's outcome instead of
+        // crashing — the residual double-bill on this unwired path is
+        // accepted and documented; the crash is not.
         $existing = ContentTranscript::query()
             ->where('content_item_id', $target->id)
             ->where('provider', SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT)
@@ -91,7 +105,8 @@ class YouTubeTranscriptEnricher
 
         if ($text === '') {
             // Successful run, no captions: negative-cache it (never re-bill).
-            ContentTranscript::query()->updateOrCreate($identity, [
+            $row = ContentTranscript::query()->firstOrNew($identity);
+            $row->fill([
                 'status' => ContentTranscript::STATUS_UNAVAILABLE,
                 'text' => null,
                 'segments' => null,
@@ -99,12 +114,27 @@ class YouTubeTranscriptEnricher
                 'fetched_at' => CarbonImmutable::now(),
                 'provenance' => $provenance,
             ]);
-            $this->recorder->recordOperation($context, $response, 0);
 
-            return 'skipped:no-captions';
+            try {
+                // A SAVEPOINT (when already inside a transaction) so a
+                // collision here rolls back only this insert, never the
+                // caller's wider unit of work.
+                ContentTranscript::query()->withSavepointIfNeeded(fn () => $row->save());
+                $this->recorder->recordOperation($context, $response, 0);
+
+                return 'skipped:no-captions';
+            } catch (UniqueConstraintViolationException) {
+                // A concurrent run won the race and persisted first. Our
+                // actor call really happened, so it must stay telemetered —
+                // then report the WINNER's row status, not ours.
+                $this->recorder->recordOperation($context, $response, 0);
+
+                return $this->summaryForConcurrentWinner($identity);
+            }
         }
 
-        ContentTranscript::query()->updateOrCreate($identity, [
+        $row = ContentTranscript::query()->firstOrNew($identity);
+        $row->fill([
             'status' => ContentTranscript::STATUS_AVAILABLE,
             'text' => $text,
             'segments' => $segments,
@@ -112,9 +142,41 @@ class YouTubeTranscriptEnricher
             'fetched_at' => CarbonImmutable::now(),
             'provenance' => $provenance,
         ]);
-        $this->recorder->recordOperation($context, $response, 1);
 
-        return 'completed:fetched';
+        try {
+            ContentTranscript::query()->withSavepointIfNeeded(fn () => $row->save());
+            $this->recorder->recordOperation($context, $response, 1);
+
+            return 'completed:fetched';
+        } catch (UniqueConstraintViolationException) {
+            // Same recovery as above: a concurrent run won, our billed call
+            // still gets telemetered, and we report the winner's outcome.
+            $this->recorder->recordOperation($context, $response, 1);
+
+            return $this->summaryForConcurrentWinner($identity);
+        }
+    }
+
+    /**
+     * Re-read the row a concurrent run persisted first (by the same
+     * content_item_id/language/provider identity) and report ITS status
+     * rather than ours. A null read here is pathological — the winner's
+     * row should exist by definition of losing a unique-key race — but is
+     * handled without fabricating a result.
+     *
+     * @param  array{content_item_id: int, language: string, provider: string}  $identity
+     */
+    private function summaryForConcurrentWinner(array $identity): string
+    {
+        $winner = ContentTranscript::query()->where($identity)->first();
+
+        if ($winner === null) {
+            return 'skipped:provider-error';
+        }
+
+        return $winner->status === ContentTranscript::STATUS_AVAILABLE
+            ? 'completed:cached'
+            : 'skipped:no-captions';
     }
 
     /**

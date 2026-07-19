@@ -1374,18 +1374,24 @@ Add to `tests/Feature/Enrichment/AudioExtractorTest.php` (reuse its synthetic-vi
 ```php
     public function test_extract_from_file_produces_the_same_flac_as_extract(): void
     {
-        $videoPath = $this->makeVideoWithAudio(); // [seam-audited helper name]
-        $extractor = app(\App\Platform\Enrichment\Recognition\AudioExtractor::class);
+        // [seam audit D1] makeVideo(bool $withAudio): string returns MP4 BYTES,
+        // not a path — write them to our own temp file for the path variant.
+        $videoBytes = $this->makeVideo(withAudio: true);
+        $videoPath = (string) tempnam(sys_get_temp_dir(), 'qds-test-video-');
+        file_put_contents($videoPath, $videoBytes);
+        $extractor = new \App\Platform\Enrichment\Recognition\AudioExtractor;
 
-        $fromFile = $extractor->extractFromFile($videoPath);
-        $fromBytes = $extractor->extract((string) file_get_contents($videoPath));
+        try {
+            $fromFile = $extractor->extractFromFile($videoPath);
+            $fromBytes = $extractor->extract($videoBytes);
 
-        $this->assertNotNull($fromFile);
-        $this->assertSame($fromBytes, $fromFile);
+            $this->assertNotNull($fromFile);
+            $this->assertSame($fromBytes, $fromFile);
+        } finally {
+            @unlink($videoPath);
+        }
     }
 ```
-
-If the helper returns bytes instead of a path, write them to a temp file first inside the test.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1505,6 +1511,9 @@ Add to `RecognitionPipelineTest.php` (mirror its existing fake helpers — the e
 ```php
     public function test_video_over_the_inline_cap_skips_whole_video_vi_with_the_distinct_marker(): void
     {
+        // [seam audit 7b] the file's real helpers: reel() builds the video
+        // ContentItem (media_urls hardcoded to self::MEDIA_URL on the literal-IP
+        // host) and enrich() is the direct RecognitionService call.
         config([
             'services.google_video_intelligence.api_key' => 'test-vi-key',
             'qds.enrichment.recognition.inline_max_bytes' => 10, // force the split
@@ -1512,9 +1521,8 @@ Add to `RecognitionPipelineTest.php` (mirror its existing fake helpers — the e
         \Illuminate\Support\Facades\Http::fake([
             '93.184.216.34/*' => \Illuminate\Support\Facades\Http::response(str_repeat('V', 100), 200, ['Content-Type' => 'video/mp4']),
         ]);
-        $content = $this->makeVideoContent(['https://93.184.216.34/big.mp4']); // [seam-audited helper name]
 
-        $result = $this->enrichViaService($content); // [seam-audited helper around RecognitionService::enrich]
+        $result = $this->enrich($this->reel());
 
         $this->assertContains('recognition:whole-video-skipped-too-large', $result['skipped']);
         \Illuminate\Support\Facades\Http::assertNotSent(fn ($request) => str_contains($request->url(), 'videointelligence'));
@@ -1666,7 +1674,7 @@ Change the recognition call to `$this->recognition->enrich($target, $correlation
 - [ ] **Step 6: Run the enrichment suite, then the FULL suite (Slice B1 gate)**
 
 Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/`
-Expected: all PASS — the behaviour-preservation gate. One legacy delta is legitimate: oversized media now yields `media:too-large`/`recognition:whole-video-skipped-too-large` instead of `media:fetch-failed`; update any test asserting the old marker for oversized media (seam audit #13 lists them).
+Expected: all PASS — the behaviour-preservation gate. [seam audit D2] NO existing test asserts any media marker (`fetch-failed`/`too-large`/`media:none` have zero hits in tests/), so there are no legacy marker assertions to update — the split markers are covered by NEW tests only. Existing per-key `stages['recognition']` assertions (e.g. `EnrichmentPipelineTest` contains-`vision:not-configured`) must still pass unchanged.
 Then run: `XDEBUG_MODE=off vendor/bin/phpunit`
 Expected: full suite green. **This is the Slice B1 gate — B1 is mergeable on its own from here.**
 
@@ -1815,7 +1823,8 @@ return new class extends Migration
     {
         Schema::create('keyframes', function (Blueprint $table): void {
             $table->id();
-            $table->unsignedBigInteger('tenant_id')->index();
+            // [seam audit 14] tenant-owned table convention (ADR-0019).
+            $table->foreignId('tenant_id')->index()->constrained('tenants')->cascadeOnDelete();
             // Polymorphic owner: ContentItem or Story (and future media roots).
             $table->string('owner_type');
             $table->unsignedBigInteger('owner_id');
@@ -1837,9 +1846,10 @@ return new class extends Migration
             $table->timestamps();
 
             // Extract-once identity: a re-run may never duplicate or renumber
-            // frames (tier C FKs embeddings to keyframes.id).
+            // frames (tier C FKs embeddings to keyframes.id). The unique index
+            // also serves (owner_type, owner_id) prefix lookups — no separate
+            // composite index needed [seam audit 14].
             $table->unique(['owner_type', 'owner_id', 'ordinal']);
-            $table->index(['owner_type', 'owner_id']);
         });
 
         DB::statement("ALTER TABLE keyframes ADD CONSTRAINT keyframes_kind_check CHECK (kind IN ('video_sample', 'thumbnail', 'source_image'))");
@@ -3114,7 +3124,8 @@ return new class extends Migration
     {
         Schema::create('content_transcripts', function (Blueprint $table): void {
             $table->id();
-            $table->unsignedBigInteger('tenant_id')->index();
+            // [seam audit 14] tenant-owned table convention (ADR-0019).
+            $table->foreignId('tenant_id')->index()->constrained('tenants')->cascadeOnDelete();
             $table->foreignId('content_item_id')->constrained()->cascadeOnDelete();
             // 'und' (BCP-47 undetermined) when the provider names no language —
             // NOT NULL so the unique key below has no NULL-duplicate hole.
@@ -3408,7 +3419,7 @@ Expected: ERROR — class `YouTubeTranscriptEnricher` not found.
 
 - [ ] **Step 4: Extend `ProviderCallRecorder`**
 
-Per the Task 0 audit (seam 2), add ONE public method that records a completed provider operation with no normalized items, **sharing** the ProviderCall row-writing path `recordCompletion` uses. Reference shape (align names/fields with the audited internals — the acceptance criteria are behavioural):
+Per the Task 0 audit (seam 2): `ProviderCallRecorder` has NO shared private row-writer — `recordCompletion` (lines 66-99) and `recordFailure` (125-142) each inline their own `ProviderCall::query()->create()`. The consistent implementation is a THIRD inline create plus verbatim reuse of the existing side-effect internals:
 
 ```php
     /**
@@ -3416,16 +3427,39 @@ Per the Task 0 audit (seam 2), add ONE public method that records a completed pr
      * (e.g. a transcript fetch): same ProviderCall row and health tracking
      * as recordCompletion, without pretending a normalization ran.
      */
-    public function recordOperation($context, ProviderResponse $response, int $resultCount): void
+    public function recordOperation(CallContext $context, ProviderResponse $response, int $resultCount): ProviderCall
     {
-        // Delegate to the same internal row-writer recordCompletion uses,
-        // passing: outcome SUCCESS, the response's httpStatus/responseBytes/
-        // requestMs, result_count = accepted_count = $resultCount, and no
-        // validation/normalization/persistence timings.
+        $call = ProviderCall::query()->create([
+            'source' => $context->source,
+            'operation' => $context->operation,
+            'correlation_id' => $context->correlationId,
+            'job_id' => $context->jobId,
+            'platform_account_id' => $context->platformAccountId,
+            'started_at' => $context->startedAt,
+            'finished_at' => CarbonImmutable::now(),
+            'duration_ms' => round($context->elapsedMs(), 2),
+            'http_status' => $response->httpStatus,
+            'outcome' => CallOutcome::Success,
+            'retry_count' => $context->retryCount,
+            'response_bytes' => $response->responseBytes,
+            'result_count' => $resultCount,
+            'accepted_count' => $resultCount,
+            'rate_limit' => $response->rateLimit ?: null,
+            'timings' => ['request_ms' => round($response->requestMs, 2)],
+        ]);
+
+        $this->markSuccess($context, CallOutcome::Success);
+        $this->raiseDurationAlertIfNeeded($context);
+        // maybeSample's 4th parameter is typed ProviderResponse — no batch needed.
+        $this->sampler->maybeSample($context->source, $context->operation, $context->correlationId, $response);
+
+        return $call;
     }
 ```
 
-Acceptance: after `recordOperation`, one `ProviderCall` row exists with the context's source/operation/correlation, `outcome = SUCCESS`, `response_bytes`/`duration_ms` from the response, and `result_count = accepted_count = $resultCount`. No `NormalizedBatch` or `PersistenceResult` is constructed anywhere in the transcript path.
+(Align field names against the neighbouring `recordCompletion` create block if they drift; imports `CarbonImmutable`, `CallOutcome`, `ProviderResponse` as the class already uses.) Acceptance: after `recordOperation`, one `ProviderCall` row exists with the context's source/operation/correlation, `outcome = SUCCESS`, `response_bytes`/`duration_ms` from the response, and `result_count = accepted_count = $resultCount`; health state marked Healthy; NO `NormalizedBatch` or `PersistenceResult` anywhere in the transcript path.
+
+**Also [seam audit 8]:** `tests/Feature/Enrichment/EnrichmentPipelineTest.php:176-178` asserts which stage keys exist up to a mid-run vision failure — the new `transcript` stage runs BEFORE recognition, so `assertArrayHasKey('transcript', ...)` joins `hashtags` there; `keyframes` (after recognition) stays in the not-has set. Update that test in this task.
 
 - [ ] **Step 5: Implement `YouTubeTranscriptEnricher`**
 

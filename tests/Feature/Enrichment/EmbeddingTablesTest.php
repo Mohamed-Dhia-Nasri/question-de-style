@@ -14,8 +14,10 @@ use App\Platform\Enrichment\VisualMatch\Support\VectorLiteral;
 use App\Shared\Enums\KeyframeKind;
 use App\Shared\ValueObjects\Provenance;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -190,5 +192,28 @@ class EmbeddingTablesTest extends TestCase
 
         $this->assertDatabaseMissing('product_reference_photos', ['id' => $photo->id]);
         $this->assertDatabaseMissing('product_photo_embeddings', ['id' => $embedding->id]);
+    }
+
+    /**
+     * vector(3072) is DDL, not convention (Task 5 review): the column
+     * typmod itself must reject a wrong-width literal, independent of any
+     * PHP-side validation. A 10-dimension vector on a vector(3072) column
+     * must fail at the Postgres input function with the engine's own
+     * "expected 3072 dimensions" message.
+     */
+    public function test_a_non_3072_dimension_literal_is_rejected_by_postgres(): void
+    {
+        $frame = $this->makeFrame();
+
+        $this->expectException(QueryException::class);
+        $this->expectExceptionMessage('expected 3072 dimensions');
+
+        DB::table('keyframe_embeddings')->insert([
+            'tenant_id' => $frame->tenant_id,
+            'keyframe_id' => $frame->id,
+            'model_version' => 'gemini-embedding-2',
+            'embedding' => VectorLiteral::fromArray(array_fill(0, 10, 0.001)),
+            'created_at' => now(),
+        ]);
     }
 }

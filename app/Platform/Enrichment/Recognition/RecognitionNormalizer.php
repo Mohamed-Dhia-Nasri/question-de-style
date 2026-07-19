@@ -148,6 +148,39 @@ class RecognitionNormalizer
         );
     }
 
+    /**
+     * A stored provider transcript → SPOKEN_BRAND candidates (sub-project B:
+     * YouTube rides the transcript stage since its audio is not downloadable
+     * in-freeze). Same lexicon gate as speechBatch — free text with no known
+     * brand is not a recognition hit. The synthetic response describes this
+     * LOCAL normalization pass (no provider call happens here).
+     */
+    public function transcriptBatch(string $transcript): NormalizedBatch
+    {
+        $start = microtime(true);
+
+        $items = [];
+        $candidate = $this->textCandidate(RecognitionType::SpokenBrand, $transcript, null, 'spoken-brand-transcript-match');
+
+        if ($candidate !== null) {
+            $items[] = $candidate;
+        }
+
+        return new NormalizedBatch(
+            items: $items,
+            rejected: [],
+            response: new ProviderResponse(
+                items: [],
+                httpStatus: 200,
+                responseBytes: 0,
+                requestMs: 0.0,
+                sourceVersion: 'youtube-transcript-v1',
+            ),
+            validationMs: 0.0,
+            normalizationMs: (microtime(true) - $start) * 1000,
+        );
+    }
+
     /** Video Intelligence annotationResults → ON_SCREEN_TEXT + LOGO candidates. */
     public function videoBatch(ProviderResponse $response): NormalizedBatch
     {

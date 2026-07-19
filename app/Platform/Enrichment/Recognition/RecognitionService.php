@@ -3,6 +3,7 @@
 namespace App\Platform\Enrichment\Recognition;
 
 use App\Modules\Monitoring\Models\ContentItem;
+use App\Modules\Monitoring\Models\ContentTranscript;
 use App\Modules\Monitoring\Models\RecognitionDetection;
 use App\Modules\Monitoring\Models\Story;
 use App\Platform\Enrichment\Http\GoogleSpeechClient;
@@ -21,6 +22,7 @@ use App\Platform\Ingestion\SourceRegistry;
 use App\Platform\Ingestion\Support\AlertType;
 use App\Platform\Ingestion\Support\ErrorCategory;
 use App\Shared\Enums\ConfidenceLevel;
+use App\Shared\Enums\Platform;
 use App\Shared\Enums\VerificationStatus;
 use App\Shared\ValueObjects\ConfidenceAssessment;
 use App\Shared\ValueObjects\Provenance;
@@ -68,6 +70,25 @@ class RecognitionService
         $updated = 0;
         $skipped = [];
 
+        // YouTube SPOKEN_BRAND rides the transcript the pipeline's transcript
+        // stage persisted (ADR-0028) — consume-only: recognition never calls
+        // the actor, and no ProviderCall is recorded for this local mining.
+        if ($target instanceof ContentItem && $target->platform === Platform::YouTube) {
+            $transcript = ContentTranscript::query()
+                ->where('content_item_id', $target->id)
+                ->where('status', ContentTranscript::STATUS_AVAILABLE)
+                ->latest('id')
+                ->first();
+
+            if ($transcript === null) {
+                $skipped[] = 'youtube-transcript:unavailable';
+            } else {
+                [$c, $u] = $this->persist($target, SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT, $this->normalizer->transcriptBatch((string) $transcript->text));
+                $created += $c;
+                $updated += $u;
+            }
+        }
+
         // No configured provider → nothing to annotate; don't download
         // media for nobody (cost control).
         if (! $this->vision->isConfigured() && ! $this->videoIntelligence->isConfigured() && ! $this->speech->isConfigured()) {
@@ -75,7 +96,12 @@ class RecognitionService
             $skipped[] = 'video-intelligence:not-configured';
             $skipped[] = 'speech:not-configured';
 
-            return ['status' => 'completed-empty', 'created' => 0, 'updated' => 0, 'skipped' => $skipped];
+            return [
+                'status' => $created + $updated > 0 ? 'completed' : 'completed-empty',
+                'created' => $created,
+                'updated' => $updated,
+                'skipped' => $skipped,
+            ];
         }
 
         $ownWorkspace = $workspace === null;

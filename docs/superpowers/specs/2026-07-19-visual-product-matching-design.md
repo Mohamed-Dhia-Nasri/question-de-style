@@ -136,7 +136,7 @@ EnrichmentPipeline (per post, inside EnrichContentItemJob/EnrichStoryJob, queue 
 | Component | Responsibility |
 |---|---|
 | `EmbeddingProvider` (interface) | `embedImage(bytes): array`, `modelVersion()`, `isConfigured()` — the provider seam; container-bound so C is never coupled to Google (§5) |
-| `VertexMultimodalEmbeddingProvider` | First implementation: HTTP client for the Vertex AI multimodal embedding model (§5) |
+| `GeminiMultimodalEmbeddingProvider` | First implementation: HTTP client for Gemini Embedding 2 on the Vertex AI platform (§5) |
 | `GoogleServiceAccountTokenProvider` | Signs/caches OAuth tokens from a service-account key (§5) |
 | `ReferencePhotoEmbedder` + `EmbedProductPhotoJob` | Embed reference photos on upload / backfill (§6) |
 | `FrameQualityFilter` | Local, free: drop undecodable / extreme-dark / overexposed / flat frames before spending (§8) |
@@ -180,16 +180,19 @@ collect paths in-transaction, delete rows (cascade), blobs after commit (house o
 
 ### 4.2 `product_photo_embeddings`
 `id, tenant_id (+composite FK), product_reference_photo_id FK cascadeOnDelete, model_version
-varchar(64), embedding vector(1408), created_at`; unique `(product_reference_photo_id,
+varchar(64), embedding vector(3072), created_at`; unique `(product_reference_photo_id,
 model_version)`. Immutable per key: photo replaced ⇒ new photo row; model upgraded ⇒ backfill new
-rows, never in-place mutation. The `vector(1408)` column width is part of the DDL: a future model
+rows, never in-place mutation. The `vector(3072)` column width is part of the DDL: a future model
 with different dimensions is a schema migration (new column/table), not a config flip — the
-config `dimensions` knob exists to keep request and DDL visibly in agreement.
+config `dimensions` knob exists to keep request and DDL visibly in agreement. (3072 exceeds
+pgvector's 2000-dimension **index** limit — irrelevant for the exact-scan design, and one more
+reason it is right; if ANN indexing is ever wanted, the model's Matryoshka truncation to 1536 is
+the sanctioned path, as a new `model_version`.)
 
 ### 4.3 `keyframe_embeddings`
 `id, tenant_id, keyframe_id FK **ON DELETE CASCADE** (+composite (keyframe_id, tenant_id) FK —
 requires the new `(id, tenant_id)` unique on `keyframes`), model_version varchar(64), embedding
-vector(1408), created_at`; unique `(keyframe_id, model_version)`. The DB-level cascade keeps
+vector(3072), created_at`; unique `(keyframe_id, model_version)`. The DB-level cascade keeps
 **both** existing deleters correct with zero code changes: `CreatorEraser`'s in-transaction bulk
 deletes and the daily `qds:prune-keyframes` retention prune.
 
@@ -249,7 +252,7 @@ estimated_visible_ms int nullable` (§8; null when frames carry no timestamps).
 2. `RecognitionType::VisualProduct = 'VISUAL_PRODUCT'` enum case + DROP/re-ADD of
    `recognition_detections_recognition_type_check` with the widened set.
 3. `(id, tenant_id)` unique on `keyframes` (prerequisite for 4.3's composite FK).
-4. `SourceRegistry::GOOGLE_VERTEX_EMBEDDINGS = 'SRC-google-vertex-embeddings'` (+ ADR, §16).
+4. `SourceRegistry::GOOGLE_GEMINI_EMBEDDINGS = 'SRC-google-gemini-embeddings'` (+ ADR, §16).
 5. `docker-compose.yml` image `postgres:17` → `pgvector/pgvector:pg17` (same Postgres major,
    existing `qds-pgdata` volume compatible); README note: the extension must exist in `qds_test`
    too — the migration's `IF NOT EXISTS` handles it once the image ships pgvector.
@@ -267,21 +270,34 @@ via the FKs suffices.
 
 **Abstraction first.** C depends on an **`EmbeddingProvider` interface**
 (`embedImage(string $bytes): array` returning the vector, `modelVersion(): string`,
-`isConfigured(): bool`), container-bound. `VertexMultimodalEmbeddingProvider` is the first and
+`isConfigured(): bool`), container-bound. `GeminiMultimodalEmbeddingProvider` is the first and
 only v1 implementation; a future provider (or the v2 crop variant) is a new binding plus a new
 `model_version`, with zero changes to the matcher, embedders, or persistence. YAGNI applies: no
 provider-selection config knob until a second implementation exists — the container binding is
 the seam.
 
-**Model.** Vertex AI `multimodalembedding@001`, image input, full **1408 dimensions**, cosine
-similarity. `model_version` config string is stamped on every embedding row; changing it is a
-re-embed backfill, never a mutation.
+**Model.** **Gemini Embedding 2** (`gemini-embedding-2`; pin the exact versioned id current at
+implementation time — it launched as `gemini-embedding-2-preview`), Google's natively multimodal
+embedding model; image input (PNG/JPEG — matches §8's format gate), full **3072 dimensions**
+(Matryoshka truncation to 1536/768 exists but v1 keeps full width for precision; storage is
+trivial at this scale), cosine similarity, list price **$0.0001 per image**. The predecessor
+`multimodalembedding@001` is NOT an option: deprecated 2025-06-24, API access removed
+**2026-06-24**, retirement 2027-04-01. `model_version` config string is stamped on every
+embedding row; changing it is a re-embed backfill, never a mutation.
 
-**Endpoint & residency.** `https://europe-west4-aiplatform.googleapis.com/v1/projects/{project}/locations/europe-west4/publishers/google/models/{model}:predict`
-— EU regional endpoint (locked EU-residency decision; note: the existing Vision/Speech clients
-still use global endpoints — pre-existing, out of C's scope, flagged in the ADR). `base_url`,
-`project_id`, `location` env-overridable in `config/services.php` under
-`services.google_vertex_embeddings`.
+**Endpoint & residency.** Served through the **Vertex AI platform** endpoints
+(`{location}-aiplatform.googleapis.com`, path `projects/{project}/locations/{location}/publishers/google/models/{model}`)
+— the platform name survives even as Google's docs migrate under the "Gemini Enterprise Agent
+Platform" umbrella, which is why the class/config naming here is model-based (Gemini), not
+platform-based. Default location `europe-west4` (locked EU-residency decision). **Caveat found in
+verification (2026-07): EU single regions still serve a limited model list — whether the
+embedding model is available in `europe-west4` (vs another EU region) must be confirmed against
+the real project as an early implementation task; if no EU location serves it, the capability
+stays dark (fail-closed on the locked residency decision) and we escalate.** The Gemini API
+(`generativelanguage.googleapis.com`, API-key auth) also serves the model but offers no residency
+control — rejected. `base_url`, `project_id`, `location` env-overridable in
+`config/services.php` under `services.google_embeddings`. (The existing Vision/Speech clients
+still use global endpoints — pre-existing, out of C's scope, flagged in the ADR.)
 
 **Auth.** First service-account machinery in the repo: `GoogleServiceAccountTokenProvider` reads a
 JSON key file path from config, signs a JWT (`RS256`, openssl — no new dependency), exchanges it
@@ -290,15 +306,17 @@ for an OAuth token at Google's token endpoint, caches until ~60 s before expiry.
 rule). `isConfigured()` = key file readable + project set — unconfigured ⇒ the stage skips with a
 marker, exactly like `vision:not-configured`.
 
-**Request/response.** One image per `:predict` call (base64 inline in `instances[0].image
-.bytesBase64Encoded`, `parameters.dimension = 1408`), response `predictions[0].imageEmbedding`.
+**Request/response.** Image bytes inline as base64; the exact payload shape follows the model's
+current Vertex reference at implementation time (the model accepts up to 6 images per request —
+batching frames per call is a permitted implementation optimization; budget units are counted
+**per image** regardless). Requested dimension = config `dimensions` (3072).
 Every payload passes `AiPayloadGuard::assertSafe` (bytes inline — no URLs, no personal data).
 Timeout `services.google_vertex_embeddings.timeout` default 30 s, connect 10 s. Errors map onto
 the existing `ErrorCategory` taxonomy and throw `ProviderCallException` (429 → RateLimited with
 Retry-After, 401/403 → Authentication, 5xx → UpstreamError, non-JSON → MalformedResponse).
 
 **Telemetry & protection.** Every call wrapped in `ProviderCallRecorder::start` /
-`recordOperation` / `recordFailure` under source `SRC-google-vertex-embeddings`, operation
+`recordOperation` / `recordFailure` under source `SRC-google-gemini-embeddings`, operation
 `embedding.embed` — provider health, the operations dashboard row, FAILING alerts and the
 existing `ProviderCircuitBreaker` all come free. The matcher consults
 `ProviderCircuitBreaker::shouldSkip()` **before** spending (deliberate improvement over the
@@ -438,7 +456,7 @@ re-extract command (with DEF-009 scene-change).
   `visual-threshold:<CATEGORY>:auto=<0.xx>:review=<0.xx>:margin=<0.xx>`,
   `embedding-model:<model_version>` — new prefixes, no collision with the parsed
   `shipment-record:` / `product-unconfirmed` / `human-rejected` vocabulary;
-- provenance `{source: SRC-google-vertex-embeddings, fetchedAt, sourceVersion: 'visual-match-v1'}`;
+- provenance `{source: SRC-google-gemini-embeddings, fetchedAt, sourceVersion: 'visual-match-v1'}`;
 - **Edge case:** if a later run (only possible after catalog/model change — matching is otherwise
   deterministic) finds REJECT where an `AI_ASSESSED` VISUAL_PRODUCT row exists, the row is
   downgraded to LOW with signal `visual-support-withdrawn` (routes to review; humans decide).
@@ -568,8 +586,8 @@ inconclusiveness adds no fake signal in either direction.
     // …existing…
     'visual_match' => [
         'enabled' => (bool) env('QDS_ENRICHMENT_VISUAL_MATCH_ENABLED', false), // kill switch, true no-op
-        'model_version' => env('QDS_ENRICHMENT_VISUAL_MATCH_MODEL', 'multimodalembedding@001'),
-        'dimensions' => (int) env('QDS_ENRICHMENT_VISUAL_MATCH_DIMENSIONS', 1408),
+        'model_version' => env('QDS_ENRICHMENT_VISUAL_MATCH_MODEL', 'gemini-embedding-2'), // pin exact versioned id at implementation
+        'dimensions' => (int) env('QDS_ENRICHMENT_VISUAL_MATCH_DIMENSIONS', 3072),
         'frame_budget' => (int) env('QDS_ENRICHMENT_VISUAL_MATCH_FRAME_BUDGET', 12),
         'photo_cap' => (int) env('QDS_ENRICHMENT_VISUAL_MATCH_PHOTO_CAP', 8),
         'photo_link_ttl_minutes' => (int) env('QDS_ENRICHMENT_VISUAL_MATCH_PHOTO_LINK_TTL', 10),
@@ -609,13 +627,13 @@ inconclusiveness adds no fake signal in either direction.
     ],
 ],
 
-// config/services.php
-'google_vertex_embeddings' => [
-    'credentials_path' => env('GOOGLE_VERTEX_CREDENTIALS'),   // service-account JSON key file
-    'project_id' => env('GOOGLE_VERTEX_PROJECT'),
-    'location' => env('GOOGLE_VERTEX_LOCATION', 'europe-west4'),
-    'base_url' => env('GOOGLE_VERTEX_BASE_URL'),              // default derived from location
-    'timeout' => (int) env('GOOGLE_VERTEX_TIMEOUT_SECONDS', 30),
+// config/services.php — model-based naming (survives Google platform-brand churn)
+'google_embeddings' => [
+    'credentials_path' => env('GOOGLE_EMBEDDINGS_CREDENTIALS'),   // service-account JSON key file
+    'project_id' => env('GOOGLE_EMBEDDINGS_PROJECT'),
+    'location' => env('GOOGLE_EMBEDDINGS_LOCATION', 'europe-west4'), // EU-availability spike may adjust (§5)
+    'base_url' => env('GOOGLE_EMBEDDINGS_BASE_URL'),              // default derived from location
+    'timeout' => (int) env('GOOGLE_EMBEDDINGS_TIMEOUT_SECONDS', 30),
 ],
 ```
 
@@ -690,7 +708,7 @@ pgvector — factories/fixtures, `XDEBUG_MODE=off`).** Highlights per component:
   threshold, distinct frames survive, representative carries group size + span, config off.
 - `VectorLiteral` + pgvector round-trip; exact-scan scorer against seeded vectors (known cosine
   geometry) asserting per-frame/per-candidate maxima and ordering.
-- `VertexEmbeddingClient`: `Http::fake` (house pattern) + faked token provider; error taxonomy;
+- `GeminiMultimodalEmbeddingProvider`: `Http::fake` (house pattern) + faked token provider; error taxonomy;
   `AiPayloadGuard` compliance; recorder wiring; breaker consultation.
 - `CandidateScope`: window edges (anchor fallback, per-tenant days), roster statuses, dedupe,
   priority computation, unmatchable-candidate accounting, tenant isolation (`makeTenantPair`).
@@ -723,8 +741,8 @@ webp/heic frame transcoding; off-peak queue for low-priority work (awaits D); te
 purge (pre-existing platform gap); billing-plan quota purchase (billing module follow-up);
 existing Vision/Speech clients still on global endpoints (EU-residency follow-up).
 
-**ADR-0029 "Visual product matching — sub-project C":** records the Vertex embeddings
-provider addition (`SRC-google-vertex-embeddings`, DP-006 requires the ADR), first
+**ADR-0029 "Visual product matching — sub-project C":** records the Gemini Embedding 2
+provider addition (`SRC-google-gemini-embeddings`, DP-006 requires the ADR), first
 service-account auth, pgvector adoption + docker image change, exact-scan decision, band
 thresholds as E-calibrated placeholders, the `buildEvidence` gate generalization, and the AI
 budget governance subsystem.

@@ -308,6 +308,19 @@ return [
             'ffprobe_path' => env('QDS_ENRICHMENT_FFPROBE_PATH', 'ffprobe'),
         ],
 
+        // Visual product matching (sub-project C, ADR-0029). Kill switch
+        // default OFF = true no-op (skipped:disabled, zero provider calls).
+        // model_version is stamped on every embedding row — changing it is
+        // a re-embed backfill, never a mutation; dimensions keeps the
+        // request width and the vector(3072) DDL visibly in agreement.
+        // Later C tasks extend this block (quality filter, dedup, frame
+        // budget, photo cap, thresholds).
+        'visual_match' => [
+            'enabled' => (bool) env('QDS_ENRICHMENT_VISUAL_MATCH_ENABLED', false), // kill switch, true no-op
+            'model_version' => env('QDS_ENRICHMENT_VISUAL_MATCH_MODEL', 'gemini-embedding-2'), // pin exact versioned id at implementation
+            'dimensions' => (int) env('QDS_ENRICHMENT_VISUAL_MATCH_DIMENSIONS', 3072),
+        ],
+
         // Numeric provider score → ENUM-ConfidenceLevel bucketing
         // (ADR-0026): score >= high → HIGH; >= medium → MEDIUM; else LOW
         // (LOW routes to review per DP-004). Env-tunable calibration.

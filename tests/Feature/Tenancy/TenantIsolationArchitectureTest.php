@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Tenancy;
 
+use App\Platform\AiBudget\Models\AiUsageCounter;
+use App\Platform\AiBudget\Models\TenantAiQuota;
 use App\Platform\Ingestion\Models\IngestionAlert;
 use App\Shared\Audit\AuditLog;
 use App\Shared\Authorization\TenantIsolationGate;
@@ -41,9 +43,24 @@ class TenantIsolationArchitectureTest extends TestCase
      *    only; AlertService raise/resolve partition by a tenant-encoded
      *    fingerprint (CrossTenantAlertTest pins this).
      *
+     * AiUsageCounter and TenantAiQuota (spec §10, sub-project C) carry a
+     * NOT NULL tenant_id — every row IS tenant-attributed — but are still
+     * deliberately unscoped: AiBudgetGuard's GLOBAL budget dimensions must
+     * SUM units across EVERY tenant, including from inside tenant-bound
+     * enrichment jobs where a TenantScope would silently narrow the global
+     * read to just the ambient tenant (masking real exhaustion). The guard
+     * queries these tables directly (never via an ambient-tenant scope);
+     * the only tenant-facing surfaces are the qds:ai-quota operator command
+     * and (later) an own-tenant-only dashboard read.
+     *
      * @var list<class-string<Model>>
      */
-    private const UNSCOPED_TENANT_ID_MODELS = [AuditLog::class, IngestionAlert::class];
+    private const UNSCOPED_TENANT_ID_MODELS = [
+        AuditLog::class,
+        IngestionAlert::class,
+        AiUsageCounter::class,
+        TenantAiQuota::class,
+    ];
 
     /** @return list<class-string<Model>> every concrete Eloquent model in app/ */
     private function eloquentModels(): array

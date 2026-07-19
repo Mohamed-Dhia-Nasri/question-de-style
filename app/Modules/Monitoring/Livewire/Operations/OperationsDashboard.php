@@ -174,19 +174,23 @@ class OperationsDashboard extends Component
             ];
         }
 
-        return ['capabilities' => $capabilities, 'visual' => $this->visualRunAggregates()];
+        return ['capabilities' => $capabilities, 'visual' => $this->visualRunAggregates($tenantId)];
     }
 
     /**
      * Quality/efficiency aggregates over the last 7 days of visual-match
-     * runs. VisualMatchRun is TenantScoped, so this is the viewer's own
-     * tenant automatically. Null when there are no recent runs.
+     * runs. VisualMatchRun is TenantScoped, but TenantScope is a NO-OP with
+     * no active context — so a null $tenantId is filtered explicitly here
+     * too (same defensive pattern as aiSpendPanel()'s `own()`), rather than
+     * trusting the scope alone to keep a null-context render from silently
+     * becoming an all-tenant aggregate. Null when there are no recent runs.
      *
      * @return array<string, mixed>|null
      */
-    private function visualRunAggregates(): ?array
+    private function visualRunAggregates(?int $tenantId): ?array
     {
         $recent = fn () => VisualMatchRun::query()
+            ->where('tenant_id', $tenantId ?? 0)
             ->where('created_at', '>=', CarbonImmutable::now()->subDays(7));
 
         $runs = (int) $recent()->count();

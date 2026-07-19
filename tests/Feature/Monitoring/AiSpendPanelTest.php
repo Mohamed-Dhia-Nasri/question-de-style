@@ -7,6 +7,7 @@ use App\Modules\Monitoring\Models\VisualMatchRun;
 use App\Platform\AiBudget\Models\AiUsageCounter;
 use App\Shared\Enums\RoleName;
 use App\Shared\Enums\VisualMatchOutcome;
+use App\Shared\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -95,6 +96,26 @@ class AiSpendPanelTest extends TestCase
             ->assertSee('1 / 2 / 3')   // format / quality / dedup frame skips
             ->assertSee('Budget denials')
             ->assertSee('2,250 ms');   // average processing time
+    }
+
+    public function test_visual_match_aggregates_never_leak_when_no_tenant_context_is_active(): void
+    {
+        // A foreign tenant's runs exist and WOULD be summed by a bare
+        // TenantScope no-op under a null context (platform/CLI rendering).
+        // The panel must stay empty rather than silently aggregate them.
+        $foreign = $this->makeTenant('Tenant B');
+
+        $this->withTenant($foreign, fn () => VisualMatchRun::factory()->create([
+            'embedding_calls' => 9,
+            'cache_hits' => 3,
+            'processing_ms' => 3000,
+        ]));
+
+        app(TenantContext::class)->runAs(null, function (): void {
+            Livewire::test(OperationsDashboard::class)
+                ->assertDontSee('Cache-hit rate')
+                ->assertSee('No visual-match runs in the last 7 days.');
+        });
     }
 
     public function test_provider_table_marks_gemini_embeddings_configured(): void

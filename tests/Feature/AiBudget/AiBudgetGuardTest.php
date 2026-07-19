@@ -95,4 +95,26 @@ class AiBudgetGuardTest extends TestCase
             'units' => 1,
         ]);
     }
+
+    public function test_quota_resolver_defaults_overrides_and_memoization(): void
+    {
+        $this->configureBudget();
+        $tenantId = $this->defaultTenant->id;
+
+        // No override row → config defaults.
+        $this->assertSame(['daily' => 100, 'monthly' => 1000], app(TenantQuotaResolver::class)->for($tenantId, 'embedding'));
+
+        // Override daily only; the NULL monthly column keeps the config default.
+        TenantAiQuota::query()->create(['tenant_id' => $tenantId, 'capability' => 'embedding', 'daily_units' => 5, 'monthly_units' => null]);
+
+        $resolver = app(TenantQuotaResolver::class);
+        $this->assertSame(['daily' => 5, 'monthly' => 1000], $resolver->for($tenantId, 'embedding'));
+
+        // Memoized for THIS instance's life…
+        TenantAiQuota::query()->update(['daily_units' => 9]);
+        $this->assertSame(['daily' => 5, 'monthly' => 1000], $resolver->for($tenantId, 'embedding'));
+
+        // …while a fresh resolver (not a singleton) reads the new row.
+        $this->assertSame(['daily' => 9, 'monthly' => 1000], app(TenantQuotaResolver::class)->for($tenantId, 'embedding'));
+    }
 }

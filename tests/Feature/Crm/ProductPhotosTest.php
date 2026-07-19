@@ -267,4 +267,15 @@ class ProductPhotosTest extends TestCase
         $this->assertDatabaseCount('product_reference_photos', 1);
         Storage::disk((string) $photo->storage_disk)->assertExists($photo->storage_path);
     }
+
+    public function test_products_index_row_shows_a_photos_action_with_count(): void
+    {
+        $this->actingAsCrmStaff();
+        $product = Product::factory()->create();
+        $this->makeStoredPhoto($product);
+        $this->makeStoredPhoto($product);
+
+        Livewire::test(ProductsIndex::class)
+            ->assertSee('Photos (2)');
+    }
 }

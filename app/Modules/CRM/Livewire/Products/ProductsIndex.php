@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Livewire\Attributes\On;
 use Livewire\Component;
 
 /**
@@ -75,6 +76,7 @@ class ProductsIndex extends Component
         return $this->applySort(
             Product::query()
                 ->with('brand')
+                ->withCount('referencePhotos')
                 ->when($this->search !== '', function (Builder $query) {
                     $query->where(function (Builder $query) {
                         $query->where('name', 'ilike', '%'.$this->search.'%')
@@ -228,6 +230,14 @@ class ProductsIndex extends Component
     public function cancelDelete(): void
     {
         $this->confirmingDeleteId = null;
+    }
+
+    /** Photos-modal mutations re-render the list so the badge stays fresh. */
+    #[On('product-photos-changed')]
+    public function refreshPhotoCounts(): void
+    {
+        // Intentionally empty: receiving the event triggers a re-render,
+        // which re-reads reference_photos_count.
     }
 
     /** After deletes/filter-affecting mutations, leave no out-of-range page. */

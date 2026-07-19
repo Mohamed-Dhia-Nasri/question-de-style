@@ -117,4 +117,158 @@ class AiBudgetGuardTest extends TestCase
         // …while a fresh resolver (not a singleton) reads the new row.
         $this->assertSame(['daily' => 9, 'monthly' => 1000], app(TenantQuotaResolver::class)->for($tenantId, 'embedding'));
     }
+
+    /** Seed a usage row for TODAY (or the given date) without touching record(). */
+    private function seedUsage(int $tenantId, int $units, ?string $date = null): void
+    {
+        AiUsageCounter::query()->create([
+            'capability' => 'embedding',
+            'tenant_id' => $tenantId,
+            'usage_date' => $date ?? CarbonImmutable::now()->toDateString(),
+            'units' => $units,
+        ]);
+    }
+
+    public function test_read_only_mode_blocks_every_priority_instantly(): void
+    {
+        $this->configureBudget();
+        $guard = app(AiBudgetGuard::class);
+        $tenantId = $this->defaultTenant->id;
+
+        Cache::forever(AiBudgetGuard::READ_ONLY_CACHE_KEY, true);
+
+        foreach ([Priority::High, Priority::Medium] as $priority) {
+            $decision = $guard->allows('embedding', $tenantId, 1, $priority);
+            $this->assertFalse($decision->allowed);
+            $this->assertSame('read-only', $decision->reason);
+        }
+
+        // A cached FALSE overrides even a truthy config default.
+        config(['qds.ai_budget.read_only' => true]);
+        Cache::forever(AiBudgetGuard::READ_ONLY_CACHE_KEY, false);
+        $this->assertFalse($guard->readOnly());
+        $this->assertTrue($guard->allows('embedding', $tenantId, 1, Priority::Medium)->allowed);
+
+        // With NO cached flag the config default decides.
+        Cache::forget(AiBudgetGuard::READ_ONLY_CACHE_KEY);
+        $this->assertTrue($guard->readOnly());
+    }
+
+    public function test_unknown_capability_fails_closed(): void
+    {
+        $this->configureBudget();
+
+        $decision = app(AiBudgetGuard::class)->allows('vlm_verification', $this->defaultTenant->id, 1, Priority::High);
+
+        $this->assertFalse($decision->allowed);
+        $this->assertSame('unknown-capability', $decision->reason);
+    }
+
+    public function test_per_post_ceiling_applies_to_medium_priority(): void
+    {
+        $this->configureBudget();
+        $guard = app(AiBudgetGuard::class);
+        $tenantId = $this->defaultTenant->id;
+
+        $decision = $guard->allows('embedding', $tenantId, 13, Priority::Medium);
+        $this->assertFalse($decision->allowed);
+        $this->assertSame('per-post-exceeded', $decision->reason);
+
+        $this->assertTrue($guard->allows('embedding', $tenantId, 12, Priority::Medium)->allowed);
+    }
+
+    public function test_medium_priority_denies_when_the_tenant_daily_budget_is_exhausted(): void
+    {
+        $this->configureBudget();
+        $guard = app(AiBudgetGuard::class);
+        $tenantId = $this->defaultTenant->id;
+
+        $this->seedUsage($tenantId, 95); // 95 of 100 daily units used
+
+        $decision = $guard->allows('embedding', $tenantId, 10, Priority::Medium);
+        $this->assertFalse($decision->allowed);
+        $this->assertSame('tenant-daily-exhausted', $decision->reason);
+
+        // The remaining 5 still fit.
+        $this->assertTrue($guard->allows('embedding', $tenantId, 5, Priority::Medium)->allowed);
+    }
+
+    public function test_high_priority_ignores_soft_caps_but_stops_at_the_global_hard_cap(): void
+    {
+        $this->configureBudget(['capabilities' => ['embedding' => ['global_daily_hard_units' => 200]]]);
+        $guard = app(AiBudgetGuard::class);
+        $tenantId = $this->defaultTenant->id;
+
+        $this->seedUsage($tenantId, 195); // tenant daily (100) long gone; hard cap at 200
+
+        // High does not care about the exhausted tenant budget…
+        $this->assertTrue($guard->allows('embedding', $tenantId, 5, Priority::High)->allowed);
+
+        // …but the global HARD cap stops even High.
+        $decision = $guard->allows('embedding', $tenantId, 6, Priority::High);
+        $this->assertFalse($decision->allowed);
+        $this->assertSame('global-hard-exhausted', $decision->reason);
+    }
+
+    public function test_global_soft_budget_sums_across_tenants_for_medium(): void
+    {
+        $this->configureBudget(['capabilities' => ['embedding' => [
+            'tenant_daily_units' => 10000,
+            'tenant_monthly_units' => 100000,
+            'global_daily_units' => 50,
+        ]]]);
+        $guard = app(AiBudgetGuard::class);
+
+        // ANOTHER tenant's spend counts toward the global dimension — this
+        // is why the models are not TenantScoped.
+        $this->seedUsage($this->makeTenant('Tenant B')->id, 45);
+
+        $decision = $guard->allows('embedding', $this->defaultTenant->id, 10, Priority::Medium);
+        $this->assertFalse($decision->allowed);
+        $this->assertSame('global-daily-exhausted', $decision->reason);
+
+        $this->assertTrue($guard->allows('embedding', $this->defaultTenant->id, 5, Priority::Medium)->allowed);
+    }
+
+    public function test_tenant_quota_override_beats_the_config_default(): void
+    {
+        $this->configureBudget();
+        $tenantId = $this->defaultTenant->id;
+
+        TenantAiQuota::query()->create(['tenant_id' => $tenantId, 'capability' => 'embedding', 'daily_units' => 5, 'monthly_units' => null]);
+        $guard = app(AiBudgetGuard::class);
+
+        $decision = $guard->allows('embedding', $tenantId, 6, Priority::Medium);
+        $this->assertFalse($decision->allowed);
+        $this->assertSame('tenant-daily-exhausted', $decision->reason);
+
+        $this->assertTrue($guard->allows('embedding', $tenantId, 5, Priority::Medium)->allowed);
+        // High ignores the override entirely (tenant caps are soft).
+        $this->assertTrue($guard->allows('embedding', $tenantId, 6, Priority::High)->allowed);
+    }
+
+    public function test_monthly_budget_is_the_sum_of_the_months_days_and_rolls_over(): void
+    {
+        $this->configureBudget(['capabilities' => ['embedding' => [
+            'tenant_daily_units' => 1000,
+            'tenant_monthly_units' => 100,
+        ]]]);
+        $guard = app(AiBudgetGuard::class);
+        $tenantId = $this->defaultTenant->id;
+
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-06-30 12:00:00'));
+        $this->seedUsage($tenantId, 60, '2026-06-01');
+        $this->seedUsage($tenantId, 40, '2026-06-30');
+
+        // June: 60 + 40 = the whole monthly budget.
+        $decision = $guard->allows('embedding', $tenantId, 1, Priority::Medium);
+        $this->assertFalse($decision->allowed);
+        $this->assertSame('tenant-monthly-exhausted', $decision->reason);
+
+        // July 1st: June's spend counts toward NOTHING.
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-07-01 00:05:00'));
+        $this->assertTrue($guard->allows('embedding', $tenantId, 1, Priority::Medium)->allowed);
+
+        CarbonImmutable::setTestNow();
+    }
 }

@@ -1,25 +1,77 @@
-# Sub-project B — Media Resolution + Keyframe Sampling — Implementation Plan
+# Sub-project B — Media Resolution + Keyframe Sampling — Implementation Plan (rev 2)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Resolve real media on TikTok/YouTube, sample persisted keyframes for every platform, and hand tiers C/D a stable `KeyframeSet` contract — per `docs/superpowers/specs/2026-07-18-seeded-detection-media-resolution-design.md`.
 
-**Architecture:** Ingestion adapters store real media/thumbnail URLs; a lazy per-target `MediaWorkspace` downloads each asset once (streaming, size-guarded, SSRF-pinned) and feeds recognition + keyframe persistence; an ffmpeg `KeyframeSampler` extracts deterministic even-interval frames persisted as polymorphic `keyframes` rows; YouTube gains a transcript provider feeding the existing SPOKEN_BRAND path. All new stages are kill-switched; retention + GDPR erase mirror story media.
+**Architecture:** Ingestion adapters store real media/thumbnail URLs; a lazy per-target `MediaWorkspace` downloads each asset once (streaming, size-guarded, SSRF-pinned) and routes it by the **downloaded content type**; an ffmpeg `KeyframeSampler` extracts deterministic even-interval frames persisted **transactionally** as polymorphic `keyframes` rows; YouTube gains a dedicated **transcript pipeline stage** (before recognition) with negative-result caching, and recognition consumes only persisted transcripts. Pipeline order becomes: `hashtags → transcript → recognition → keyframes → text_signals → sentiment → attribution → EMV → reach`. All new stages are kill-switched; retention + GDPR erase mirror story media.
 
 **Tech Stack:** Laravel 12, PostgreSQL, PHPUnit, ffmpeg/ffprobe via `Illuminate\Support\Facades\Process`, Apify actors via the existing `ApifyClient`.
+
+## How to execute this plan (read first)
+
+Act as a senior Laravel platform engineer. **Task 0 (seam audit) runs before any code**: verify every referenced constructor, enum case, recorder API, factory, and test helper against the repository, and record a deviation report. Where repository reality differs from a task's code, **amend the task and follow reality** — the architecture (workspace, keyframes contract, transcript stage, markers) is approved and fixed; the code blocks are strong references, not gospel. Never fabricate telemetry or provenance objects merely to satisfy an existing interface — extend the interface instead.
+
+The plan is three **independently mergeable slices**, each ending in a full-suite gate:
+
+- **Slice B1 (Tasks 0–7):** media contracts + resolution — config, adapters, streaming fetcher, workspace, recognition refactor.
+- **Slice B2 (Tasks 8–11):** keyframe persistence + extraction pipeline.
+- **Slice B3 (Tasks 12–17):** YouTube transcript stage, retention, GDPR, documentation.
+
+Run the focused test after each step, the file's suite after each task, and the FULL suite at each slice gate. Commit only coherent green changes.
 
 ## Global Constraints
 
 - Run tests with `XDEBUG_MODE=off vendor/bin/phpunit` (repo convention; `--filter` for single tests).
 - NEVER add a `Co-Authored-By` or any AI-attribution trailer to commits (a commit hook rejects it).
 - Base test class `Tests\TestCase`; DB tests `use RefreshDatabase;` (auto-creates + binds a default tenant).
-- Fail-closed, never fabricate: missing media/signal → explainable skip marker, no row.
+- Fail-closed, never fabricate: missing media/signal → explainable skip marker, no row. Never fabricate telemetry or provenance.
+- **Route media by the DOWNLOADED content type, never only by the row's `content_type`** — a video-typed row can legitimately carry an image (YouTube's thumbnail is its only in-freeze visual; a reel row can fall back to `displayUrl`).
 - Tenant-scoped: new tables use `App\Shared\Tenancy\BelongsToTenant`; commands iterating tenants use explicit `tenant_id` predicates + `withoutGlobalScopes()`.
 - DP-004 human precedence and DP-005 (inline media to providers, no URL leaves the platform, `AiPayloadGuard` untouched) are preserved.
 - Kill switches: `qds.enrichment.keyframes.enabled` and `qds.ingestion.youtube_transcript.enabled` (both default `true`); OFF = no behavioural change vs today.
 - Backward compatible: existing Instagram recognition behaviour and the full suite (~1,300 tests) stay green. The former `MediaFetcher::MAX_BYTES = 20_000_000` becomes config `qds.enrichment.recognition.inline_max_bytes` with the same default.
 - The branch is `feat/seeded-detection-media` (already exists, rebased on post-A main). Commit after every task.
 - Sub-project A landed on main: `EnrichmentPipeline` already has a `text_signals` stage; `BrandLexicon` has `matchAllInText`/`resolveHandle`; adapters already pass `mentions/productTags/collaborators/brandedContentLabel` to `ContentData`. Do not touch those.
+
+---
+
+# Slice B1 — Media contracts & resolution
+
+### Task 0: Seam audit + deviation report (no production code)
+
+**Files:**
+- Create: `docs/superpowers/plans/2026-07-19-seam-audit.md`
+- Modify: this plan file inline, where reality differs
+
+**Interfaces:** none — this task produces knowledge, not code. Every later task depends on its findings.
+
+- [ ] **Step 1: Audit each seam below.** For each, read the file(s), record the ACTUAL signature/values in the audit doc, and note `OK` or `DEVIATION` against what this plan's code blocks assume.
+
+1. **`CallOutcome` enum** — `app/Platform/Ingestion/Support/CallOutcome.php`: exact case names + backing values (Task 13's test asserts a failure outcome).
+2. **`ProviderCallRecorder`** — `app/Platform/Ingestion/Observability/ProviderCallRecorder.php`: full public API; the exact type returned by `start()`; what `recordCompletion(context, NormalizedBatch, PersistenceResult)` writes per field. Task 13 extends this class — the extension must share the row-writing internals, not duplicate them.
+3. **`ProviderResponse` DTO** — `app/Platform/Ingestion/DTO/ProviderResponse.php`: constructor signature (plan assumes `items, httpStatus, responseBytes, requestMs, sourceVersion`).
+4. **Morph map** — `grep -rn "enforceMorphMap\|morphMap" app/`: plan assumes NONE exists, so `getMorphClass()` returns the FQCN and `keyframes.owner_type` stores FQCNs. Confirm.
+5. **`BelongsToTenant`** — `app/Shared/Tenancy/BelongsToTenant.php`: when is `tenant_id` stamped (creating event? requires bound `TenantContext`?); what happens on create with NO tenant context (Task 15's command, Task 12/8 tests).
+6. **Factories** — `database/factories/`: required attributes of `ContentItemFactory`, `StoryFactory`, `PlatformAccountFactory`, `CreatorFactory`, `BrandFactory`, and whether `provenance` is auto-filled (Tasks 5, 8, 10, 11, 13, 14 tests build these).
+7. **Test helpers** — `tests/Feature/Enrichment/RecognitionPipelineTest.php` (its fake helpers, content-item builder names, and the direct `enrich()` call at ~line 116), `tests/Feature/Enrichment/AudioExtractorTest.php` (the synthetic-video helper's real name/return type), `tests/TestCase.php` (the default-tenant property name used in Task 15's test).
+8. **`EnrichmentRun.stages` assertions** — `grep -rn "stages\[" tests/`: which tests assert the stages array shape (they gain `transcript` and `keyframes` keys in Tasks 13/10).
+9. **Guzzle sink semantics** — write a THROWAWAY scratch script (scratchpad, not the repo) that hits a local `php -S` server through `Http::withOptions(['sink' => …])` and proves: (a) whether a redirect hop's body is written to the sink and whether the next hop truncates it; (b) whether an exception thrown from the `'progress'` option aborts the transfer and propagates. Record the findings — Task 4's redirect-truncation and cap-abort code depends on them.
+10. **Story archive edge** — `app/Platform/Ingestion/Jobs/ArchiveStoryMediaJob.php` `extensionFor()`: confirm extensions are DERIVED from Content-Type at archive time (so extension-routing is trustworthy) and how common the `.bin` fallback is; confirm `Story.provenance` is non-null in practice.
+11. **`MonitoringSetting`** — required fields on create (is `updated_by` nullable?) for Task 15's test.
+12. **Enum case names** — `ContentType::{ImagePost, Carousel, Reel, Short, Video}`, `Platform::{Instagram, TikTok, YouTube}`, `RecognitionType::SpokenBrand`: confirm exact case names used throughout the plan.
+13. **Oversized-media marker assertions** — `grep -rn "fetch-failed\|too-large" tests/`: which existing tests assert the old markers (Task 7 changes some to the new split markers).
+
+- [ ] **Step 2: Write the deviation report** to `docs/superpowers/plans/2026-07-19-seam-audit.md`: one section per seam, `OK`/`DEVIATION` verdict, the actual signature, and — for each DEVIATION — the concrete amendment to the affected task(s).
+
+- [ ] **Step 3: Amend this plan file inline** wherever the audit found a deviation (edit the task's code block to match reality; note `[amended per seam audit]` beside it).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add docs/superpowers/plans/2026-07-19-seam-audit.md docs/superpowers/plans/2026-07-19-seeded-detection-media-resolution.md
+git commit -m "docs(enrichment): sub-project B seam audit + plan amendments"
+```
 
 ---
 
@@ -87,7 +139,7 @@ In `config/qds.php`, inside the `'ingestion'` array (after the `'campaign_refres
 
 ```php
         // YouTube transcript fetch (ADR-0028, sub-project B): one actor run
-        // per NEW YouTube video, invoked lazily from enrichment recognition.
+        // per YouTube video, from the dedicated transcript pipeline stage.
         // Kill switch: off = no actor call, SPOKEN_BRAND stays unavailable.
         'youtube_transcript' => [
             'enabled' => (bool) env('QDS_INGESTION_YOUTUBE_TRANSCRIPT_ENABLED', true),
@@ -249,7 +301,7 @@ git commit -m "feat(ingestion): TikTok media_urls carry the actor's real downloa
 
 **Interfaces:**
 - Consumes: `Extract::string`.
-- Produces: YouTube `ContentData::mediaUrls` = `[<best thumbnail URL>]` (maxres → standard → high → medium → default; `[]` when none), `permalink` = the watch URL (new — feeds nothing else yet, but keeps the canonical page URL).
+- Produces: YouTube `ContentData::mediaUrls` = `[<best thumbnail URL>]` (maxres → standard → high → medium → default; `[]` when none), `permalink` = the watch URL. NOTE for later tasks: the row stays `content_type = VIDEO/SHORT` while `media_urls` holds an IMAGE — Task 5's content-type routing is what makes that safe.
 
 - [ ] **Step 1: Update the fixture**
 
@@ -342,695 +394,18 @@ git commit -m "feat(ingestion): YouTube media_urls carry the max-res thumbnail; 
 
 ---
 
-### Task 4: `content_transcripts` table + `ContentTranscript` model
-
-**Files:**
-- Create: `database/migrations/2026_07_19_100001_create_content_transcripts_table.php`
-- Create: `app/Modules/Monitoring/Models/ContentTranscript.php`
-- Modify: `app/Modules/Monitoring/Models/ContentItem.php` (add `transcripts()` HasMany)
-- Test: `tests/Feature/Enrichment/ContentTranscriptTest.php` (create)
-
-**Interfaces:**
-- Consumes: `BelongsToTenant`, `AsValueObject`, `Provenance`.
-- Produces: `ContentTranscript` model — fillable `content_item_id, language, text, segments, provider, provenance, checksum, fetched_at`; casts `segments => array`, `provenance => AsValueObject:Provenance`, `fetched_at => immutable_datetime`; unique `(content_item_id, language, provider)`; `ContentItem::transcripts(): HasMany`.
-
-- [ ] **Step 1: Write the failing test**
-
-```php
-<?php
-
-namespace Tests\Feature\Enrichment;
-
-use App\Modules\CRM\Models\Creator;
-use App\Modules\CRM\Models\PlatformAccount;
-use App\Modules\Monitoring\Models\ContentItem;
-use App\Modules\Monitoring\Models\ContentTranscript;
-use App\Platform\Ingestion\SourceRegistry;
-use App\Shared\ValueObjects\Provenance;
-use Carbon\CarbonImmutable;
-use Illuminate\Database\UniqueConstraintViolationException;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Tests\TestCase;
-
-class ContentTranscriptTest extends TestCase
-{
-    use RefreshDatabase;
-
-    private function makeContentItem(): ContentItem
-    {
-        $account = PlatformAccount::factory()->for(Creator::factory())->create();
-
-        return ContentItem::factory()->for($account, 'platformAccount')->create();
-    }
-
-    private function attributes(ContentItem $item): array
-    {
-        return [
-            'content_item_id' => $item->id,
-            'language' => 'und',
-            'text' => 'danke an Glossier für das PR Paket',
-            'segments' => [['start' => '0.0', 'dur' => '4.2', 'text' => 'danke an Glossier für das PR Paket']],
-            'provider' => SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT,
-            'provenance' => new Provenance(SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT, CarbonImmutable::now(), 'youtube-transcript-v1'),
-            'checksum' => hash('sha256', 'danke an Glossier für das PR Paket'),
-            'fetched_at' => CarbonImmutable::now(),
-        ];
-    }
-
-    public function test_transcript_row_is_tenant_stamped_and_reachable_from_content(): void
-    {
-        $item = $this->makeContentItem();
-        $row = ContentTranscript::query()->create($this->attributes($item));
-
-        $this->assertNotNull($row->tenant_id);
-        $this->assertSame($item->tenant_id, $row->tenant_id);
-        $this->assertTrue($item->transcripts()->whereKey($row->id)->exists());
-        $this->assertSame('und', $row->language);
-    }
-
-    public function test_one_transcript_per_item_language_provider(): void
-    {
-        $item = $this->makeContentItem();
-        ContentTranscript::query()->create($this->attributes($item));
-
-        $this->expectException(UniqueConstraintViolationException::class);
-        ContentTranscript::query()->create($this->attributes($item));
-    }
-}
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/ContentTranscriptTest.php`
-Expected: ERROR — class `ContentTranscript` not found.
-
-- [ ] **Step 3: Implement the migration**
-
-```php
-<?php
-
-use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
-
-return new class extends Migration
-{
-    public function up(): void
-    {
-        Schema::create('content_transcripts', function (Blueprint $table): void {
-            $table->id();
-            $table->unsignedBigInteger('tenant_id')->index();
-            $table->foreignId('content_item_id')->constrained()->cascadeOnDelete();
-            // 'und' (BCP-47 undetermined) when the provider names no language —
-            // NOT NULL so the unique key below has no NULL-duplicate hole.
-            $table->string('language', 20);
-            $table->text('text');
-            $table->jsonb('segments')->nullable();
-            $table->string('provider', 100);
-            $table->jsonb('provenance');
-            $table->char('checksum', 64);
-            $table->timestamp('fetched_at');
-            $table->timestamps();
-
-            $table->unique(['content_item_id', 'language', 'provider']);
-        });
-    }
-
-    public function down(): void
-    {
-        Schema::dropIfExists('content_transcripts');
-    }
-};
-```
-
-- [ ] **Step 4: Implement the model**
-
-```php
-<?php
-
-namespace App\Modules\Monitoring\Models;
-
-use App\Shared\Casts\AsValueObject;
-use App\Shared\Tenancy\BelongsToTenant;
-use App\Shared\ValueObjects\Provenance;
-use Carbon\CarbonImmutable;
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
-
-/**
- * A provider-derived transcript of one ContentItem (sub-project B) —
- * refreshable, multi-language, segment-ready. v1 source: the YouTube
- * transcript actor (SRC-apify-youtube-transcript, ADR-0028); tier D's
- * multilingual speech will add rows under other providers/languages.
- *
- * Tenant-owned (ADR-0019); erased with the creator's content (GDPR).
- *
- * @property int $id
- * @property int|null $tenant_id
- * @property int $content_item_id
- * @property string $language BCP-47; 'und' when the provider names none
- * @property string $text
- * @property array<int, array<string, string>>|null $segments timestamped cues
- * @property string $provider SRC-* id
- * @property Provenance $provenance
- * @property string $checksum sha256 of text
- * @property CarbonImmutable $fetched_at
- */
-class ContentTranscript extends Model
-{
-    use BelongsToTenant;
-
-    protected $fillable = [
-        'content_item_id',
-        'language',
-        'text',
-        'segments',
-        'provider',
-        'provenance',
-        'checksum',
-        'fetched_at',
-    ];
-
-    /** @return array<string, string> */
-    protected function casts(): array
-    {
-        return [
-            'segments' => 'array',
-            'provenance' => AsValueObject::class.':'.Provenance::class,
-            'fetched_at' => 'immutable_datetime',
-        ];
-    }
-
-    /** @return BelongsTo<ContentItem, $this> */
-    public function contentItem(): BelongsTo
-    {
-        return $this->belongsTo(ContentItem::class);
-    }
-}
-```
-
-In `ContentItem.php`, add after `enrichmentRuns()`:
-
-```php
-    /** @return HasMany<ContentTranscript, $this> */
-    public function transcripts(): HasMany
-    {
-        return $this->hasMany(ContentTranscript::class);
-    }
-```
-
-- [ ] **Step 5: Run test to verify it passes**
-
-Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/ContentTranscriptTest.php`
-Expected: PASS (2 tests).
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add database/migrations/2026_07_19_100001_create_content_transcripts_table.php app/Modules/Monitoring/Models/ContentTranscript.php app/Modules/Monitoring/Models/ContentItem.php tests/Feature/Enrichment/ContentTranscriptTest.php
-git commit -m "feat(enrichment): content_transcripts table + model (refreshable, multi-language)"
-```
-
----
-
-### Task 5: `YouTubeTranscriptFetcher` (actor call + persistence + telemetry)
-
-**Files:**
-- Create: `app/Platform/Enrichment/Transcripts/YouTubeTranscriptFetcher.php`
-- Create: `tests/Fixtures/providers/youtube-transcript.json`
-- Test: `tests/Feature/Enrichment/YouTubeTranscriptFetcherTest.php` (create)
-
-**Interfaces:**
-- Consumes: `ApifyClient::runActor(string $sourceId, string $actorId, array $input): ProviderResponse`; `ProviderCallRecorder::{start,recordFailure,recordCompletion}`; `ContentTranscript` (Task 4); `SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT` (Task 1).
-- Produces: `YouTubeTranscriptFetcher::ensureFor(ContentItem $item, string $correlationId, int $retryCount): ?ContentTranscript` — returns the existing row without re-fetching; fetches + persists otherwise; `null` = unavailable (normal outcome, never throws). Task 6 consumes this.
-
-- [ ] **Step 1: Create the fixture**
-
-`tests/Fixtures/providers/youtube-transcript.json`:
-
-```json
-[
-  {
-    "data": [
-      {"start": "0.00", "dur": "4.20", "text": "danke an Glossier für das PR Paket"},
-      {"start": "4.20", "dur": "3.10", "text": "der You Perfume Duft ist unglaublich"}
-    ]
-  }
-]
-```
-
-- [ ] **Step 2: Write the failing test**
-
-```php
-<?php
-
-namespace Tests\Feature\Enrichment;
-
-use App\Modules\CRM\Models\Creator;
-use App\Modules\CRM\Models\PlatformAccount;
-use App\Modules\Monitoring\Models\ContentItem;
-use App\Modules\Monitoring\Models\ContentTranscript;
-use App\Platform\Enrichment\Transcripts\YouTubeTranscriptFetcher;
-use App\Platform\Ingestion\Models\ProviderCall;
-use App\Platform\Ingestion\SourceRegistry;
-use App\Shared\Enums\ContentType;
-use App\Shared\Enums\Platform;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Http;
-use Tests\Support\FakesProviderResponses;
-use Tests\TestCase;
-
-class YouTubeTranscriptFetcherTest extends TestCase
-{
-    use FakesProviderResponses;
-    use RefreshDatabase;
-
-    private function makeYouTubeItem(): ContentItem
-    {
-        $account = PlatformAccount::factory()->for(Creator::factory())->create(['platform' => Platform::YouTube]);
-
-        return ContentItem::factory()->for($account, 'platformAccount')->create([
-            'platform' => Platform::YouTube,
-            'content_type' => ContentType::Video,
-            'external_id' => 'vid00000001',
-        ]);
-    }
-
-    public function test_fetches_persists_and_records_telemetry(): void
-    {
-        $this->fakeProviderCredentials();
-        $this->fakeApifyActor((string) config('services.apify.actors.youtube_transcript'), $this->fixture('youtube-transcript'));
-        $item = $this->makeYouTubeItem();
-
-        $row = app(YouTubeTranscriptFetcher::class)->ensureFor($item, 'corr-1', 0);
-
-        $this->assertNotNull($row);
-        $this->assertSame('danke an Glossier für das PR Paket der You Perfume Duft ist unglaublich', $row->text);
-        $this->assertSame('und', $row->language);
-        $this->assertSame(SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT, $row->provider);
-        $this->assertCount(2, $row->segments);
-        $this->assertSame(1, ProviderCall::query()->where('source', SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT)->where('operation', 'transcript.fetch')->count());
-    }
-
-    public function test_existing_row_short_circuits_without_actor_call(): void
-    {
-        $this->fakeProviderCredentials();
-        Http::fake(); // any HTTP call would be recorded
-        $item = $this->makeYouTubeItem();
-        ContentTranscript::query()->create([
-            'content_item_id' => $item->id, 'language' => 'und', 'text' => 'schon da',
-            'provider' => SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT,
-            'provenance' => new \App\Shared\ValueObjects\Provenance(SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT, \Carbon\CarbonImmutable::now(), 'youtube-transcript-v1'),
-            'checksum' => hash('sha256', 'schon da'), 'fetched_at' => \Carbon\CarbonImmutable::now(),
-        ]);
-
-        $row = app(YouTubeTranscriptFetcher::class)->ensureFor($item, 'corr-2', 0);
-
-        $this->assertSame('schon da', $row?->text);
-        Http::assertNothingSent();
-    }
-
-    public function test_no_captions_yields_null_not_an_exception(): void
-    {
-        $this->fakeProviderCredentials();
-        $this->fakeApifyActor((string) config('services.apify.actors.youtube_transcript'), [['data' => []]]);
-        $item = $this->makeYouTubeItem();
-
-        $this->assertNull(app(YouTubeTranscriptFetcher::class)->ensureFor($item, 'corr-3', 0));
-        $this->assertSame(0, ContentTranscript::query()->count());
-    }
-
-    public function test_provider_failure_yields_null_and_records_failure(): void
-    {
-        $this->fakeProviderCredentials();
-        $this->fakeApifyActor((string) config('services.apify.actors.youtube_transcript'), [], 500);
-        $item = $this->makeYouTubeItem();
-
-        $this->assertNull(app(YouTubeTranscriptFetcher::class)->ensureFor($item, 'corr-4', 0));
-        $this->assertSame(1, ProviderCall::query()->where('source', SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT)->where('outcome', 'FAILURE')->count());
-    }
-}
-```
-
-Note: if `ProviderCall::outcome` is stored differently (check `app/Platform/Ingestion/Support/CallOutcome.php` enum values), assert with `CallOutcome::Failure->value` instead of the literal.
-
-- [ ] **Step 3: Run test to verify it fails**
-
-Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/YouTubeTranscriptFetcherTest.php`
-Expected: ERROR — class `YouTubeTranscriptFetcher` not found.
-
-- [ ] **Step 4: Implement**
-
-```php
-<?php
-
-namespace App\Platform\Enrichment\Transcripts;
-
-use App\Modules\Monitoring\Models\ContentItem;
-use App\Modules\Monitoring\Models\ContentTranscript;
-use App\Platform\Ingestion\DTO\NormalizedBatch;
-use App\Platform\Ingestion\Exceptions\ProviderCallException;
-use App\Platform\Ingestion\Http\ApifyClient;
-use App\Platform\Ingestion\Observability\ProviderCallRecorder;
-use App\Platform\Ingestion\Persistence\PersistenceResult;
-use App\Platform\Ingestion\SourceRegistry;
-use App\Shared\ValueObjects\Provenance;
-use Carbon\CarbonImmutable;
-
-/**
- * Lazily fetches one YouTube video's transcript via the ADR-0028 actor
- * (SRC-apify-youtube-transcript) and persists it as a ContentTranscript.
- *
- * - An existing row short-circuits (one billed run per video, ever).
- * - No captions / provider failure → null: transcript stays unavailable,
- *   the enrichment run does NOT fail (mirrors the speech:provider-error
- *   swallow — a transcript is an optional signal, never fabricated).
- * - Every actor call is recorded in External API Monitoring.
- */
-class YouTubeTranscriptFetcher
-{
-    public function __construct(
-        private readonly ApifyClient $client,
-        private readonly ProviderCallRecorder $recorder,
-    ) {}
-
-    public function ensureFor(ContentItem $item, string $correlationId, int $retryCount): ?ContentTranscript
-    {
-        $existing = ContentTranscript::query()
-            ->where('content_item_id', $item->id)
-            ->latest('id')
-            ->first();
-
-        if ($existing !== null) {
-            return $existing;
-        }
-
-        if (! is_string($item->external_id) || $item->external_id === '') {
-            return null;
-        }
-
-        $context = $this->recorder->start(
-            SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT,
-            'transcript.fetch',
-            $correlationId,
-            null,
-            $item->platform_account_id,
-            $retryCount,
-        );
-
-        try {
-            $response = $this->client->runActor(
-                SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT,
-                (string) config('services.apify.actors.youtube_transcript'),
-                ['videoUrl' => "https://www.youtube.com/watch?v={$item->external_id}"],
-            );
-        } catch (ProviderCallException $e) {
-            $this->recorder->recordFailure($context, $e);
-
-            return null;
-        }
-
-        $segments = $this->segmentsFrom($response->items);
-        $text = trim(implode(' ', array_column($segments, 'text')));
-
-        $row = null;
-
-        if ($text !== '') {
-            $row = ContentTranscript::query()->updateOrCreate(
-                [
-                    'content_item_id' => $item->id,
-                    'language' => 'und',
-                    'provider' => SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT,
-                ],
-                [
-                    'text' => $text,
-                    'segments' => $segments,
-                    'checksum' => hash('sha256', $text),
-                    'fetched_at' => CarbonImmutable::now(),
-                    'provenance' => new Provenance(
-                        SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT,
-                        CarbonImmutable::now(),
-                        'youtube-transcript-v1',
-                    ),
-                ],
-            );
-        }
-
-        $this->recorder->recordCompletion(
-            $context,
-            new NormalizedBatch(items: [], rejected: [], response: $response, validationMs: 0.0, normalizationMs: 0.0),
-            new PersistenceResult(created: $row !== null ? 1 : 0, duplicates: 0, persistenceMs: 0.0),
-        );
-
-        return $row;
-    }
-
-    /**
-     * Tolerant parse of the actor's dataset items — each item may carry a
-     * `data` list of {start, dur, text} caption cues. Anything malformed is
-     * skipped (never fabricated).
-     *
-     * @param  list<mixed>  $items
-     * @return list<array{start: string, dur: string, text: string}>
-     */
-    private function segmentsFrom(array $items): array
-    {
-        $segments = [];
-
-        foreach ($items as $item) {
-            if (! is_array($item)) {
-                continue;
-            }
-
-            foreach ((array) ($item['data'] ?? []) as $segment) {
-                if (is_array($segment) && is_string($segment['text'] ?? null) && trim($segment['text']) !== '') {
-                    $segments[] = [
-                        'start' => (string) ($segment['start'] ?? ''),
-                        'dur' => (string) ($segment['dur'] ?? ''),
-                        'text' => trim($segment['text']),
-                    ];
-                }
-            }
-        }
-
-        return $segments;
-    }
-}
-```
-
-- [ ] **Step 5: Run test to verify it passes**
-
-Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/YouTubeTranscriptFetcherTest.php`
-Expected: PASS (4 tests).
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add app/Platform/Enrichment/Transcripts/YouTubeTranscriptFetcher.php tests/Fixtures/providers/youtube-transcript.json tests/Feature/Enrichment/YouTubeTranscriptFetcherTest.php
-git commit -m "feat(enrichment): YouTubeTranscriptFetcher — one telemetered actor run per video"
-```
-
----
-
-### Task 6: Transcript → SPOKEN_BRAND seam (`transcriptBatch` + RecognitionService YouTube branch)
-
-**Files:**
-- Modify: `app/Platform/Enrichment/Recognition/RecognitionNormalizer.php` (add `transcriptBatch()`)
-- Modify: `app/Platform/Enrichment/Recognition/RecognitionService.php` (constructor + a YouTube branch at the top of `enrich()`)
-- Test: `tests/Feature/Enrichment/TranscriptRecognitionTest.php` (create)
-
-**Interfaces:**
-- Consumes: `YouTubeTranscriptFetcher::ensureFor` (Task 5); `BrandLexicon::matchInText`; `RecognitionService::persist()` (existing private upsert — reused, NOT duplicated).
-- Produces: `RecognitionNormalizer::transcriptBatch(string $transcript): NormalizedBatch` (SPOKEN_BRAND candidates, synthetic `ProviderResponse` with `sourceVersion: 'youtube-transcript-v1'`); skip markers `youtube-transcript:disabled` / `youtube-transcript:unavailable`. The branch runs BEFORE the Google-providers-configured early return (a transcript needs no Google key).
-
-- [ ] **Step 1: Write the failing test**
-
-```php
-<?php
-
-namespace Tests\Feature\Enrichment;
-
-use App\Modules\CRM\Models\Brand;
-use App\Modules\CRM\Models\Creator;
-use App\Modules\CRM\Models\PlatformAccount;
-use App\Modules\Monitoring\Models\ContentItem;
-use App\Modules\Monitoring\Models\RecognitionDetection;
-use App\Platform\Enrichment\Recognition\RecognitionService;
-use App\Platform\Ingestion\SourceRegistry;
-use App\Shared\Enums\ContentType;
-use App\Shared\Enums\Platform;
-use App\Shared\Enums\RecognitionType;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Tests\Support\FakesProviderResponses;
-use Tests\TestCase;
-
-class TranscriptRecognitionTest extends TestCase
-{
-    use FakesProviderResponses;
-    use RefreshDatabase;
-
-    private function makeYouTubeItem(): ContentItem
-    {
-        $account = PlatformAccount::factory()->for(Creator::factory())->create(['platform' => Platform::YouTube]);
-
-        return ContentItem::factory()->for($account, 'platformAccount')->create([
-            'platform' => Platform::YouTube,
-            'content_type' => ContentType::Video,
-            'external_id' => 'vid00000001',
-            'media_urls' => [],
-        ]);
-    }
-
-    public function test_transcript_yields_spoken_brand_detection_with_actor_provenance_and_no_google_call(): void
-    {
-        Brand::factory()->create(['name' => 'Glossier']);
-        $this->fakeProviderCredentials();
-        $this->fakeApifyActor((string) config('services.apify.actors.youtube_transcript'), $this->fixture('youtube-transcript'));
-        // NO Google provider keys configured — the transcript path must still run.
-        $item = $this->makeYouTubeItem();
-
-        $result = app(RecognitionService::class)->enrich($item, 'corr-t1');
-
-        $this->assertSame('completed', $result['status']);
-        $detection = RecognitionDetection::query()
-            ->where('content_item_id', $item->id)
-            ->where('recognition_type', RecognitionType::SpokenBrand)
-            ->firstOrFail();
-        $this->assertSame('Glossier', $detection->detected_brand);
-        $this->assertSame(SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT, $detection->provenance->source);
-    }
-
-    public function test_kill_switch_off_reports_disabled_and_makes_no_actor_call(): void
-    {
-        config(['qds.ingestion.youtube_transcript.enabled' => false]);
-        \Illuminate\Support\Facades\Http::fake();
-        $item = $this->makeYouTubeItem();
-
-        $result = app(RecognitionService::class)->enrich($item, 'corr-t2');
-
-        $this->assertContains('youtube-transcript:disabled', $result['skipped']);
-        \Illuminate\Support\Facades\Http::assertNothingSent();
-    }
-
-    public function test_no_captions_reports_unavailable(): void
-    {
-        $this->fakeProviderCredentials();
-        $this->fakeApifyActor((string) config('services.apify.actors.youtube_transcript'), [['data' => []]]);
-        $item = $this->makeYouTubeItem();
-
-        $result = app(RecognitionService::class)->enrich($item, 'corr-t3');
-
-        $this->assertContains('youtube-transcript:unavailable', $result['skipped']);
-    }
-}
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/TranscriptRecognitionTest.php`
-Expected: FAIL — no SPOKEN_BRAND detection is created (the branch does not exist yet).
-
-- [ ] **Step 3: Add `transcriptBatch` to `RecognitionNormalizer`**
-
-Add after `speechBatch()` (imports: `App\Platform\Ingestion\DTO\ProviderResponse` is already imported):
-
-```php
-    /**
-     * A stored provider transcript → SPOKEN_BRAND candidates (sub-project B:
-     * YouTube rides the transcript actor since its audio is not downloadable
-     * in-freeze). Same lexicon gate as speechBatch — free text with no known
-     * brand is not a recognition hit.
-     */
-    public function transcriptBatch(string $transcript): NormalizedBatch
-    {
-        $start = microtime(true);
-
-        $items = [];
-        $candidate = $this->textCandidate(RecognitionType::SpokenBrand, $transcript, null, 'spoken-brand-transcript-match');
-
-        if ($candidate !== null) {
-            $items[] = $candidate;
-        }
-
-        return new NormalizedBatch(
-            items: $items,
-            rejected: [],
-            response: new ProviderResponse(
-                items: [],
-                httpStatus: 200,
-                responseBytes: 0,
-                requestMs: 0.0,
-                sourceVersion: 'youtube-transcript-v1',
-            ),
-            validationMs: 0.0,
-            normalizationMs: (microtime(true) - $start) * 1000,
-        );
-    }
-```
-
-- [ ] **Step 4: Add the YouTube branch to `RecognitionService`**
-
-Constructor: add `private readonly YouTubeTranscriptFetcher $transcripts,` after the `AudioExtractor $audio` parameter (import `App\Platform\Enrichment\Transcripts\YouTubeTranscriptFetcher` and `App\Shared\Enums\Platform`).
-
-In `enrich()`, insert at the very top (before the no-provider-configured early return), and note the early return must now RETURN the accumulated `$created`/`$updated` instead of hard-coded zeros:
-
-```php
-        // YouTube SPOKEN_BRAND rides the stored transcript (ADR-0028): its
-        // audio is not downloadable in-freeze, and mining a transcript needs
-        // no Google key — so this runs before the provider-config gate.
-        if ($target instanceof ContentItem && $target->platform === Platform::YouTube) {
-            if (! (bool) config('qds.ingestion.youtube_transcript.enabled')) {
-                $skipped[] = 'youtube-transcript:disabled';
-            } else {
-                $transcript = $this->transcripts->ensureFor($target, $correlationId, $retryCount);
-
-                if ($transcript === null) {
-                    $skipped[] = 'youtube-transcript:unavailable';
-                } else {
-                    [$c, $u] = $this->persist($target, SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT, $this->normalizer->transcriptBatch($transcript->text));
-                    $created += $c;
-                    $updated += $u;
-                }
-            }
-        }
-```
-
-Change the not-configured early return from `return ['status' => 'completed-empty', 'created' => 0, 'updated' => 0, 'skipped' => $skipped];` to:
-
-```php
-            return [
-                'status' => $created + $updated > 0 ? 'completed' : 'completed-empty',
-                'created' => $created,
-                'updated' => $updated,
-                'skipped' => $skipped,
-            ];
-```
-
-- [ ] **Step 5: Run test + the existing recognition suite**
-
-Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/TranscriptRecognitionTest.php tests/Feature/Enrichment/RecognitionPipelineTest.php`
-Expected: all PASS (the branch only fires for YouTube ContentItems; existing tests use Instagram/stories).
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add app/Platform/Enrichment/Recognition/RecognitionNormalizer.php app/Platform/Enrichment/Recognition/RecognitionService.php tests/Feature/Enrichment/TranscriptRecognitionTest.php
-git commit -m "feat(enrichment): YouTube SPOKEN_BRAND from the stored transcript (no Google call)"
-```
-
----
-
-### Task 7: `MediaFetcher::streamToFile` (streaming, size-guarded, SSRF-pinned)
+### Task 4: `MediaFetcher::streamToFile` (streaming, size-guarded, SSRF-pinned) + real-server proof
 
 **Files:**
 - Create: `app/Platform/Enrichment/Media/StreamStatus.php`
 - Create: `app/Platform/Enrichment/Media/StreamResult.php`
-- Modify: `app/Platform/Enrichment/Recognition/MediaFetcher.php`
-- Test: `tests/Feature/Enrichment/MediaStreamingTest.php` (create)
+- Modify: `app/Platform/Enrichment/Recognition/MediaFetcher.php` (add `streamToFile`; make `ipIsPublic()` `protected` for the loopback-server test)
+- Test: `tests/Feature/Enrichment/MediaStreamingTest.php` (create — `Http::fake` status mapping)
+- Test: `tests/Feature/Enrichment/MediaStreamingRealServerTest.php` (create — real `php -S` integration: sink, redirect truncation, mid-stream cap)
 
 **Interfaces:**
-- Consumes: the existing private SSRF helpers (`resolvePublicIp`, `resolveRedirectTarget`) — reused, not duplicated.
-- Produces: `MediaFetcher::streamToFile(string $url, string $sinkPath, int $maxBytes): StreamResult` where `StreamResult{ StreamStatus $status; ?string $contentType }` and `enum StreamStatus: string { Ok, TooLarge, Gone, Failed }`. Task 8 consumes this.
+- Consumes: the existing private SSRF helpers (`resolvePublicIp`, `resolveRedirectTarget`) — reused, not duplicated; Task 0's Guzzle-sink findings (seam 9) govern the redirect-truncation details.
+- Produces: `MediaFetcher::streamToFile(string $url, string $sinkPath, int $maxBytes): StreamResult` where `StreamResult{ StreamStatus $status; ?string $contentType }` and `enum StreamStatus: string { Ok, TooLarge, Gone, Failed }`. Task 5 consumes this.
 
 - [ ] **Step 1: Create the enum + VO**
 
@@ -1069,7 +444,7 @@ final readonly class StreamResult
 }
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [ ] **Step 2: Write the failing fake-based test**
 
 ```php
 <?php
@@ -1160,7 +535,17 @@ Expected: ERROR — method `streamToFile` does not exist.
 
 - [ ] **Step 4: Implement in `MediaFetcher`**
 
-Add imports `App\Platform\Enrichment\Media\StreamResult;` and `App\Platform\Enrichment\Media\StreamStatus;`. Add after `fromPublicUrl()`:
+Add imports `App\Platform\Enrichment\Media\StreamResult;` and `App\Platform\Enrichment\Media\StreamStatus;`. Change `private function ipIsPublic` to `protected function ipIsPublic` with this comment above it:
+
+```php
+    /**
+     * Protected (not private) so the real-server integration test can
+     * subclass and allow the loopback address its php -S fixture binds —
+     * production behaviour is unchanged.
+     */
+```
+
+Add after `fromPublicUrl()`:
 
 ```php
     /**
@@ -1213,9 +598,16 @@ Add imports `App\Platform\Enrichment\Media\StreamResult;` and `App\Platform\Enri
 
             $next = $this->resolveRedirectTarget($url, (string) $response->header('Location'));
 
-            return $next === null
-                ? new StreamResult(StreamStatus::Failed)
-                : $this->streamFollowingRedirects($next, $sinkPath, $maxBytes, $redirectsLeft - 1);
+            if ($next === null) {
+                return new StreamResult(StreamStatus::Failed);
+            }
+
+            // Belt-and-braces over Guzzle's per-request sink handling (seam
+            // audit #9): a redirect hop must never leave its bytes in front
+            // of the final hop's payload.
+            @file_put_contents($sinkPath, '');
+
+            return $this->streamFollowingRedirects($next, $sinkPath, $maxBytes, $redirectsLeft - 1);
         }
 
         if (in_array($response->status(), [403, 404, 410], true)) {
@@ -1243,8 +635,11 @@ Add imports `App\Platform\Enrichment\Media\StreamResult;` and `App\Platform\Enri
         }
 
         // Http::fake() bypasses curl's sink — materialize the body so tests
-        // and production share one code path; real transfers already wrote
-        // the sink and body() just re-reads that same stream.
+        // and production share one code path. Guarded by filesize so a REAL
+        // transfer (sink already written) never loads a large body into
+        // memory: body() is only reached when the sink is still empty.
+        clearstatcache(true, $sinkPath);
+
         if ((int) @filesize($sinkPath) === 0) {
             $body = $response->body();
 
@@ -1254,12 +649,13 @@ Add imports `App\Platform\Enrichment\Media\StreamResult;` and `App\Platform\Enri
         }
 
         clearstatcache(true, $sinkPath);
+        $size = (int) @filesize($sinkPath);
 
-        if ((int) @filesize($sinkPath) > $maxBytes) {
+        if ($size > $maxBytes) {
             return new StreamResult(StreamStatus::TooLarge);
         }
 
-        if ((int) @filesize($sinkPath) === 0) {
+        if ($size === 0) {
             return new StreamResult(StreamStatus::Failed);
         }
 
@@ -1289,21 +685,164 @@ Add imports `App\Platform\Enrichment\Media\StreamResult;` and `App\Platform\Enri
     }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+Adjust the redirect-truncation and progress-abort details to whatever the Task 0 seam-audit scratch script actually proved (seam 9) — the acceptance criteria are behavioural: a followed redirect leaves ONLY the final hop's bytes in the sink, and an over-cap transfer aborts without buffering the whole body.
+
+- [ ] **Step 5: Run the fake-based tests**
 
 Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/MediaStreamingTest.php`
 Expected: PASS (6 tests).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Write the real-server integration test**
+
+`tests/Feature/Enrichment/MediaStreamingRealServerTest.php` — proves the sink/redirect/cap behaviour with REAL Guzzle + curl (no `Http::fake`), against a loopback `php -S` server. The fetcher subclass whitelists loopback; everything else is production code.
+
+```php
+<?php
+
+namespace Tests\Feature\Enrichment;
+
+use App\Platform\Enrichment\Media\StreamStatus;
+use App\Platform\Enrichment\Recognition\MediaFetcher;
+use Illuminate\Process\InvokedProcess;
+use Illuminate\Support\Facades\Process;
+use Tests\TestCase;
+
+class MediaStreamingRealServerTest extends TestCase
+{
+    private ?InvokedProcess $server = null;
+
+    private string $docroot;
+
+    private int $port;
+
+    /** Loopback-permitting fetcher: ONLY ipIsPublic is overridden. */
+    private function loopbackFetcher(): MediaFetcher
+    {
+        return new class extends MediaFetcher
+        {
+            protected function ipIsPublic(string $ip): bool
+            {
+                return $ip === '127.0.0.1' || parent::ipIsPublic($ip);
+            }
+        };
+    }
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->docroot = sys_get_temp_dir().'/qds-media-server-'.getmypid();
+        @mkdir($this->docroot, 0777, true);
+        file_put_contents($this->docroot.'/ok.mp4', str_repeat('A', 1024));
+        file_put_contents($this->docroot.'/big.mp4', str_repeat('B', 5 * 1024 * 1024));
+        file_put_contents($this->docroot.'/router.php', <<<'PHP'
+<?php
+$uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+if ($uri === '/redirect') {
+    header('Location: /ok.mp4', true, 302);
+    exit;
+}
+$file = __DIR__.$uri;
+if (is_file($file)) {
+    header('Content-Type: video/mp4');
+    header('Content-Length: '.filesize($file));
+    readfile($file);
+    exit;
+}
+http_response_code(404);
+PHP);
+
+        // Find a free loopback port, then boot php -S on it.
+        $probe = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
+        if ($probe === false) {
+            $this->markTestSkipped('Cannot bind a loopback socket.');
+        }
+        $this->port = (int) explode(':', (string) stream_socket_get_name($probe, false))[1];
+        fclose($probe);
+
+        $this->server = Process::start([PHP_BINARY, '-S', "127.0.0.1:{$this->port}", '-t', $this->docroot, $this->docroot.'/router.php']);
+
+        // Wait (bounded) until the server accepts connections.
+        $deadline = microtime(true) + 5.0;
+        while (microtime(true) < $deadline) {
+            $conn = @fsockopen('127.0.0.1', $this->port, $errno, $errstr, 0.2);
+            if (is_resource($conn)) {
+                fclose($conn);
+
+                return;
+            }
+            usleep(100_000);
+        }
+
+        $this->markTestSkipped('php -S did not come up on loopback.');
+    }
+
+    protected function tearDown(): void
+    {
+        $this->server?->stop();
+        @unlink($this->docroot.'/ok.mp4');
+        @unlink($this->docroot.'/big.mp4');
+        @unlink($this->docroot.'/router.php');
+        @rmdir($this->docroot);
+        parent::tearDown();
+    }
+
+    private function sink(): string
+    {
+        return (string) tempnam(sys_get_temp_dir(), 'qds-real-sink-');
+    }
+
+    public function test_real_transfer_streams_exact_bytes_to_the_sink(): void
+    {
+        $sink = $this->sink();
+
+        $result = $this->loopbackFetcher()->streamToFile("http://127.0.0.1:{$this->port}/ok.mp4", $sink, 1_000_000);
+
+        $this->assertSame(StreamStatus::Ok, $result->status);
+        $this->assertSame(str_repeat('A', 1024), file_get_contents($sink));
+        @unlink($sink);
+    }
+
+    public function test_redirect_leaves_only_the_final_hops_bytes_in_the_sink(): void
+    {
+        $sink = $this->sink();
+
+        $result = $this->loopbackFetcher()->streamToFile("http://127.0.0.1:{$this->port}/redirect", $sink, 1_000_000);
+
+        $this->assertSame(StreamStatus::Ok, $result->status);
+        $this->assertSame(str_repeat('A', 1024), file_get_contents($sink));
+        @unlink($sink);
+    }
+
+    public function test_over_cap_transfer_reports_too_large(): void
+    {
+        $sink = $this->sink();
+
+        $result = $this->loopbackFetcher()->streamToFile("http://127.0.0.1:{$this->port}/big.mp4", $sink, 100_000);
+
+        $this->assertSame(StreamStatus::TooLarge, $result->status);
+        @unlink($sink);
+    }
+}
+```
+
+(If `Process::start` is unavailable in this Laravel version — seam audit — fall back to `proc_open` with the same lifecycle.)
+
+- [ ] **Step 7: Run the real-server tests**
+
+Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/MediaStreamingRealServerTest.php`
+Expected: PASS (3 tests; SKIPPED environments are acceptable in CI sandboxes that forbid sockets). If the redirect test fails with stale bytes, the seam-audit findings (seam 9) dictate the fix — truncate the sink before each hop, which Step 4's code already does.
+
+- [ ] **Step 8: Commit**
 
 ```bash
-git add app/Platform/Enrichment/Media/StreamStatus.php app/Platform/Enrichment/Media/StreamResult.php app/Platform/Enrichment/Recognition/MediaFetcher.php tests/Feature/Enrichment/MediaStreamingTest.php
-git commit -m "feat(enrichment): MediaFetcher::streamToFile — streaming, size-guarded, SSRF-pinned"
+git add app/Platform/Enrichment/Media/StreamStatus.php app/Platform/Enrichment/Media/StreamResult.php app/Platform/Enrichment/Recognition/MediaFetcher.php tests/Feature/Enrichment/MediaStreamingTest.php tests/Feature/Enrichment/MediaStreamingRealServerTest.php
+git commit -m "feat(enrichment): MediaFetcher::streamToFile — streaming, size-guarded, SSRF-pinned, real-server proven"
 ```
 
 ---
 
-### Task 8: `MediaWorkspace` + `LocalMediaAsset` + `MediaWorkspaceFactory` (single lazy download per target)
+### Task 5: `MediaWorkspace` + `LocalMediaAsset` + factory with content-type routing
 
 **Files:**
 - Create: `app/Platform/Enrichment/Media/LocalMediaAsset.php`
@@ -1312,11 +851,11 @@ git commit -m "feat(enrichment): MediaFetcher::streamToFile — streaming, size-
 - Test: `tests/Feature/Enrichment/MediaWorkspaceTest.php` (create)
 
 **Interfaces:**
-- Consumes: `MediaFetcher::streamToFile` (Task 7); config `qds.enrichment.recognition.inline_max_bytes`, `qds.enrichment.keyframes.download_max_bytes`, `qds.ingestion.media_disk`.
-- Produces (consumed by Tasks 10 and 13):
+- Consumes: `MediaFetcher::streamToFile` (Task 4); config `qds.enrichment.recognition.inline_max_bytes`, `qds.enrichment.keyframes.download_max_bytes`, `qds.ingestion.media_disk`.
+- Produces (consumed by Tasks 7 and 10):
   - `LocalMediaAsset{ string $tempPath; int $byteSize; ?string $contentType; string $sha256; ?string $sourceUrl }` + `bytes(): string`.
-  - `MediaWorkspace::images(): list<LocalMediaAsset>`, `video(): ?LocalMediaAsset`, `markers(): list<string>`, `close(): void`. Acquisition is LAZY — no download until first access ("don't download media for nobody").
-  - `MediaWorkspaceFactory::forTarget(ContentItem|Story $target): MediaWorkspace`. Routing: ImagePost/Carousel → first 3 image URLs at the inline cap; video types → first URL at the download cap; Story → the archived private-disk file (no HTTP). Markers: `media:none`, `media:fetch-failed`, `media:too-large`, `media:too-old`.
+  - `MediaWorkspace::images(): list<LocalMediaAsset>`, `video(): ?LocalMediaAsset`, `markers(): list<string>`, `close(): void`. Acquisition is LAZY — no download until first access.
+  - `MediaWorkspaceFactory::forTarget(ContentItem|Story $target): MediaWorkspace`. Routing: ImagePost/Carousel → first 3 image URLs at the inline cap; video-typed rows → first URL at the download cap, **then routed by the DOWNLOADED content type** — an `image/*` payload becomes an image asset (the YouTube-thumbnail fix; also catches a reel row that fell back to `displayUrl`). Story → the archived private-disk file. Markers: `media:none`, `media:fetch-failed`, `media:too-large`, `media:too-old`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1341,12 +880,12 @@ class MediaWorkspaceTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function makeItem(ContentType $type, array $mediaUrls): ContentItem
+    private function makeItem(ContentType $type, array $mediaUrls, Platform $platform = Platform::Instagram): ContentItem
     {
-        $account = PlatformAccount::factory()->for(Creator::factory())->create(['platform' => Platform::Instagram]);
+        $account = PlatformAccount::factory()->for(Creator::factory())->create(['platform' => $platform]);
 
         return ContentItem::factory()->for($account, 'platformAccount')->create([
-            'platform' => Platform::Instagram,
+            'platform' => $platform,
             'content_type' => $type,
             'media_urls' => $mediaUrls,
         ]);
@@ -1376,6 +915,20 @@ class MediaWorkspaceTest extends TestCase
         foreach ($paths as $path) {
             $this->assertFileDoesNotExist($path);
         }
+    }
+
+    public function test_video_typed_row_with_image_payload_routes_to_images(): void
+    {
+        // THE YouTube case: content_type=VIDEO, media_urls=[thumbnail.jpg].
+        Http::fake(['93.184.216.34/*' => Http::response('THUMBBYTES', 200, ['Content-Type' => 'image/jpeg'])]);
+        $item = $this->makeItem(ContentType::Video, ['https://93.184.216.34/maxres.jpg'], Platform::YouTube);
+
+        $ws = app(MediaWorkspaceFactory::class)->forTarget($item);
+
+        $this->assertNull($ws->video());
+        $this->assertCount(1, $ws->images());
+        $this->assertSame('THUMBBYTES', $ws->images()[0]->bytes());
+        $ws->close();
     }
 
     public function test_video_target_downloads_the_first_url_and_expired_url_marks_too_old(): void
@@ -1423,7 +976,7 @@ class MediaWorkspaceTest extends TestCase
 }
 ```
 
-Note: if `Story::factory()` requires other attributes (check `database/factories` for the Story factory's required fields), satisfy them minimally; the essential inputs are `media_url` and the platform account.
+(Adjust `Story::factory()` attributes per the Task 0 factory audit.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1592,9 +1145,11 @@ use Throwable;
 
 /**
  * Builds the lazy MediaWorkspace for one enrichment target. Routing
- * mirrors the pre-B RecognitionService::mediaFor: image-typed content →
- * first 3 image URLs (inline cap); video-typed content → first URL
- * (streaming download cap); Story → the archived private-disk file.
+ * starts from the row's content_type (image-typed → first 3 image URLs;
+ * video-typed → first URL) but the FINAL word belongs to the DOWNLOADED
+ * content type: a video-typed row whose payload turns out to be an image
+ * (YouTube's thumbnail, a reel's displayUrl fallback) becomes an image
+ * asset — never fed to ffmpeg or Video Intelligence as "video".
  */
 class MediaWorkspaceFactory
 {
@@ -1635,12 +1190,21 @@ class MediaWorkspaceFactory
             return;
         }
 
-        // Video-typed content: single deep pass over the first media asset.
+        // Video-typed content: single deep pass over the first media asset —
+        // but the downloaded content type has the final word (see class doc).
         $asset = $this->stream($workspace, $urls[0], (int) config('qds.enrichment.keyframes.download_max_bytes'));
 
-        if ($asset !== null) {
-            $workspace->setVideo($asset);
+        if ($asset === null) {
+            return;
         }
+
+        if ($asset->contentType !== null && str_starts_with($asset->contentType, 'image/')) {
+            $workspace->addImage($asset);
+
+            return;
+        }
+
+        $workspace->setVideo($asset);
     }
 
     private function stream(MediaWorkspace $workspace, string $url, int $maxBytes): ?LocalMediaAsset
@@ -1696,6 +1260,9 @@ class MediaWorkspaceFactory
             return;
         }
 
+        // Archive extensions are DERIVED from Content-Type at archive time
+        // (ArchiveStoryMediaJob::extensionFor), so extension routing is the
+        // stored MIME metadata — trustworthy by construction (seam audit #10).
         $isVideo = $this->looksLikeVideo($mediaUrl);
         $maxBytes = $isVideo
             ? (int) config('qds.enrichment.keyframes.download_max_bytes')
@@ -1750,18 +1317,18 @@ class MediaWorkspaceFactory
 - [ ] **Step 6: Run test to verify it passes**
 
 Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/MediaWorkspaceTest.php`
-Expected: PASS (4 tests).
+Expected: PASS (5 tests).
 
 - [ ] **Step 7: Commit**
 
 ```bash
 git add app/Platform/Enrichment/Media/ tests/Feature/Enrichment/MediaWorkspaceTest.php
-git commit -m "feat(enrichment): lazy single-download MediaWorkspace + factory"
+git commit -m "feat(enrichment): lazy single-download MediaWorkspace with content-type routing"
 ```
 
 ---
 
-### Task 9: `AudioExtractor::extractFromFile` (reuse the workspace's file)
+### Task 6: `AudioExtractor::extractFromFile` (reuse the workspace's file)
 
 **Files:**
 - Modify: `app/Platform/Enrichment/Recognition/AudioExtractor.php`
@@ -1769,16 +1336,16 @@ git commit -m "feat(enrichment): lazy single-download MediaWorkspace + factory"
 
 **Interfaces:**
 - Consumes: nothing new.
-- Produces: `AudioExtractor::extractFromFile(string $videoPath): ?string` — same contract as `extract()` but reads an existing file instead of writing bytes to a fresh temp file. `extract(string $videoBytes)` keeps its exact behaviour (delegates). Task 10 calls `extractFromFile`.
+- Produces: `AudioExtractor::extractFromFile(string $videoPath): ?string` — same contract as `extract()` but reads an existing file instead of writing bytes to a fresh temp file. `extract(string $videoBytes)` keeps its exact behaviour (delegates). Task 7 calls `extractFromFile`.
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `tests/Feature/Enrichment/AudioExtractorTest.php` (reuse its existing synthetic-video helper and ffmpeg-or-skip gate):
+Add to `tests/Feature/Enrichment/AudioExtractorTest.php` (reuse its synthetic-video helper and ffmpeg-or-skip gate — the helper's real name comes from the Task 0 audit, seam 7):
 
 ```php
     public function test_extract_from_file_produces_the_same_flac_as_extract(): void
     {
-        $videoPath = $this->makeVideoWithAudio(); // the file's existing helper that renders a testsrc+sine MP4 and returns its path (adapt the name to the helper actually present)
+        $videoPath = $this->makeVideoWithAudio(); // [seam-audited helper name]
         $extractor = app(\App\Platform\Enrichment\Recognition\AudioExtractor::class);
 
         $fromFile = $extractor->extractFromFile($videoPath);
@@ -1876,8 +1443,6 @@ In `AudioExtractor.php`, replace the body of `extract()` and add `extractFromFil
     }
 ```
 
-(The old `extract()` body's dual-tempnam cleanup comment becomes obsolete — the split leaves each method owning exactly one temp file.)
-
 - [ ] **Step 4: Run the whole file to verify no regression**
 
 Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/AudioExtractorTest.php`
@@ -1892,22 +1457,21 @@ git commit -m "refactor(enrichment): AudioExtractor::extractFromFile — reuse t
 
 ---
 
-### Task 10: RecognitionService + EnrichmentPipeline consume the workspace (the marker split lands here)
+### Task 7: RecognitionService + EnrichmentPipeline consume the workspace (the marker split lands here)
 
 **Files:**
 - Modify: `app/Platform/Enrichment/Recognition/RecognitionService.php`
 - Modify: `app/Platform/Enrichment/EnrichmentPipeline.php`
-- Modify: `tests/Feature/Enrichment/RecognitionPipelineTest.php` (line ~116: the direct `enrich()` call site)
-- Test: extend `tests/Feature/Enrichment/RecognitionPipelineTest.php` with the too-large marker test
+- Test: extend `tests/Feature/Enrichment/RecognitionPipelineTest.php`
 
 **Interfaces:**
-- Consumes: `MediaWorkspace`/`MediaWorkspaceFactory` (Task 8), `AudioExtractor::extractFromFile` (Task 9), config `qds.enrichment.recognition.inline_max_bytes`.
-- Produces: `RecognitionService::enrich(ContentItem|Story $target, string $correlationId, int $retryCount = 0, ?MediaWorkspace $workspace = null): array` — same return shape. A `null` workspace builds its own (keeps any other callers working); the pipeline passes the shared one. New marker: `recognition:whole-video-skipped-too-large`. `EnrichmentPipeline` builds ONE workspace per run and `close()`s it in `finally`; Task 13 adds the keyframes stage next to it.
-- Behaviour preserved: in-cap images/video produce byte-identical provider calls; `MediaFetcher` stays injected only via the factory.
+- Consumes: `MediaWorkspace`/`MediaWorkspaceFactory` (Task 5), `AudioExtractor::extractFromFile` (Task 6), config `qds.enrichment.recognition.inline_max_bytes`.
+- Produces: `RecognitionService::enrich(ContentItem|Story $target, string $correlationId, int $retryCount = 0, ?MediaWorkspace $workspace = null): array` — same return shape. A `null` workspace builds its own (keeps other callers working); the pipeline passes the shared one. New markers: `recognition:whole-video-skipped-too-large` (video over the inline cap — keyframes still cover it) and `recognition:image-skipped-too-large` (an image asset over the inline cap — only reachable for video-branch-routed images, which are acquired under the larger download cap). `EnrichmentPipeline` builds ONE workspace per run and `close()`s it in a `finally`; Task 10 adds the keyframes stage next to it. NO transcript logic here — that is Slice B3.
+- Behaviour preserved: in-cap images/video produce byte-identical provider calls.
 
 - [ ] **Step 1: Write the failing marker test**
 
-Add to `RecognitionPipelineTest.php` (mirror its existing fake helpers — Vision/VI fakes on `videointelligence.googleapis.com/*` and media on the literal-IP host):
+Add to `RecognitionPipelineTest.php` (mirror its existing fake helpers — the exact builder names come from the Task 0 audit, seam 7):
 
 ```php
     public function test_video_over_the_inline_cap_skips_whole_video_vi_with_the_distinct_marker(): void
@@ -1919,9 +1483,9 @@ Add to `RecognitionPipelineTest.php` (mirror its existing fake helpers — Visio
         \Illuminate\Support\Facades\Http::fake([
             '93.184.216.34/*' => \Illuminate\Support\Facades\Http::response(str_repeat('V', 100), 200, ['Content-Type' => 'video/mp4']),
         ]);
-        $content = $this->makeVideoContent(['https://93.184.216.34/big.mp4']); // adapt to the file's existing content-item helper
+        $content = $this->makeVideoContent(['https://93.184.216.34/big.mp4']); // [seam-audited helper name]
 
-        $result = $this->enrichViaService($content); // the file's helper around RecognitionService::enrich
+        $result = $this->enrichViaService($content); // [seam-audited helper around RecognitionService::enrich]
 
         $this->assertContains('recognition:whole-video-skipped-too-large', $result['skipped']);
         \Illuminate\Support\Facades\Http::assertNotSent(fn ($request) => str_contains($request->url(), 'videointelligence'));
@@ -1935,7 +1499,7 @@ Expected: FAIL (marker absent — the old code drops the video with `media:fetch
 
 - [ ] **Step 3: Refactor `RecognitionService`**
 
-Constructor: REMOVE `private readonly MediaFetcher $media,` and ADD `private readonly MediaWorkspaceFactory $workspaces,` (import `App\Platform\Enrichment\Media\{LocalMediaAsset, MediaWorkspace, MediaWorkspaceFactory}`; drop the now-unused `MediaFetcher` import).
+Constructor: REMOVE `private readonly MediaFetcher $media,` and ADD `private readonly MediaWorkspaceFactory $workspaces,` (import `App\Platform\Enrichment\Media\{MediaWorkspace, MediaWorkspaceFactory}`; drop the now-unused `MediaFetcher` import).
 
 `enrich()` signature: `public function enrich(ContentItem|Story $target, string $correlationId, int $retryCount = 0, ?MediaWorkspace $workspace = null): array`.
 
@@ -1953,11 +1517,22 @@ Replace the media section — everything from `[$imageBytes, $videoBytes] = $thi
                 $skipped[] = $marker;
             }
 
+            $inlineMax = (int) config('qds.enrichment.recognition.inline_max_bytes');
+
             if ($images !== []) {
                 if (! $this->vision->isConfigured()) {
                     $skipped[] = 'vision:not-configured';
                 } else {
                     foreach ($images as $image) {
+                        if ($image->byteSize > $inlineMax) {
+                            // Only reachable for a video-branch-routed image
+                            // (acquired under the download cap): keyframes
+                            // keep it, the inline Vision send does not.
+                            $skipped[] = 'recognition:image-skipped-too-large';
+
+                            continue;
+                        }
+
                         [$c, $u] = $this->annotate(
                             $target,
                             SourceRegistry::GOOGLE_CLOUD_VISION,
@@ -1974,8 +1549,6 @@ Replace the media section — everything from `[$imageBytes, $videoBytes] = $thi
             }
 
             if ($video !== null) {
-                $inlineMax = (int) config('qds.enrichment.recognition.inline_max_bytes');
-
                 if (! $this->videoIntelligence->isConfigured()) {
                     // OPTIONAL provider (data-source matrix) — absence is normal.
                     $skipped[] = 'video-intelligence:not-configured';
@@ -2057,16 +1630,16 @@ Change the recognition call to `$this->recognition->enrich($target, $correlation
         }
 ```
 
-- [ ] **Step 5: Update the direct call site**
+- [ ] **Step 5: Check the direct call sites**
 
 `RecognitionPipelineTest.php:116` — `app(RecognitionService::class)->enrich($content, $correlationId)` needs no change (the nullable workspace builds its own). Verify no other caller passes positional args beyond `$retryCount`: `grep -rn "->enrich(" app tests | grep -i recognition`.
 
-- [ ] **Step 6: Run the enrichment suite, then the FULL suite**
+- [ ] **Step 6: Run the enrichment suite, then the FULL suite (Slice B1 gate)**
 
 Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/`
-Expected: all PASS — this is the behaviour-preservation gate. One legacy delta is legitimate: an over-20MB image/video now yields `media:too-large`/`recognition:whole-video-skipped-too-large` instead of `media:fetch-failed`; update any test asserting the old marker for oversized media (grep `fetch-failed` in tests/Feature/Enrichment).
+Expected: all PASS — the behaviour-preservation gate. One legacy delta is legitimate: oversized media now yields `media:too-large`/`recognition:whole-video-skipped-too-large` instead of `media:fetch-failed`; update any test asserting the old marker for oversized media (seam audit #13 lists them).
 Then run: `XDEBUG_MODE=off vendor/bin/phpunit`
-Expected: full suite green.
+Expected: full suite green. **This is the Slice B1 gate — B1 is mergeable on its own from here.**
 
 - [ ] **Step 7: Commit**
 
@@ -2077,7 +1650,9 @@ git commit -m "refactor(enrichment): recognition consumes the shared MediaWorksp
 
 ---
 
-### Task 11: `keyframes` table, `Keyframe` model, `KeyframeKind`, `KeyframeSet` + repository
+# Slice B2 — Keyframe persistence & extraction
+
+### Task 8: `keyframes` table, `Keyframe` model, `KeyframeKind`, `KeyframeSet` + repository
 
 **Files:**
 - Create: `database/migrations/2026_07_19_100002_create_keyframes_table.php`
@@ -2092,7 +1667,7 @@ git commit -m "refactor(enrichment): recognition consumes the shared MediaWorksp
 - Consumes: `BelongsToTenant`, `AsValueObject`, `Provenance`.
 - Produces (the C/D seam — tier C will FK `embedding.keyframe_id` → `keyframes.id`):
   - `enum KeyframeKind: string { VideoSample = 'video_sample'; Thumbnail = 'thumbnail'; SourceImage = 'source_image'; }`
-  - `Keyframe` model — fillable `owner_type, owner_id, ordinal, timestamp_ms, storage_disk, storage_path, width, height, kind, checksum, provenance`; casts `kind => KeyframeKind`, `provenance => AsValueObject:Provenance`; `owner(): MorphTo`; unique `(owner_type, owner_id, ordinal)`.
+  - `Keyframe` model — fillable `owner_type, owner_id, ordinal, timestamp_ms, storage_disk, storage_path, width, height, kind, checksum, source_checksum, provenance`; casts `kind => KeyframeKind`, `provenance => AsValueObject:Provenance`; `owner(): MorphTo`; unique `(owner_type, owner_id, ordinal)`. `source_checksum` = sha256 of the SOURCE media the frame was derived from (reproducibility: ties every frame to exact input bytes).
   - `KeyframeSet{ list<Keyframe> $frames; string $status }` with `isEmpty(): bool`; `KeyframeRepository::forOwner(ContentItem|Story $owner): KeyframeSet` (frames ordered by `ordinal`; status `extracted` | `empty`).
 
 - [ ] **Step 1: Write the failing test**
@@ -2138,6 +1713,7 @@ class KeyframeModelTest extends TestCase
             'height' => 720,
             'kind' => KeyframeKind::VideoSample,
             'checksum' => str_repeat('a', 64),
+            'source_checksum' => str_repeat('b', 64),
             'provenance' => new Provenance('SRC-apify-instagram-reel-scraper', CarbonImmutable::now(), 'keyframes-v1'),
         ];
     }
@@ -2151,6 +1727,7 @@ class KeyframeModelTest extends TestCase
         $this->assertTrue($frame->owner()->is($item));
         $this->assertTrue($item->keyframes()->whereKey($frame->id)->exists());
         $this->assertSame(KeyframeKind::VideoSample, $frame->kind);
+        $this->assertSame(str_repeat('b', 64), $frame->source_checksum);
     }
 
     public function test_owner_plus_ordinal_is_unique(): void
@@ -2222,7 +1799,11 @@ return new class extends Migration
             $table->unsignedInteger('width')->nullable();
             $table->unsignedInteger('height')->nullable();
             $table->string('kind', 20);
+            // sha256 of the stored frame file.
             $table->char('checksum', 64);
+            // sha256 of the SOURCE media the frame was derived from — ties a
+            // frame to exact input bytes (reproducibility for tiers C/D).
+            $table->char('source_checksum', 64);
             $table->jsonb('provenance');
             $table->timestamps();
 
@@ -2293,7 +1874,8 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  * @property int|null $width
  * @property int|null $height
  * @property KeyframeKind $kind
- * @property string $checksum sha256 of the stored file
+ * @property string $checksum sha256 of the stored frame file
+ * @property string $source_checksum sha256 of the source media it derives from
  * @property Provenance $provenance
  */
 class Keyframe extends Model
@@ -2311,6 +1893,7 @@ class Keyframe extends Model
         'height',
         'kind',
         'checksum',
+        'source_checksum',
         'provenance',
     ];
 
@@ -2331,7 +1914,7 @@ class Keyframe extends Model
 }
 ```
 
-In `ContentItem.php` add after `transcripts()` (import `Illuminate\Database\Eloquent\Relations\MorphMany`):
+In `ContentItem.php` add after `transcripts()` — NOTE: `transcripts()` arrives in Slice B3; until then add after `enrichmentRuns()` (import `Illuminate\Database\Eloquent\Relations\MorphMany`):
 
 ```php
     /** @return MorphMany<Keyframe, $this> */
@@ -2408,12 +1991,12 @@ Expected: PASS (4 tests).
 
 ```bash
 git add database/migrations/2026_07_19_100002_create_keyframes_table.php app/Shared/Enums/KeyframeKind.php app/Modules/Monitoring/Models/Keyframe.php app/Modules/Monitoring/Models/ContentItem.php app/Modules/Monitoring/Models/Story.php app/Platform/Enrichment/Keyframes/ tests/Feature/Enrichment/KeyframeModelTest.php
-git commit -m "feat(enrichment): keyframes table (polymorphic owner) + KeyframeSet contract for C/D"
+git commit -m "feat(enrichment): keyframes table (polymorphic owner, source checksum) + KeyframeSet contract"
 ```
 
 ---
 
-### Task 12: `KeyframeSampler` (deterministic even-interval ffmpeg extraction)
+### Task 9: `KeyframeSampler` (deterministic even-interval ffmpeg extraction)
 
 **Files:**
 - Create: `app/Platform/Enrichment/Keyframes/SampledFrame.php`
@@ -2422,7 +2005,7 @@ git commit -m "feat(enrichment): keyframes table (polymorphic owner) + KeyframeS
 
 **Interfaces:**
 - Consumes: config `qds.enrichment.keyframes.{interval_seconds,min_frames,max_frames,max_width,jpeg_quality,ffmpeg_path,ffprobe_path}`.
-- Produces (Task 13 consumes): `SampledFrame{ string $tempPath; int $timestampMs; int $ordinal }`; `KeyframeSampler::isAvailable(): bool`; `sample(string $videoPath): ?list<SampledFrame>` — null on any failure (fail-closed); the CALLER unlinks the frame temp files.
+- Produces (Task 10 consumes): `SampledFrame{ string $tempPath; int $timestampMs; int $ordinal }`; `KeyframeSampler::isAvailable(): bool`; `sample(string $videoPath): ?list<SampledFrame>` — null on any failure (fail-closed); the CALLER unlinks the frame temp files.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2736,7 +2319,7 @@ git commit -m "feat(enrichment): deterministic even-interval KeyframeSampler (ff
 
 ---
 
-### Task 13: `KeyframeWriter` + `KeyframeExtractor` stage wired into the pipeline
+### Task 10: `KeyframeWriter` (transactional) + `KeyframeExtractor` stage wired into the pipeline
 
 **Files:**
 - Create: `app/Platform/Enrichment/Keyframes/KeyframeWriter.php`
@@ -2745,10 +2328,10 @@ git commit -m "feat(enrichment): deterministic even-interval KeyframeSampler (ff
 - Test: `tests/Feature/Enrichment/KeyframePipelineTest.php` (create)
 
 **Interfaces:**
-- Consumes: `KeyframeSampler`/`SampledFrame` (Task 12), `Keyframe`/`KeyframeKind` (Task 11), `MediaWorkspace`/`LocalMediaAsset` (Task 8), config `qds.enrichment.keyframes.enabled`, `qds.ingestion.media_disk`.
+- Consumes: `KeyframeSampler`/`SampledFrame` (Task 9), `Keyframe`/`KeyframeKind` (Task 8), `MediaWorkspace`/`LocalMediaAsset` (Task 5), config `qds.enrichment.keyframes.enabled`, `qds.ingestion.media_disk`.
 - Produces:
-  - `KeyframeWriter::persist(ContentItem|Story $owner, list<array{tempPath: string, timestampMs: int|null, kind: KeyframeKind, extension: string}> $frames): int` — stores files under `tenants/{tenant_id}/keyframes/{platform}/{platform_account_id}/{content|story}-{external_id}/{ordinal}.{ext}` and inserts rows.
-  - `KeyframeExtractor::enrich(ContentItem|Story $target, MediaWorkspace $workspace): string` — the stage summary written to `EnrichmentRun.stages['keyframes']`: `completed:N frame(s)` | `skipped:already-extracted` | `skipped:ffmpeg-unavailable` | `skipped:extraction-failed` | `skipped:<acquisition marker>` | `skipped:no-media`.
+  - `KeyframeWriter::persist(ContentItem|Story $owner, list<array{tempPath: string, timestampMs: int|null, kind: KeyframeKind, extension: string, sourceChecksum: string}> $frames): int` — files under `tenants/{tenant_id}/keyframes/{platform}/{platform_account_id}/{content|story}-{external_id}/{ordinal}.{ext}`, rows inserted in **ONE database transaction** (all-or-nothing: "frames exist" always means "the complete set exists" — the partial-extraction fix). On a unique-key loss to a concurrent pass → return 0, keep files (deterministic sampling makes them byte-identical to the winner's). On any other failure → **delete the written files** (no orphans) and rethrow.
+  - `KeyframeExtractor::enrich(ContentItem|Story $target, MediaWorkspace $workspace): string` — stage summary for `EnrichmentRun.stages['keyframes']`: `completed:N frame(s)` | `skipped:already-extracted` | `skipped:ffmpeg-unavailable` | `skipped:extraction-failed` | `skipped:<acquisition marker>` | `skipped:no-media`.
   - Pipeline stage value `skipped:disabled` when the kill switch is off.
 
 - [ ] **Step 1: Write the failing test**
@@ -2764,10 +2347,13 @@ use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\Keyframe;
 use App\Platform\Enrichment\EnrichmentPipeline;
 use App\Platform\Enrichment\Keyframes\KeyframeSampler;
+use App\Platform\Enrichment\Keyframes\KeyframeWriter;
 use App\Platform\Enrichment\Keyframes\SampledFrame;
 use App\Shared\Enums\ContentType;
 use App\Shared\Enums\KeyframeKind;
 use App\Shared\Enums\Platform;
+use App\Shared\ValueObjects\Provenance;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -2837,9 +2423,40 @@ class KeyframePipelineTest extends TestCase
         $this->assertSame(KeyframeKind::VideoSample, $frames[0]->kind);
         $this->assertSame($reel->tenant_id, $frames[0]->tenant_id);
         $this->assertSame(hash('sha256', 'FRAME-0'), $frames[0]->checksum);
+        $this->assertSame(hash('sha256', 'REELBYTES'), $frames[0]->source_checksum);
         $expectedPath = "tenants/{$reel->tenant_id}/keyframes/instagram/{$reel->platform_account_id}/content-reel-1/0.jpg";
         $this->assertSame($expectedPath, $frames[0]->storage_path);
         Storage::disk('media')->assertExists($expectedPath);
+    }
+
+    public function test_writer_is_all_or_nothing_when_an_ordinal_is_already_taken(): void
+    {
+        // The atomicity guarantee behind extract-once: a conflicting row for
+        // ordinal 1 must roll back ordinals 0 and 2 as well — no partial set.
+        $reel = $this->makeReel();
+        Keyframe::query()->create([
+            'owner_type' => $reel->getMorphClass(), 'owner_id' => $reel->id, 'ordinal' => 1,
+            'timestamp_ms' => 3000, 'storage_disk' => 'media',
+            'storage_path' => "tenants/{$reel->tenant_id}/keyframes/instagram/{$reel->platform_account_id}/content-reel-1/1.jpg",
+            'width' => 1, 'height' => 1, 'kind' => KeyframeKind::VideoSample,
+            'checksum' => str_repeat('a', 64), 'source_checksum' => str_repeat('b', 64),
+            'provenance' => new Provenance('SRC-apify-instagram-reel-scraper', CarbonImmutable::now(), 'keyframes-v1'),
+        ]);
+
+        $entries = [];
+        foreach ([0, 1, 2] as $i) {
+            $path = (string) tempnam(sys_get_temp_dir(), 'qds-atomic-frame-');
+            file_put_contents($path, "F{$i}");
+            $entries[] = ['tempPath' => $path, 'timestampMs' => $i * 1000, 'kind' => KeyframeKind::VideoSample, 'extension' => 'jpg', 'sourceChecksum' => str_repeat('b', 64)];
+        }
+
+        $written = app(KeyframeWriter::class)->persist($reel, $entries);
+
+        $this->assertSame(0, $written);
+        $this->assertSame(1, Keyframe::query()->where('owner_id', $reel->id)->count()); // only the pre-seeded row
+        foreach ($entries as $entry) {
+            @unlink($entry['tempPath']);
+        }
     }
 
     public function test_extract_once_a_second_run_skips_and_never_renumbers(): void
@@ -2889,6 +2506,7 @@ class KeyframePipelineTest extends TestCase
         $this->assertNull($frames[0]->timestamp_ms);
         // Same bytes Vision would see — one download, one checksum.
         $this->assertSame(hash('sha256', 'IMAGEBYTES'), $frames[0]->checksum);
+        $this->assertSame($frames[0]->checksum, $frames[0]->source_checksum); // a source image IS its own source
     }
 
     public function test_ffmpeg_unavailable_reports_the_marker(): void
@@ -2929,66 +2547,94 @@ use App\Shared\Enums\KeyframeKind;
 use App\Shared\ValueObjects\Provenance;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Throwable;
 
 /**
  * Persists extracted frames to the private media disk (the story-media
- * path convention) and inserts their rows. Idempotency is the DB's
- * (owner, ordinal) unique key — a concurrent duplicate insert loses
- * quietly and the winner's rows stand (extract-once; tier C embeddings
- * FK these ids and must never be orphaned by a re-run).
+ * path convention) and inserts their rows in ONE transaction — a set is
+ * all-or-nothing, so "frames exist" always means "the COMPLETE set
+ * exists" (extract-once depends on this; tier C embeddings FK these ids).
+ *
+ * Failure semantics:
+ *  - unique-key loss to a concurrent pass → rollback, return 0, KEEP the
+ *    files (deterministic sampling makes them byte-identical to the
+ *    winner's, so deleting would destroy the winner's frames);
+ *  - any other failure → rollback, DELETE the files we wrote (no orphan
+ *    blobs), rethrow (the run fails loudly; a retry re-extracts cleanly).
  */
 class KeyframeWriter
 {
     /**
-     * @param  list<array{tempPath: string, timestampMs: int|null, kind: KeyframeKind, extension: string}>  $frames
-     * @return int rows written
+     * @param  list<array{tempPath: string, timestampMs: int|null, kind: KeyframeKind, extension: string, sourceChecksum: string}>  $frames
+     * @return int rows written (0 when a concurrent pass won)
      */
     public function persist(ContentItem|Story $owner, array $frames): int
     {
-        $disk = (string) config('qds.ingestion.media_disk');
-        $written = 0;
+        $diskName = (string) config('qds.ingestion.media_disk');
+        $disk = Storage::disk($diskName);
+        $writtenPaths = [];
+        $rows = [];
 
-        foreach (array_values($frames) as $ordinal => $frame) {
-            $path = $this->pathFor($owner, $ordinal, $frame['extension']);
-            $stream = @fopen($frame['tempPath'], 'rb');
+        try {
+            foreach (array_values($frames) as $ordinal => $frame) {
+                $path = $this->pathFor($owner, $ordinal, $frame['extension']);
+                $stream = @fopen($frame['tempPath'], 'rb');
 
-            if ($stream === false) {
-                continue;
-            }
-
-            try {
-                Storage::disk($disk)->put($path, $stream);
-            } finally {
-                if (is_resource($stream)) {
-                    fclose($stream);
+                if ($stream === false) {
+                    continue;
                 }
-            }
 
-            [$width, $height] = $this->dimensions($frame['tempPath']);
+                try {
+                    $disk->put($path, $stream);
+                } finally {
+                    if (is_resource($stream)) {
+                        fclose($stream);
+                    }
+                }
 
-            try {
-                Keyframe::query()->create([
+                $writtenPaths[] = $path;
+                [$width, $height] = $this->dimensions($frame['tempPath']);
+
+                $rows[] = [
                     'owner_type' => $owner->getMorphClass(),
                     'owner_id' => $owner->id,
                     'ordinal' => $ordinal,
                     'timestamp_ms' => $frame['timestampMs'],
-                    'storage_disk' => $disk,
+                    'storage_disk' => $diskName,
                     'storage_path' => $path,
                     'width' => $width,
                     'height' => $height,
                     'kind' => $frame['kind'],
                     'checksum' => (string) hash_file('sha256', $frame['tempPath']),
+                    'source_checksum' => $frame['sourceChecksum'],
                     'provenance' => new Provenance($owner->provenance->source, CarbonImmutable::now(), 'keyframes-v1'),
-                ]);
-            } catch (UniqueConstraintViolationException) {
-                continue; // a concurrent pass already wrote this ordinal
+                ];
             }
 
-            $written++;
+            DB::transaction(function () use ($rows): void {
+                foreach ($rows as $row) {
+                    Keyframe::query()->create($row);
+                }
+            });
+        } catch (UniqueConstraintViolationException) {
+            // A concurrent pass won the (owner, ordinal) key — its rows
+            // stand, our identical files are harmless (see class doc).
+            return 0;
+        } catch (Throwable $e) {
+            foreach ($writtenPaths as $path) {
+                try {
+                    $disk->delete($path);
+                } catch (Throwable) {
+                    // Best-effort compensation; the retention sweep is the backstop.
+                }
+            }
+
+            throw $e;
         }
 
-        return $written;
+        return count($rows);
     }
 
     /** tenants/{tenant}/keyframes/{platform}/{account}/{content|story}-{external}/{ordinal}.{ext} */
@@ -3035,9 +2681,10 @@ use App\Shared\Enums\Platform;
 /**
  * The keyframes pipeline stage (sub-project B): turns the workspace's
  * media into persisted frames. Extract-once: an owner that already has
- * frames is never re-sampled (a forced re-extract is a future operator
- * command, not a pipeline behaviour). The returned string is the
- * EnrichmentRun stage summary — every skip is explainable.
+ * frames is never re-sampled — and because the writer is transactional,
+ * "has frames" is equivalent to "has the complete set" (a forced
+ * re-extract is a future operator command, not a pipeline behaviour).
+ * The returned string is the EnrichmentRun stage summary.
  */
 class KeyframeExtractor
 {
@@ -3077,6 +2724,7 @@ class KeyframeExtractor
                         'timestampMs' => $frame->timestampMs,
                         'kind' => KeyframeKind::VideoSample,
                         'extension' => 'jpg',
+                        'sourceChecksum' => $video->sha256,
                     ],
                     $frames,
                 ));
@@ -3104,6 +2752,7 @@ class KeyframeExtractor
                     'timestampMs' => null,
                     'kind' => $kind,
                     'extension' => $this->extensionFor($asset->contentType),
+                    'sourceChecksum' => $asset->sha256,
                 ],
                 $images,
             ));
@@ -3130,7 +2779,7 @@ class KeyframeExtractor
 
 - [ ] **Step 5: Wire the pipeline stage**
 
-In `EnrichmentPipeline` (Task 10 already added the workspace + `finally`): constructor adds `private readonly KeyframeExtractor $keyframes,` (import it). Insert directly after the recognition stage block:
+In `EnrichmentPipeline` (Task 7 already added the workspace + `finally`): constructor adds `private readonly KeyframeExtractor $keyframes,` (import it). Insert directly after the recognition stage block:
 
 ```php
             if ((bool) config('qds.enrichment.keyframes.enabled')) {
@@ -3142,32 +2791,32 @@ In `EnrichmentPipeline` (Task 10 already added the workspace + `finally`): const
             }
 ```
 
-Update the pipeline docblock's stage list line to `hashtags → recognition → keyframes → text signals → sentiment → seeded attribution → EMV → reach`.
+Update the pipeline docblock's stage list line to `hashtags → recognition → keyframes → text signals → sentiment → seeded attribution → EMV → reach` (the transcript stage joins in Slice B3).
 
 - [ ] **Step 6: Run test to verify it passes, then the enrichment suite**
 
 Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/KeyframePipelineTest.php`
-Expected: PASS (5 tests).
+Expected: PASS (6 tests).
 Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/`
-Expected: green. Existing pipeline tests that assert the full `stages` array now see the extra `keyframes` key — update those assertions to include it (grep `stages` in tests/Feature/Enrichment).
+Expected: green. Existing pipeline tests that assert the full `stages` array now see the extra `keyframes` key — update those assertions (seam audit #8 lists them).
 
 - [ ] **Step 7: Commit**
 
 ```bash
 git add app/Platform/Enrichment/Keyframes/KeyframeWriter.php app/Platform/Enrichment/Keyframes/KeyframeExtractor.php app/Platform/Enrichment/EnrichmentPipeline.php tests/Feature/Enrichment/KeyframePipelineTest.php
-git commit -m "feat(enrichment): keyframes pipeline stage — persisted frames for every platform"
+git commit -m "feat(enrichment): transactional keyframes pipeline stage — persisted frames for every platform"
 ```
 
 ---
 
-### Task 14: End-to-end flow tests (the spec §7 worked examples)
+### Task 11: End-to-end flow tests (Slice B2 gate)
 
 **Files:**
-- Test: `tests/Feature/Enrichment/MediaResolutionFlowsTest.php` (create; no production code — this task locks the spec's promised end-states)
+- Test: `tests/Feature/Enrichment/MediaResolutionFlowsTest.php` (create; no production code — this task locks the spec's promised end-states for the media/keyframe half; the YouTube transcript flow lands with Slice B3)
 
 **Interfaces:**
 - Consumes: everything above via `EnrichmentPipeline::run`.
-- Produces: regression coverage for the four flagship flows.
+- Produces: regression coverage for the flagship flows: TikTok full video, YouTube thumbnail (the routing fix), large-video marker split, story video.
 
 - [ ] **Step 1: Write the tests**
 
@@ -3176,13 +2825,10 @@ git commit -m "feat(enrichment): keyframes pipeline stage — persisted frames f
 
 namespace Tests\Feature\Enrichment;
 
-use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\Monitoring\Models\ContentItem;
-use App\Modules\Monitoring\Models\ContentTranscript;
 use App\Modules\Monitoring\Models\Keyframe;
-use App\Modules\Monitoring\Models\RecognitionDetection;
 use App\Modules\Monitoring\Models\Story;
 use App\Platform\Enrichment\EnrichmentPipeline;
 use App\Platform\Enrichment\Keyframes\KeyframeSampler;
@@ -3190,16 +2836,13 @@ use App\Platform\Enrichment\Keyframes\SampledFrame;
 use App\Shared\Enums\ContentType;
 use App\Shared\Enums\KeyframeKind;
 use App\Shared\Enums\Platform;
-use App\Shared\Enums\RecognitionType;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
-use Tests\Support\FakesProviderResponses;
 use Tests\TestCase;
 
 class MediaResolutionFlowsTest extends TestCase
 {
-    use FakesProviderResponses;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -3245,14 +2888,11 @@ class MediaResolutionFlowsTest extends TestCase
         $this->assertSame(KeyframeKind::VideoSample, Keyframe::query()->where('owner_id', $item->id)->firstOrFail()->kind);
     }
 
-    public function test_youtube_yields_thumbnail_keyframe_and_transcript_spoken_brand(): void
+    public function test_youtube_video_typed_item_with_thumbnail_yields_a_thumbnail_keyframe(): void
     {
-        Brand::factory()->create(['name' => 'Glossier']);
-        $this->fakeProviderCredentials();
-        Http::fake([
-            'api.apify.com/v2/acts/*/run-sync-get-dataset-items*' => Http::response($this->fixture('youtube-transcript')),
-            '93.184.216.34/*' => Http::response('THUMBNAIL', 200, ['Content-Type' => 'image/jpeg']),
-        ]);
+        // THE routing fix: content_type=VIDEO + image payload → Thumbnail,
+        // never ffmpeg, never Video Intelligence.
+        Http::fake(['93.184.216.34/*' => Http::response('THUMBNAIL', 200, ['Content-Type' => 'image/jpeg'])]);
         $item = ContentItem::factory()->for($this->makeAccount(Platform::YouTube), 'platformAccount')->create([
             'platform' => Platform::YouTube,
             'content_type' => ContentType::Video,
@@ -3265,14 +2905,7 @@ class MediaResolutionFlowsTest extends TestCase
         $this->assertSame('completed:1 frame(s)', $run->stages['keyframes']);
         $frame = Keyframe::query()->where('owner_id', $item->id)->firstOrFail();
         $this->assertSame(KeyframeKind::Thumbnail, $frame->kind);
-        $this->assertSame(1, ContentTranscript::query()->where('content_item_id', $item->id)->count());
-        $this->assertTrue(
-            RecognitionDetection::query()
-                ->where('content_item_id', $item->id)
-                ->where('recognition_type', RecognitionType::SpokenBrand)
-                ->where('detected_brand', 'Glossier')
-                ->exists(),
-        );
+        $this->assertNull($frame->timestamp_ms);
     }
 
     public function test_large_video_still_gets_keyframes_with_the_split_marker(): void
@@ -3314,23 +2947,854 @@ class MediaResolutionFlowsTest extends TestCase
 }
 ```
 
-(Adjust `Story::factory()` attributes to the factory's required fields, as in Task 8.)
+(Adjust `Story::factory()` attributes per the Task 0 factory audit.)
 
 - [ ] **Step 2: Run the tests**
 
 Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/MediaResolutionFlowsTest.php`
-Expected: PASS (4 tests) — everything was built in Tasks 1–13; failures here are integration bugs to fix now, not new features.
+Expected: PASS (4 tests) — everything was built in Tasks 1–10; failures here are integration bugs to fix now, not new features.
 
-- [ ] **Step 3: Run the FULL suite**
+- [ ] **Step 3: Run the FULL suite (Slice B2 gate)**
 
 Run: `XDEBUG_MODE=off vendor/bin/phpunit`
-Expected: green.
+Expected: green. **This is the Slice B2 gate — B1+B2 are mergeable from here.**
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add tests/Feature/Enrichment/MediaResolutionFlowsTest.php
-git commit -m "test(enrichment): end-to-end media-resolution + keyframe flows (spec §7)"
+git commit -m "test(enrichment): end-to-end media-resolution + keyframe flows"
+```
+
+---
+
+# Slice B3 — YouTube transcript, lifecycle, documentation
+
+### Task 12: `content_transcripts` table + `ContentTranscript` model (with negative-result state)
+
+**Files:**
+- Create: `database/migrations/2026_07_19_100004_create_content_transcripts_table.php`
+- Create: `app/Modules/Monitoring/Models/ContentTranscript.php`
+- Modify: `app/Modules/Monitoring/Models/ContentItem.php` (add `transcripts()` HasMany)
+- Test: `tests/Feature/Enrichment/ContentTranscriptTest.php` (create)
+
+**Interfaces:**
+- Consumes: `BelongsToTenant`, `AsValueObject`, `Provenance`.
+- Produces: `ContentTranscript` model — fillable `content_item_id, language, status, text, segments, provider, provenance, checksum, fetched_at`; consts `STATUS_AVAILABLE = 'available'`, `STATUS_UNAVAILABLE = 'unavailable'`; unique `(content_item_id, language, provider)`. An `unavailable` row is the **negative cache**: "the provider was asked and this video has no captions — do not bill again". `text`/`checksum` are nullable (null for unavailable rows). `ContentItem::transcripts(): HasMany`.
+
+- [ ] **Step 1: Write the failing test**
+
+```php
+<?php
+
+namespace Tests\Feature\Enrichment;
+
+use App\Modules\CRM\Models\Creator;
+use App\Modules\CRM\Models\PlatformAccount;
+use App\Modules\Monitoring\Models\ContentItem;
+use App\Modules\Monitoring\Models\ContentTranscript;
+use App\Platform\Ingestion\SourceRegistry;
+use App\Shared\ValueObjects\Provenance;
+use Carbon\CarbonImmutable;
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class ContentTranscriptTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private function makeContentItem(): ContentItem
+    {
+        $account = PlatformAccount::factory()->for(Creator::factory())->create();
+
+        return ContentItem::factory()->for($account, 'platformAccount')->create();
+    }
+
+    private function attributes(ContentItem $item): array
+    {
+        return [
+            'content_item_id' => $item->id,
+            'language' => 'und',
+            'status' => ContentTranscript::STATUS_AVAILABLE,
+            'text' => 'danke an Glossier für das PR Paket',
+            'segments' => [['start' => '0.0', 'dur' => '4.2', 'text' => 'danke an Glossier für das PR Paket']],
+            'provider' => SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT,
+            'provenance' => new Provenance(SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT, CarbonImmutable::now(), 'youtube-transcript-v1'),
+            'checksum' => hash('sha256', 'danke an Glossier für das PR Paket'),
+            'fetched_at' => CarbonImmutable::now(),
+        ];
+    }
+
+    public function test_transcript_row_is_tenant_stamped_and_reachable_from_content(): void
+    {
+        $item = $this->makeContentItem();
+        $row = ContentTranscript::query()->create($this->attributes($item));
+
+        $this->assertNotNull($row->tenant_id);
+        $this->assertSame($item->tenant_id, $row->tenant_id);
+        $this->assertTrue($item->transcripts()->whereKey($row->id)->exists());
+        $this->assertSame(ContentTranscript::STATUS_AVAILABLE, $row->status);
+    }
+
+    public function test_one_transcript_per_item_language_provider(): void
+    {
+        $item = $this->makeContentItem();
+        ContentTranscript::query()->create($this->attributes($item));
+
+        $this->expectException(UniqueConstraintViolationException::class);
+        ContentTranscript::query()->create($this->attributes($item));
+    }
+
+    public function test_unavailable_negative_cache_row_needs_no_text(): void
+    {
+        $item = $this->makeContentItem();
+
+        $row = ContentTranscript::query()->create([
+            ...$this->attributes($item),
+            'status' => ContentTranscript::STATUS_UNAVAILABLE,
+            'text' => null,
+            'segments' => null,
+            'checksum' => null,
+        ]);
+
+        $this->assertSame(ContentTranscript::STATUS_UNAVAILABLE, $row->status);
+        $this->assertNull($row->text);
+    }
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/ContentTranscriptTest.php`
+Expected: ERROR — class `ContentTranscript` not found.
+
+- [ ] **Step 3: Implement the migration**
+
+```php
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('content_transcripts', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('tenant_id')->index();
+            $table->foreignId('content_item_id')->constrained()->cascadeOnDelete();
+            // 'und' (BCP-47 undetermined) when the provider names no language —
+            // NOT NULL so the unique key below has no NULL-duplicate hole.
+            $table->string('language', 20);
+            // 'available' = captions text present; 'unavailable' = the provider
+            // was successfully asked and this video HAS no captions (negative
+            // cache — never re-billed). Transport failures persist NOTHING.
+            $table->string('status', 20);
+            $table->text('text')->nullable();
+            $table->jsonb('segments')->nullable();
+            $table->string('provider', 100);
+            $table->jsonb('provenance');
+            $table->char('checksum', 64)->nullable();
+            $table->timestamp('fetched_at');
+            $table->timestamps();
+
+            $table->unique(['content_item_id', 'language', 'provider']);
+        });
+
+        DB::statement("ALTER TABLE content_transcripts ADD CONSTRAINT content_transcripts_status_check CHECK (status IN ('available', 'unavailable'))");
+        DB::statement("ALTER TABLE content_transcripts ADD CONSTRAINT content_transcripts_available_has_text_check CHECK (status <> 'available' OR text IS NOT NULL)");
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('content_transcripts');
+    }
+};
+```
+
+- [ ] **Step 4: Implement the model**
+
+```php
+<?php
+
+namespace App\Modules\Monitoring\Models;
+
+use App\Shared\Casts\AsValueObject;
+use App\Shared\Tenancy\BelongsToTenant;
+use App\Shared\ValueObjects\Provenance;
+use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+/**
+ * A provider-derived transcript of one ContentItem (sub-project B) —
+ * refreshable, multi-language, segment-ready. v1 source: the YouTube
+ * transcript actor (SRC-apify-youtube-transcript, ADR-0028); tier D's
+ * multilingual speech will add rows under other providers/languages.
+ *
+ * An UNAVAILABLE row is a negative cache: the provider confirmed this
+ * video has no captions, so the fetch is never re-billed. Transport
+ * failures persist nothing (retrying is correct there).
+ *
+ * Tenant-owned (ADR-0019); erased with the creator's content (GDPR).
+ *
+ * @property int $id
+ * @property int|null $tenant_id
+ * @property int $content_item_id
+ * @property string $language BCP-47; 'und' when the provider names none
+ * @property string $status available | unavailable
+ * @property string|null $text null on unavailable rows
+ * @property array<int, array<string, string>>|null $segments timestamped cues
+ * @property string $provider SRC-* id
+ * @property Provenance $provenance
+ * @property string|null $checksum sha256 of text; null on unavailable rows
+ * @property CarbonImmutable $fetched_at
+ */
+class ContentTranscript extends Model
+{
+    use BelongsToTenant;
+
+    public const STATUS_AVAILABLE = 'available';
+
+    public const STATUS_UNAVAILABLE = 'unavailable';
+
+    protected $fillable = [
+        'content_item_id',
+        'language',
+        'status',
+        'text',
+        'segments',
+        'provider',
+        'provenance',
+        'checksum',
+        'fetched_at',
+    ];
+
+    /** @return array<string, string> */
+    protected function casts(): array
+    {
+        return [
+            'segments' => 'array',
+            'provenance' => AsValueObject::class.':'.Provenance::class,
+            'fetched_at' => 'immutable_datetime',
+        ];
+    }
+
+    /** @return BelongsTo<ContentItem, $this> */
+    public function contentItem(): BelongsTo
+    {
+        return $this->belongsTo(ContentItem::class);
+    }
+}
+```
+
+In `ContentItem.php`, add after `enrichmentRuns()` (before `keyframes()`):
+
+```php
+    /** @return HasMany<ContentTranscript, $this> */
+    public function transcripts(): HasMany
+    {
+        return $this->hasMany(ContentTranscript::class);
+    }
+```
+
+- [ ] **Step 5: Run test to verify it passes**
+
+Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/ContentTranscriptTest.php`
+Expected: PASS (3 tests).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add database/migrations/2026_07_19_100004_create_content_transcripts_table.php app/Modules/Monitoring/Models/ContentTranscript.php app/Modules/Monitoring/Models/ContentItem.php tests/Feature/Enrichment/ContentTranscriptTest.php
+git commit -m "feat(enrichment): content_transcripts table + model (negative-result cache)"
+```
+
+---
+
+### Task 13: Recorder extension + `YouTubeTranscriptEnricher` as a dedicated pipeline stage
+
+**Files:**
+- Modify: `app/Platform/Ingestion/Observability/ProviderCallRecorder.php` (one honest completion method for non-normalizing provider operations)
+- Create: `app/Platform/Enrichment/Transcripts/YouTubeTranscriptEnricher.php`
+- Create: `tests/Fixtures/providers/youtube-transcript.json`
+- Modify: `app/Platform/Enrichment/EnrichmentPipeline.php` (transcript stage BEFORE recognition)
+- Test: `tests/Feature/Enrichment/YouTubeTranscriptEnricherTest.php` (create)
+
+**Interfaces:**
+- Consumes: `ApifyClient::runActor(string $sourceId, string $actorId, array $input): ProviderResponse`; `ProviderCallRecorder` (Task 0 seam 2 governs the extension's exact shape); `ContentTranscript` (Task 12).
+- Produces:
+  - `ProviderCallRecorder::recordOperation($context, ProviderResponse $response, int $resultCount): void` — records a completed provider operation that produces no normalized items (transcript fetch). Implemented by SHARING the row-writing internals `recordCompletion` uses (per the seam audit) — never by fabricating an empty `NormalizedBatch`/`PersistenceResult`.
+  - `YouTubeTranscriptEnricher::enrich(ContentItem|Story $target, string $correlationId, int $retryCount): string` — the pipeline stage. Summaries: `skipped:not-applicable` (not a YouTube ContentItem) | `skipped:disabled` | `completed:cached` (available row exists) | `skipped:no-captions` (unavailable row exists, or a successful fetch found none — negative-cached) | `skipped:no-video-id` | `skipped:provider-error` (transport failure — nothing persisted, retried next run) | `completed:fetched`.
+  - Recognition (Task 14) consumes ONLY persisted rows — it never triggers the actor.
+  - Pipeline order becomes: `hashtags → transcript → recognition → keyframes → text_signals → …`.
+
+- [ ] **Step 1: Create the fixture**
+
+`tests/Fixtures/providers/youtube-transcript.json`:
+
+```json
+[
+  {
+    "data": [
+      {"start": "0.00", "dur": "4.20", "text": "danke an Glossier für das PR Paket"},
+      {"start": "4.20", "dur": "3.10", "text": "der You Perfume Duft ist unglaublich"}
+    ]
+  }
+]
+```
+
+- [ ] **Step 2: Write the failing test**
+
+```php
+<?php
+
+namespace Tests\Feature\Enrichment;
+
+use App\Modules\CRM\Models\Creator;
+use App\Modules\CRM\Models\PlatformAccount;
+use App\Modules\Monitoring\Models\ContentItem;
+use App\Modules\Monitoring\Models\ContentTranscript;
+use App\Platform\Enrichment\Transcripts\YouTubeTranscriptEnricher;
+use App\Platform\Ingestion\Models\ProviderCall;
+use App\Platform\Ingestion\SourceRegistry;
+use App\Shared\Enums\ContentType;
+use App\Shared\Enums\Platform;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
+use Tests\Support\FakesProviderResponses;
+use Tests\TestCase;
+
+class YouTubeTranscriptEnricherTest extends TestCase
+{
+    use FakesProviderResponses;
+    use RefreshDatabase;
+
+    private function makeYouTubeItem(): ContentItem
+    {
+        $account = PlatformAccount::factory()->for(Creator::factory())->create(['platform' => Platform::YouTube]);
+
+        return ContentItem::factory()->for($account, 'platformAccount')->create([
+            'platform' => Platform::YouTube,
+            'content_type' => ContentType::Video,
+            'external_id' => 'vid00000001',
+        ]);
+    }
+
+    private function enrich(ContentItem $item): string
+    {
+        return app(YouTubeTranscriptEnricher::class)->enrich($item, 'corr-x', 0);
+    }
+
+    public function test_fetches_persists_available_row_and_records_telemetry(): void
+    {
+        $this->fakeProviderCredentials();
+        $this->fakeApifyActor((string) config('services.apify.actors.youtube_transcript'), $this->fixture('youtube-transcript'));
+        $item = $this->makeYouTubeItem();
+
+        $summary = $this->enrich($item);
+
+        $this->assertSame('completed:fetched', $summary);
+        $row = ContentTranscript::query()->where('content_item_id', $item->id)->firstOrFail();
+        $this->assertSame(ContentTranscript::STATUS_AVAILABLE, $row->status);
+        $this->assertSame('danke an Glossier für das PR Paket der You Perfume Duft ist unglaublich', $row->text);
+        $this->assertSame('und', $row->language);
+        $this->assertSame(SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT, $row->provider);
+        $this->assertCount(2, $row->segments);
+        $this->assertSame(1, ProviderCall::query()->where('source', SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT)->where('operation', 'transcript.fetch')->count());
+    }
+
+    public function test_available_row_short_circuits_without_actor_call(): void
+    {
+        $this->fakeProviderCredentials();
+        Http::fake();
+        $item = $this->makeYouTubeItem();
+        ContentTranscript::query()->create([
+            'content_item_id' => $item->id, 'language' => 'und',
+            'status' => ContentTranscript::STATUS_AVAILABLE, 'text' => 'schon da',
+            'provider' => SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT,
+            'provenance' => new \App\Shared\ValueObjects\Provenance(SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT, \Carbon\CarbonImmutable::now(), 'youtube-transcript-v1'),
+            'checksum' => hash('sha256', 'schon da'), 'fetched_at' => \Carbon\CarbonImmutable::now(),
+        ]);
+
+        $this->assertSame('completed:cached', $this->enrich($item));
+        Http::assertNothingSent();
+    }
+
+    public function test_no_captions_persists_the_negative_cache_and_never_rebills(): void
+    {
+        $this->fakeProviderCredentials();
+        $this->fakeApifyActor((string) config('services.apify.actors.youtube_transcript'), [['data' => []]]);
+        $item = $this->makeYouTubeItem();
+
+        $this->assertSame('skipped:no-captions', $this->enrich($item));
+        $row = ContentTranscript::query()->where('content_item_id', $item->id)->firstOrFail();
+        $this->assertSame(ContentTranscript::STATUS_UNAVAILABLE, $row->status);
+        $this->assertNull($row->text);
+
+        // Second run: negative cache — NO second actor call.
+        Http::fake();
+        $this->assertSame('skipped:no-captions', $this->enrich($item));
+        Http::assertNothingSent();
+    }
+
+    public function test_provider_failure_persists_nothing_so_a_retry_can_refetch(): void
+    {
+        $this->fakeProviderCredentials();
+        $this->fakeApifyActor((string) config('services.apify.actors.youtube_transcript'), [], 500);
+        $item = $this->makeYouTubeItem();
+
+        $this->assertSame('skipped:provider-error', $this->enrich($item));
+        $this->assertSame(0, ContentTranscript::query()->count());
+        // Outcome value per the Task 0 CallOutcome audit (seam 1):
+        $this->assertSame(1, ProviderCall::query()->where('source', SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT)->where('outcome', \App\Platform\Ingestion\Support\CallOutcome::Failure->value)->count());
+    }
+
+    public function test_kill_switch_off_and_non_youtube_targets_skip_cleanly(): void
+    {
+        Http::fake();
+        $item = $this->makeYouTubeItem();
+
+        config(['qds.ingestion.youtube_transcript.enabled' => false]);
+        $this->assertSame('skipped:disabled', $this->enrich($item));
+
+        config(['qds.ingestion.youtube_transcript.enabled' => true]);
+        $account = PlatformAccount::factory()->for(Creator::factory())->create(['platform' => Platform::Instagram]);
+        $insta = ContentItem::factory()->for($account, 'platformAccount')->create(['platform' => Platform::Instagram, 'content_type' => ContentType::Reel]);
+        $this->assertSame('skipped:not-applicable', $this->enrich($insta));
+
+        Http::assertNothingSent();
+    }
+}
+```
+
+- [ ] **Step 3: Run test to verify it fails**
+
+Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/YouTubeTranscriptEnricherTest.php`
+Expected: ERROR — class `YouTubeTranscriptEnricher` not found.
+
+- [ ] **Step 4: Extend `ProviderCallRecorder`**
+
+Per the Task 0 audit (seam 2), add ONE public method that records a completed provider operation with no normalized items, **sharing** the ProviderCall row-writing path `recordCompletion` uses. Reference shape (align names/fields with the audited internals — the acceptance criteria are behavioural):
+
+```php
+    /**
+     * Record a completed provider operation that yields no normalized items
+     * (e.g. a transcript fetch): same ProviderCall row and health tracking
+     * as recordCompletion, without pretending a normalization ran.
+     */
+    public function recordOperation($context, ProviderResponse $response, int $resultCount): void
+    {
+        // Delegate to the same internal row-writer recordCompletion uses,
+        // passing: outcome SUCCESS, the response's httpStatus/responseBytes/
+        // requestMs, result_count = accepted_count = $resultCount, and no
+        // validation/normalization/persistence timings.
+    }
+```
+
+Acceptance: after `recordOperation`, one `ProviderCall` row exists with the context's source/operation/correlation, `outcome = SUCCESS`, `response_bytes`/`duration_ms` from the response, and `result_count = accepted_count = $resultCount`. No `NormalizedBatch` or `PersistenceResult` is constructed anywhere in the transcript path.
+
+- [ ] **Step 5: Implement `YouTubeTranscriptEnricher`**
+
+```php
+<?php
+
+namespace App\Platform\Enrichment\Transcripts;
+
+use App\Modules\Monitoring\Models\ContentItem;
+use App\Modules\Monitoring\Models\ContentTranscript;
+use App\Modules\Monitoring\Models\Story;
+use App\Platform\Ingestion\Exceptions\ProviderCallException;
+use App\Platform\Ingestion\Http\ApifyClient;
+use App\Platform\Ingestion\Observability\ProviderCallRecorder;
+use App\Platform\Ingestion\SourceRegistry;
+use App\Shared\Enums\Platform;
+use App\Shared\ValueObjects\Provenance;
+use Carbon\CarbonImmutable;
+
+/**
+ * The transcript pipeline stage (sub-project B, ADR-0028): ensures one
+ * YouTube video's captions are persisted as a ContentTranscript BEFORE
+ * recognition runs — recognition only ever consumes persisted rows and
+ * never triggers this billed provider itself.
+ *
+ * Billing doctrine: at most ONE successful actor run per video, ever.
+ *  - available row  → completed:cached (no call);
+ *  - unavailable row → skipped:no-captions (negative cache, no call);
+ *  - successful run, no captions → persist the unavailable row;
+ *  - transport/provider error → persist NOTHING (skipped:provider-error;
+ *    the next enrichment run may retry — that is correct, not a leak).
+ */
+class YouTubeTranscriptEnricher
+{
+    public function __construct(
+        private readonly ApifyClient $client,
+        private readonly ProviderCallRecorder $recorder,
+    ) {}
+
+    public function enrich(ContentItem|Story $target, string $correlationId, int $retryCount): string
+    {
+        if (! $target instanceof ContentItem || $target->platform !== Platform::YouTube) {
+            return 'skipped:not-applicable';
+        }
+
+        if (! (bool) config('qds.ingestion.youtube_transcript.enabled')) {
+            return 'skipped:disabled';
+        }
+
+        $existing = ContentTranscript::query()
+            ->where('content_item_id', $target->id)
+            ->where('provider', SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT)
+            ->where('language', 'und')
+            ->first();
+
+        if ($existing !== null) {
+            return $existing->status === ContentTranscript::STATUS_AVAILABLE
+                ? 'completed:cached'
+                : 'skipped:no-captions';
+        }
+
+        if (! is_string($target->external_id) || $target->external_id === '') {
+            return 'skipped:no-video-id';
+        }
+
+        $context = $this->recorder->start(
+            SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT,
+            'transcript.fetch',
+            $correlationId,
+            null,
+            $target->platform_account_id,
+            $retryCount,
+        );
+
+        try {
+            $response = $this->client->runActor(
+                SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT,
+                (string) config('services.apify.actors.youtube_transcript'),
+                ['videoUrl' => "https://www.youtube.com/watch?v={$target->external_id}"],
+            );
+        } catch (ProviderCallException $e) {
+            $this->recorder->recordFailure($context, $e);
+
+            return 'skipped:provider-error';
+        }
+
+        $segments = $this->segmentsFrom($response->items);
+        $text = trim(implode(' ', array_column($segments, 'text')));
+        $identity = [
+            'content_item_id' => $target->id,
+            'language' => 'und',
+            'provider' => SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT,
+        ];
+        $provenance = new Provenance(SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT, CarbonImmutable::now(), 'youtube-transcript-v1');
+
+        if ($text === '') {
+            // Successful run, no captions: negative-cache it (never re-bill).
+            ContentTranscript::query()->updateOrCreate($identity, [
+                'status' => ContentTranscript::STATUS_UNAVAILABLE,
+                'text' => null,
+                'segments' => null,
+                'checksum' => null,
+                'fetched_at' => CarbonImmutable::now(),
+                'provenance' => $provenance,
+            ]);
+            $this->recorder->recordOperation($context, $response, 0);
+
+            return 'skipped:no-captions';
+        }
+
+        ContentTranscript::query()->updateOrCreate($identity, [
+            'status' => ContentTranscript::STATUS_AVAILABLE,
+            'text' => $text,
+            'segments' => $segments,
+            'checksum' => hash('sha256', $text),
+            'fetched_at' => CarbonImmutable::now(),
+            'provenance' => $provenance,
+        ]);
+        $this->recorder->recordOperation($context, $response, 1);
+
+        return 'completed:fetched';
+    }
+
+    /**
+     * Tolerant parse of the actor's dataset items — each item may carry a
+     * `data` list of {start, dur, text} caption cues. Anything malformed is
+     * skipped (never fabricated).
+     *
+     * @param  list<mixed>  $items
+     * @return list<array{start: string, dur: string, text: string}>
+     */
+    private function segmentsFrom(array $items): array
+    {
+        $segments = [];
+
+        foreach ($items as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            foreach ((array) ($item['data'] ?? []) as $segment) {
+                if (is_array($segment) && is_string($segment['text'] ?? null) && trim($segment['text']) !== '') {
+                    $segments[] = [
+                        'start' => (string) ($segment['start'] ?? ''),
+                        'dur' => (string) ($segment['dur'] ?? ''),
+                        'text' => trim($segment['text']),
+                    ];
+                }
+            }
+        }
+
+        return $segments;
+    }
+}
+```
+
+- [ ] **Step 6: Wire the pipeline stage**
+
+In `EnrichmentPipeline`: constructor adds `private readonly YouTubeTranscriptEnricher $transcripts,` (import it). Insert BEFORE the recognition stage block (recognition consumes what this stage persists):
+
+```php
+            $stages['transcript'] = $this->transcripts->enrich($target, $correlationId, $retryCount);
+```
+
+Update the docblock stage list to `hashtags → transcript → recognition → keyframes → text signals → sentiment → seeded attribution → EMV → reach`.
+
+- [ ] **Step 7: Run the tests**
+
+Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/YouTubeTranscriptEnricherTest.php tests/Feature/Enrichment/`
+Expected: enricher tests PASS (5); existing pipeline tests that assert the full `stages` array gain the `transcript` key — update them (seam audit #8).
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add app/Platform/Ingestion/Observability/ProviderCallRecorder.php app/Platform/Enrichment/Transcripts/YouTubeTranscriptEnricher.php app/Platform/Enrichment/EnrichmentPipeline.php tests/Fixtures/providers/youtube-transcript.json tests/Feature/Enrichment/YouTubeTranscriptEnricherTest.php
+git commit -m "feat(enrichment): dedicated YouTube transcript stage with negative-result caching"
+```
+
+---
+
+### Task 14: Recognition consumes persisted transcripts → SPOKEN_BRAND
+
+**Files:**
+- Modify: `app/Platform/Enrichment/Recognition/RecognitionNormalizer.php` (add `transcriptBatch()`)
+- Modify: `app/Platform/Enrichment/Recognition/RecognitionService.php` (a consume-only YouTube branch)
+- Test: `tests/Feature/Enrichment/TranscriptRecognitionTest.php` (create)
+
+**Interfaces:**
+- Consumes: `ContentTranscript` rows persisted by Task 13's stage; `BrandLexicon::matchInText`; `RecognitionService::persist()` (existing private upsert — reused, NOT duplicated).
+- Produces: `RecognitionNormalizer::transcriptBatch(string $transcript): NormalizedBatch` (SPOKEN_BRAND candidates; synthetic `ProviderResponse` with `sourceVersion: 'youtube-transcript-v1'` describing a LOCAL normalization — no provider call, no ProviderCall row); recognition marker `youtube-transcript:unavailable` when a YouTube item has no available transcript row. Recognition NEVER calls the actor.
+
+- [ ] **Step 1: Write the failing test**
+
+```php
+<?php
+
+namespace Tests\Feature\Enrichment;
+
+use App\Modules\CRM\Models\Brand;
+use App\Modules\CRM\Models\Creator;
+use App\Modules\CRM\Models\PlatformAccount;
+use App\Modules\Monitoring\Models\ContentItem;
+use App\Modules\Monitoring\Models\ContentTranscript;
+use App\Modules\Monitoring\Models\Keyframe;
+use App\Modules\Monitoring\Models\RecognitionDetection;
+use App\Platform\Enrichment\EnrichmentPipeline;
+use App\Platform\Enrichment\Recognition\RecognitionService;
+use App\Platform\Ingestion\SourceRegistry;
+use App\Shared\Enums\ContentType;
+use App\Shared\Enums\KeyframeKind;
+use App\Shared\Enums\Platform;
+use App\Shared\Enums\RecognitionType;
+use App\Shared\ValueObjects\Provenance;
+use Carbon\CarbonImmutable;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
+use Tests\Support\FakesProviderResponses;
+use Tests\TestCase;
+
+class TranscriptRecognitionTest extends TestCase
+{
+    use FakesProviderResponses;
+    use RefreshDatabase;
+
+    private function makeYouTubeItem(array $overrides = []): ContentItem
+    {
+        $account = PlatformAccount::factory()->for(Creator::factory())->create(['platform' => Platform::YouTube]);
+
+        return ContentItem::factory()->for($account, 'platformAccount')->create([
+            'platform' => Platform::YouTube,
+            'content_type' => ContentType::Video,
+            'external_id' => 'vid00000001',
+            'media_urls' => [],
+            ...$overrides,
+        ]);
+    }
+
+    private function persistAvailableTranscript(ContentItem $item, string $text): void
+    {
+        ContentTranscript::query()->create([
+            'content_item_id' => $item->id, 'language' => 'und',
+            'status' => ContentTranscript::STATUS_AVAILABLE, 'text' => $text,
+            'provider' => SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT,
+            'provenance' => new Provenance(SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT, CarbonImmutable::now(), 'youtube-transcript-v1'),
+            'checksum' => hash('sha256', $text), 'fetched_at' => CarbonImmutable::now(),
+        ]);
+    }
+
+    public function test_persisted_transcript_yields_spoken_brand_without_any_provider_call(): void
+    {
+        Brand::factory()->create(['name' => 'Glossier']);
+        Http::fake();
+        $item = $this->makeYouTubeItem();
+        $this->persistAvailableTranscript($item, 'danke an Glossier für das PR Paket');
+
+        $result = app(RecognitionService::class)->enrich($item, 'corr-t1');
+
+        $this->assertSame('completed', $result['status']);
+        $detection = RecognitionDetection::query()
+            ->where('content_item_id', $item->id)
+            ->where('recognition_type', RecognitionType::SpokenBrand)
+            ->firstOrFail();
+        $this->assertSame('Glossier', $detection->detected_brand);
+        $this->assertSame(SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT, $detection->provenance->source);
+        Http::assertNothingSent(); // consume-only: recognition never fetches
+    }
+
+    public function test_no_available_transcript_reports_unavailable(): void
+    {
+        Http::fake();
+        $item = $this->makeYouTubeItem();
+
+        $result = app(RecognitionService::class)->enrich($item, 'corr-t2');
+
+        $this->assertContains('youtube-transcript:unavailable', $result['skipped']);
+        Http::assertNothingSent();
+    }
+
+    public function test_full_youtube_flow_transcript_stage_plus_thumbnail_keyframe_plus_spoken_brand(): void
+    {
+        // The spec §7 YouTube worked example, end-to-end through the pipeline.
+        Brand::factory()->create(['name' => 'Glossier']);
+        config(['qds.ingestion.media_disk' => 'media']);
+        Storage::fake('media');
+        $this->fakeProviderCredentials();
+        Http::fake([
+            'api.apify.com/v2/acts/*/run-sync-get-dataset-items*' => Http::response($this->fixture('youtube-transcript')),
+            '93.184.216.34/*' => Http::response('THUMBNAIL', 200, ['Content-Type' => 'image/jpeg']),
+        ]);
+        $item = $this->makeYouTubeItem(['media_urls' => ['https://93.184.216.34/maxres.jpg']]);
+
+        $run = app(EnrichmentPipeline::class)->run($item, 'corr-t3');
+
+        $this->assertSame('completed:fetched', $run->stages['transcript']);
+        $this->assertSame('completed:1 frame(s)', $run->stages['keyframes']);
+        $this->assertSame(KeyframeKind::Thumbnail, Keyframe::query()->where('owner_id', $item->id)->firstOrFail()->kind);
+        $this->assertTrue(
+            RecognitionDetection::query()
+                ->where('content_item_id', $item->id)
+                ->where('recognition_type', RecognitionType::SpokenBrand)
+                ->where('detected_brand', 'Glossier')
+                ->exists(),
+        );
+    }
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/TranscriptRecognitionTest.php`
+Expected: FAIL — no SPOKEN_BRAND detection (the consume branch does not exist yet).
+
+- [ ] **Step 3: Add `transcriptBatch` to `RecognitionNormalizer`**
+
+Add after `speechBatch()` (`ProviderResponse` is already imported):
+
+```php
+    /**
+     * A stored provider transcript → SPOKEN_BRAND candidates (sub-project B:
+     * YouTube rides the transcript stage since its audio is not downloadable
+     * in-freeze). Same lexicon gate as speechBatch — free text with no known
+     * brand is not a recognition hit. The synthetic response describes this
+     * LOCAL normalization pass (no provider call happens here).
+     */
+    public function transcriptBatch(string $transcript): NormalizedBatch
+    {
+        $start = microtime(true);
+
+        $items = [];
+        $candidate = $this->textCandidate(RecognitionType::SpokenBrand, $transcript, null, 'spoken-brand-transcript-match');
+
+        if ($candidate !== null) {
+            $items[] = $candidate;
+        }
+
+        return new NormalizedBatch(
+            items: $items,
+            rejected: [],
+            response: new ProviderResponse(
+                items: [],
+                httpStatus: 200,
+                responseBytes: 0,
+                requestMs: 0.0,
+                sourceVersion: 'youtube-transcript-v1',
+            ),
+            validationMs: 0.0,
+            normalizationMs: (microtime(true) - $start) * 1000,
+        );
+    }
+```
+
+- [ ] **Step 4: Add the consume-only branch to `RecognitionService`**
+
+Imports: `App\Modules\Monitoring\Models\ContentTranscript` and `App\Shared\Enums\Platform`. No constructor change. In `enrich()`, insert after the `$created`/`$updated`/`$skipped` declarations, BEFORE the no-provider-configured early return (mining a persisted transcript needs no Google key):
+
+```php
+        // YouTube SPOKEN_BRAND rides the transcript the pipeline's transcript
+        // stage persisted (ADR-0028) — consume-only: recognition never calls
+        // the actor, and no ProviderCall is recorded for this local mining.
+        if ($target instanceof ContentItem && $target->platform === Platform::YouTube) {
+            $transcript = ContentTranscript::query()
+                ->where('content_item_id', $target->id)
+                ->where('status', ContentTranscript::STATUS_AVAILABLE)
+                ->latest('id')
+                ->first();
+
+            if ($transcript === null) {
+                $skipped[] = 'youtube-transcript:unavailable';
+            } else {
+                [$c, $u] = $this->persist($target, SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT, $this->normalizer->transcriptBatch((string) $transcript->text));
+                $created += $c;
+                $updated += $u;
+            }
+        }
+```
+
+Change the not-configured early return to carry the accumulated counts:
+
+```php
+            return [
+                'status' => $created + $updated > 0 ? 'completed' : 'completed-empty',
+                'created' => $created,
+                'updated' => $updated,
+                'skipped' => $skipped,
+            ];
+```
+
+- [ ] **Step 5: Run the tests + the enrichment suite**
+
+Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Enrichment/TranscriptRecognitionTest.php tests/Feature/Enrichment/`
+Expected: all PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add app/Platform/Enrichment/Recognition/RecognitionNormalizer.php app/Platform/Enrichment/Recognition/RecognitionService.php tests/Feature/Enrichment/TranscriptRecognitionTest.php
+git commit -m "feat(enrichment): recognition consumes persisted transcripts into SPOKEN_BRAND"
 ```
 
 ---
@@ -3347,8 +3811,8 @@ git commit -m "test(enrichment): end-to-end media-resolution + keyframe flows (s
 - Test: `tests/Feature/Enrichment/KeyframeRetentionTest.php` (create)
 
 **Interfaces:**
-- Consumes: `Keyframe` (Task 11), `MonitoringSettingsResolver::rowFor` (existing private memoized lookup), config `qds.enrichment.keyframes.retention_days`.
-- Produces: `MonitoringSettingsResolver::keyframeRetentionDaysFor(int $tenantId): int` (0 = keep forever); command `qds:prune-keyframes` — per tenant, file-then-row, confirm-blob-gone-before-delete (the M31 pattern). No settings UI in B (the nullable column falls back to config until a later settings-page change exposes it).
+- Consumes: `Keyframe` (Task 8), `MonitoringSettingsResolver::rowFor` (existing private memoized lookup), config `qds.enrichment.keyframes.retention_days`.
+- Produces: `MonitoringSettingsResolver::keyframeRetentionDaysFor(int $tenantId): int` (0 = keep forever); command `qds:prune-keyframes` — per tenant, file-then-row, confirm-blob-gone-before-delete (the M31 pattern). No settings UI in B (the nullable column falls back to config until a later settings-page change exposes it). NOTE (deferred, for tier C): pruning removes rows entirely — a C-era re-embedding job cannot tell "pruned" from "never extractable"; the deferred register records the lifecycle-state follow-up (Task 17).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3398,6 +3862,7 @@ class KeyframeRetentionTest extends TestCase
             'height' => 100,
             'kind' => KeyframeKind::VideoSample,
             'checksum' => str_repeat('a', 64),
+            'source_checksum' => str_repeat('b', 64),
             'provenance' => new Provenance('SRC-apify-instagram-reel-scraper', CarbonImmutable::now(), 'keyframes-v1'),
         ]);
         $frame->timestamps = false;
@@ -3409,7 +3874,7 @@ class KeyframeRetentionTest extends TestCase
     public function test_resolver_prefers_the_tenant_row_and_falls_back_to_config(): void
     {
         config(['qds.enrichment.keyframes.retention_days' => 180]);
-        $tenantId = (int) $this->defaultTenant->id;
+        $tenantId = (int) $this->defaultTenant->id; // [seam-audited property name]
 
         $resolver = app(MonitoringSettingsResolver::class);
         $this->assertSame(180, $resolver->keyframeRetentionDaysFor($tenantId));
@@ -3451,7 +3916,7 @@ class KeyframeRetentionTest extends TestCase
 }
 ```
 
-Note: `MonitoringSetting::create` runs in the default tenant context (BelongsToTenant stamps it). If the model requires `updated_by` or other fields, satisfy them per its factory/fillable. If `Tests\TestCase` exposes the default tenant under a different property name than `$this->defaultTenant` (check `tests/TestCase.php`), use that name.
+(`MonitoringSetting::create` requirements and the default-tenant property name come from the Task 0 audit, seams 7 and 11.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -3664,11 +4129,13 @@ class KeyframeErasureTest extends TestCase
             'height' => 100,
             'kind' => KeyframeKind::VideoSample,
             'checksum' => str_repeat('a', 64),
+            'source_checksum' => str_repeat('b', 64),
             'provenance' => new Provenance('SRC-apify-instagram-reel-scraper', CarbonImmutable::now(), 'keyframes-v1'),
         ]);
         ContentTranscript::query()->create([
             'content_item_id' => $item->id,
             'language' => 'und',
+            'status' => ContentTranscript::STATUS_AVAILABLE,
             'text' => 'hello',
             'provider' => SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT,
             'provenance' => new Provenance(SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT, CarbonImmutable::now(), 'youtube-transcript-v1'),
@@ -3688,7 +4155,7 @@ class KeyframeErasureTest extends TestCase
 }
 ```
 
-Note: `CreatorEraser::erase` refreshes materialized rollup views at the end; if the test DB lacks them under `RefreshDatabase`, mirror however the existing eraser tests handle that (find them with `grep -rln CreatorEraser tests/` and copy their setup).
+Note: `CreatorEraser::erase` refreshes materialized rollup views at the end; mirror however the existing eraser tests handle that under `RefreshDatabase` (find them with `grep -rln CreatorEraser tests/` and copy their setup).
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -3756,7 +4223,7 @@ git commit -m "feat(gdpr): erase keyframes + transcripts (rows in-transaction, b
 **Files:**
 - Modify: `docs/05-decisions/decision-log.md` (append ADR-0028)
 - Modify: `docs/40-integrations/00-data-source-matrix.md` (add the transcript provider row + TikTok field note, matching the file's existing table format)
-- Modify: `docs/20-cross-cutting/01-deferred-register.md` (three entries, matching its existing format)
+- Modify: `docs/20-cross-cutting/01-deferred-register.md` (four entries, matching its existing format)
 
 **Interfaces:** documentation only — no code, no tests.
 
@@ -3769,15 +4236,15 @@ git commit -m "feat(gdpr): erase keyframes + transcripts (rows in-transaction, b
 - **Context:** Recognition was inert on TikTok/YouTube (watch-page URLs in `media_urls`), silently dropped video over the 20 MB inline cap, and analyzed no representative frames — blocking the visual tiers (C embeddings, D Gemini) of the seeded-detection modernization. Spec: `docs/superpowers/specs/2026-07-18-seeded-detection-media-resolution-design.md`.
 - **Decision:**
   1. **TikTok** media resolves from the download-URL field the frozen `SRC-clockworks-tiktok-scraper` payload already carries (`mediaUrls[0]`, fallback `videoMeta.downloadAddr`). No provider change — a matrix clarification of which fields we read (same class as ADR-0017's input-only changes).
-  2. **The provider set is amended with exactly one source:** `SRC-apify-youtube-transcript` (the `pintostudio~youtube-transcript-scraper` actor) supplying YouTube **captions text only** — never video or audio bytes. Kill-switched (`qds.ingestion.youtube_transcript.enabled`), cost-metered through the standard `ApifyClient`/ProviderCall telemetry, one run per new YouTube video. This supersedes ADR-0001/DP-006 for this single addition; everything else stays frozen. YouTube's visual signal is the Data-API max-res thumbnail — the only in-freeze visual; downloading YouTube video files (yt-dlp or downloader actors) is REJECTED for v1 (ToS) and recorded as deferred.
-  3. **Keyframes are a persisted derived-media class:** deterministic even-interval ffmpeg samples (`N = clamp(ceil(duration/interval), min, max)`), stored on the private media disk under `tenants/{id}/keyframes/…` as polymorphic `keyframes` rows — the FK-able contract tiers C/D consume. They carry story-media-equivalent lifecycle: per-tenant retention (`keyframe_retention_days`, `qds:prune-keyframes`) and GDPR erasure (extends ADR-0013/ADR-0025).
+  2. **The provider set is amended with exactly one source:** `SRC-apify-youtube-transcript` (the `pintostudio~youtube-transcript-scraper` actor) supplying YouTube **captions text only** — never video or audio bytes. Kill-switched (`qds.ingestion.youtube_transcript.enabled`), cost-metered through the standard `ApifyClient`/ProviderCall telemetry, fetched by a **dedicated enrichment pipeline stage** (before recognition; recognition only consumes persisted transcripts), with **negative-result caching**: a successful run that finds no captions persists an `unavailable` row and is never re-billed; transport failures persist nothing and may retry. This supersedes ADR-0001/DP-006 for this single addition; everything else stays frozen. YouTube's visual signal is the Data-API max-res thumbnail — the only in-freeze visual; downloading YouTube video files (yt-dlp or downloader actors) is REJECTED for v1 (ToS) and recorded as deferred.
+  3. **Keyframes are a persisted derived-media class:** deterministic even-interval ffmpeg samples (`N = clamp(ceil(duration/interval), min, max)`), stored on the private media disk under `tenants/{id}/keyframes/…` as polymorphic `keyframes` rows (each carrying the sha256 of its SOURCE media) — the FK-able contract tiers C/D consume, written **transactionally** so a frame set is always complete or absent. Media is routed by its **downloaded content type**, not the row's content_type. They carry story-media-equivalent lifecycle: per-tenant retention (`keyframe_retention_days`, `qds:prune-keyframes`) and GDPR erasure (extends ADR-0013/ADR-0025).
   4. **No Google Cloud Storage in v1.** Video over the inline cap skips only the whole-video Video-Intelligence pass (`recognition:whole-video-skipped-too-large`) — keyframes still cover it; over the streaming download cap the media is skipped explainably (`media:too-large`). Moving Video Intelligence to a `gs://` input would reverse DP-005's inline-only doctrine and stand up a second storage backend — deferred.
-- **Consequences:** TikTok gains full-video visual coverage at zero extra provider cost; YouTube gains a thumbnail frame + transcript-driven SPOKEN_BRAND; every platform yields a `KeyframeSet` for C/D; large video is explainable, never silently dropped. New deferred items: real YouTube video download, GCS whole-video Video Intelligence, scene-change sampling.
+- **Consequences:** TikTok gains full-video visual coverage at zero extra provider cost; YouTube gains a thumbnail frame + transcript-driven SPOKEN_BRAND; every platform yields a `KeyframeSet` for C/D; large video is explainable, never silently dropped. New deferred items: real YouTube video download, GCS whole-video Video Intelligence, scene-change sampling, keyframe lifecycle state for tier-C re-extraction.
 ```
 
 - [ ] **Step 2: Amend the data-source matrix.** In `docs/40-integrations/00-data-source-matrix.md`, add `SRC-apify-youtube-transcript` to the provider table (§3) in the file's existing row format — capability "YouTube captions/transcript text (SPOKEN_BRAND input)", authority ADR-0028 — and a note on the TikTok row that `media_urls` is populated from the actor's download-URL field (ADR-0028). Update the §6 extension-rule sentence to reference ADR-0028 as the amendment precedent if the file lists amendments.
 
-- [ ] **Step 3: Add deferred-register entries.** In `docs/20-cross-cutting/01-deferred-register.md`, matching its existing entry format, add: (1) real YouTube video-file download (frame-level YouTube visual; ToS decision + ADR required); (2) GCS-URI whole-video Video Intelligence for over-cap video (first GCS bucket + DP-005 doctrine change); (3) scene-change keyframe sampling as an alternative `KeyframeSampler` mode.
+- [ ] **Step 3: Add deferred-register entries.** In `docs/20-cross-cutting/01-deferred-register.md`, matching its existing entry format, add: (1) real YouTube video-file download (frame-level YouTube visual; ToS decision + ADR required); (2) GCS-URI whole-video Video Intelligence for over-cap video (first GCS bucket + DP-005 doctrine change); (3) scene-change keyframe sampling as an alternative `KeyframeSampler` mode; (4) keyframe lifecycle state (`extracted`/`pruned`/`unavailable`) so a tier-C re-embedding job can distinguish "pruned by retention" from "never extractable" — until then, pruned content simply reports `skipped:already-extracted`-vs-`skipped:no-media` semantics from the run stages.
 
 - [ ] **Step 4: Commit**
 
@@ -3788,8 +4255,9 @@ git commit -m "docs: ADR-0028 media resolution + keyframe sampling; matrix + def
 
 ---
 
-## Final verification (after Task 17)
+## Final verification (Slice B3 gate, after Task 17)
 
 - [ ] Run the FULL suite: `XDEBUG_MODE=off vendor/bin/phpunit` — green, no skips beyond the usual ffmpeg-absent skips.
-- [ ] `git log --oneline main..feat/seeded-detection-media` — one spec commit + one plan commit + the task commits above, no attribution trailers.
-- [ ] Spot-check the kill switches: with `QDS_ENRICHMENT_KEYFRAMES_ENABLED=false` and `QDS_INGESTION_YOUTUBE_TRANSCRIPT_ENABLED=false`, an enrichment run's stages show `keyframes → skipped:disabled` and recognition shows `youtube-transcript:disabled`, with zero new HTTP calls and zero new rows — the true no-op guarantee.
+- [ ] `git log --oneline main..feat/seeded-detection-media` — spec + plan + seam-audit + the task commits above, no attribution trailers.
+- [ ] Spot-check the kill switches: with `QDS_ENRICHMENT_KEYFRAMES_ENABLED=false` and `QDS_INGESTION_YOUTUBE_TRANSCRIPT_ENABLED=false`, an enrichment run's stages show `keyframes → skipped:disabled` and `transcript → skipped:disabled`, with zero new HTTP calls and zero new rows — the true no-op guarantee.
+- [ ] Billing spot-check: enrich the same YouTube item twice — exactly ONE `ProviderCall` row for `SRC-apify-youtube-transcript` exists (the second run is `completed:cached` or `skipped:no-captions`).

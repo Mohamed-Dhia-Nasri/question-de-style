@@ -255,6 +255,46 @@ class VisualProductMatcherTest extends TestCase
         $this->assertDatabaseHas('visual_match_runs', ['correlation_id' => 'corr-vm-2', 'cache_hits' => 2, 'embedding_calls' => 0]);
     }
 
+    /**
+     * Coverage gap fix (self-review, task-19-report): withdrawSupport is
+     * unit-tested in isolation (T18's VisualMatchWriterTest), but the
+     * matcher's own wiring of it — an AUTO-matched product that later
+     * rejects (catalog/model drift: the reference photo is swapped) — was
+     * never exercised end-to-end. DP-004: downgraded to LOW, never deleted.
+     */
+    public function test_withdraw_support_downgrades_a_previously_auto_matched_product_on_catalog_drift(): void
+    {
+        [$content, $creator] = $this->wiredContent();
+        $product = $this->shippedProduct($creator, [1.0]);
+        $this->storeFrame($content, 0, 1000, [1.0]);
+        $this->storeFrame($content, 1, 5000, [1.0]);
+
+        $matcher = app(VisualProductMatcher::class);
+        $first = $matcher->enrich($content, 'corr-vm-1');
+
+        $this->assertSame('completed:matched=1,review=0,rejected=0', $first);
+        $detection = RecognitionDetection::query()->firstOrFail();
+        $this->assertSame(ConfidenceLevel::High, $detection->assessment->confidenceLevel);
+
+        // The brand replaces its reference photo with something visually
+        // unrelated. The frames are unchanged (still cached), so the rerun
+        // compares the SAME frame vectors against the NEW photo vector.
+        $photo = ProductReferencePhoto::query()->where('product_id', $product->id)->firstOrFail();
+        ProductPhotoEmbedding::query()
+            ->where('product_reference_photo_id', $photo->id)
+            ->update(['embedding' => VectorLiteral::fromArray(array_pad([0.0, 1.0], 3072, 0.0))]);
+
+        $second = $matcher->enrich($content, 'corr-vm-2');
+
+        $this->assertSame('completed:no-match', $second);
+        $this->assertSame(2, $this->provider->calls); // both frames still cached — nothing re-billed
+
+        $detection->refresh();
+        $this->assertSame(ConfidenceLevel::Low, $detection->assessment->confidenceLevel);
+        $this->assertContains('visual-support-withdrawn', $detection->assessment->signals);
+        $this->assertSame(1, RecognitionDetection::query()->count()); // downgraded, never deleted (DP-004)
+    }
+
     public function test_single_frame_hit_lands_review_and_flags_verification(): void
     {
         [$content, $creator] = $this->wiredContent();
@@ -268,6 +308,31 @@ class VisualProductMatcherTest extends TestCase
         $this->assertSame(ConfidenceLevel::Low, $detection->assessment->confidenceLevel);
         $this->assertTrue($detection->assessment->needsHumanReview());
         $this->assertDatabaseHas('visual_match_runs', ['outcome' => 'review', 'needs_verification' => true]);
+    }
+
+    /**
+     * Coverage gap fix (self-review, task-19-report): the brief's suite
+     * never exercised the clean NO_MATCH outcome end-to-end — "we looked
+     * properly and did not see it" (full coverage, similarity below the
+     * review threshold). An orthogonal frame vector scores 0 cosine
+     * similarity against the product's reference photo, well under 0.55.
+     */
+    public function test_clean_no_match_when_similarity_is_below_review_threshold(): void
+    {
+        [$content, $creator] = $this->wiredContent();
+        $this->shippedProduct($creator, [1.0]); // reference photo hot at index 0
+        $this->storeFrame($content, 0, 1000, [0.0, 1.0]); // frame hot at index 1: orthogonal, similarity 0
+
+        $marker = app(VisualProductMatcher::class)->enrich($content, 'corr-vm-1');
+
+        $this->assertSame('completed:no-match', $marker);
+        $this->assertSame(0, RecognitionDetection::query()->count());
+        $this->assertDatabaseHas('visual_match_runs', [
+            'outcome' => 'no_match',
+            // In-window shipment with no visual support still needs a human look.
+            'needs_verification' => true,
+        ]);
+        $this->assertDatabaseHas('visual_match_candidates', ['band' => 'reject', 'rejection_reason' => 'below-review-threshold']);
     }
 
     public function test_exhausted_global_hard_budget_skips_before_any_call(): void

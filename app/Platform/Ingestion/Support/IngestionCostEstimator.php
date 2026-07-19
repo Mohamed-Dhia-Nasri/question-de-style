@@ -245,7 +245,14 @@ class IngestionCostEstimator
         $videoOn = $enrichmentOn && (string) config('services.google_video_intelligence.api_key') !== '';
         $speechOn = $enrichmentOn && (string) config('services.google_speech.api_key') !== '';
         $videoMinutes = min($allAccounts * self::VIDEO_MINUTES_PER_ACCOUNT_MONTH, $sweepCeiling * self::VIDEO_MINUTES_PER_ACCOUNT_MONTH / max(1, self::ENRICHED_ITEMS_PER_ACCOUNT_MONTH));
-        $visualMatchOn = $enrichmentOn && (bool) config('qds.enrichment.visual_match.enabled');
+        // Mirrors GoogleServiceAccountTokenProvider::isConfigured() — derived
+        // from config presence here, never by instantiating the provider.
+        $embeddingsCredentialsPath = (string) config('services.google_embeddings.credentials_path');
+        $embeddingsConfigured = $embeddingsCredentialsPath !== ''
+            && is_readable($embeddingsCredentialsPath)
+            && (string) config('services.google_embeddings.project_id') !== '';
+        $visualMatchSwitchOn = (bool) config('qds.enrichment.visual_match.enabled');
+        $visualMatchOn = $enrichmentOn && $visualMatchSwitchOn && $embeddingsConfigured;
         $embeddedImages = $enrichedItems * self::EMBEDDED_FRAMES_PER_ITEM;
 
         return [
@@ -353,8 +360,9 @@ class IngestionCostEstimator
                 'active' => $visualMatchOn,
                 'note' => match (true) {
                     $visualMatchOn => 'Billed by Google, not Apify — frame embeddings are cached, so real spend is usually lower.',
-                    $enrichmentOn => 'Off — visual product matching is disabled (kill switch).',
-                    default => 'Off — AI enrichment is disabled.',
+                    ! $enrichmentOn => 'Off — AI enrichment is disabled.',
+                    ! $visualMatchSwitchOn => 'Off — visual product matching is disabled (kill switch).',
+                    default => 'Off — add Google Embeddings service-account credentials to switch this on.',
                 },
             ],
         ];

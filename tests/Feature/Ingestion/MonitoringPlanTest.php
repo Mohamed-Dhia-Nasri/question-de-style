@@ -194,6 +194,8 @@ class MonitoringPlanTest extends TestCase
             'qds.enrichment.enabled' => true,
             'qds.enrichment.sweep_batch' => 50,
             'qds.enrichment.visual_match.enabled' => false,
+            'services.google_embeddings.credentials_path' => null,
+            'services.google_embeddings.project_id' => null,
         ]);
 
         $settings = new CadenceSettings(new MonitoringPlanSetting([
@@ -222,13 +224,33 @@ class MonitoringPlanTest extends TestCase
         $this->assertSame(0.0096, $row['per_creator']); // ÷ 450 accounts
         $this->assertStringContainsString('$0.00012 per image', $row['unit']);
 
-        // Kill switch off → visible but dimmed, priced for the decision.
+        // Kill switch off, no credentials → visible but dimmed, priced for the decision.
         $this->assertFalse($row['active']);
         $this->assertStringContainsString('visual product matching is disabled', $row['note']);
 
+        // Kill switch on but credentials still missing → active mirrors the
+        // matcher's own isConfigured() gate (GoogleServiceAccountTokenProvider),
+        // so it stays inactive and says why.
         config(['qds.enrichment.visual_match.enabled' => true]);
         $rows = collect($estimator->perService($settings, $roster, $estimate))->keyBy('service');
-        $this->assertTrue($rows['Visual product matching (embeddings)']['active']);
+        $row = $rows['Visual product matching (embeddings)'];
+        $this->assertFalse($row['active']);
+        $this->assertStringContainsString('credentials', $row['note']);
+
+        // Both the switch and readable credentials present → active.
+        $credentialsPath = tempnam(sys_get_temp_dir(), 'qds-test-embeddings-');
+        file_put_contents($credentialsPath, '{}');
+
+        try {
+            config([
+                'services.google_embeddings.credentials_path' => $credentialsPath,
+                'services.google_embeddings.project_id' => 'qds-embeddings-test',
+            ]);
+            $rows = collect($estimator->perService($settings, $roster, $estimate))->keyBy('service');
+            $this->assertTrue($rows['Visual product matching (embeddings)']['active']);
+        } finally {
+            @unlink($credentialsPath);
+        }
     }
 
     public function test_the_plan_page_shows_the_visual_matching_row(): void

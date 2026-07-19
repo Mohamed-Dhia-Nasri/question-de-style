@@ -37,7 +37,25 @@
         "is_seeded": false,
         "brand": "Atelier Nord",
         "product": null,
-        "reason": "Brand mentioned organically with no seeding partnership behind it — expected false positive: a lexicon hit alone cannot distinguish organic love from a gifted/seeded post."
+        "reason": "Brand mentioned organically with no seeding partnership behind it — expected false positive: a lexicon hit alone cannot distinguish organic love from a gifted/seeded post.",
+        "visual": {
+            "candidates": [
+                {
+                    "product": "Atelier Nord Jacket",
+                    "brand": "Atelier Nord",
+                    "category": "FASHION",
+                    "photo_vectors": [[1, 0, 0, 0]],
+                    "source": "roster",
+                    "shipment_in_window": false
+                }
+            ],
+            "frame_vectors": [
+                {"t_ms": 2000, "vec": [0, 1, 0, 0]}
+            ],
+            "expected": {"product": null, "band": "none"},
+            "brief_appearance": false,
+            "reason": "The jacket on screen does not resemble the reference photos (similarity 0.0) — clean coverage, run outcome no_match: a correct visual true negative."
+        }
     },
     {
         "platform": "INSTAGRAM",
@@ -47,7 +65,26 @@
         "is_seeded": true,
         "brand": "Hearthside Living",
         "product": "Hearthside Candle Set",
-        "reason": "Seeded PR unboxing but the caption never names the brand or tags a handle — expected false negative for the deterministic text-signal path (needs image/product-tag evidence, tracked as an A5 follow-up)."
+        "reason": "Seeded PR unboxing but the caption never names the brand or tags a handle — expected false negative for the deterministic text-signal path (needs image/product-tag evidence, tracked as an A5 follow-up).",
+        "visual": {
+            "candidates": [
+                {
+                    "product": "Hearthside Candle Set",
+                    "brand": "Hearthside Living",
+                    "category": "HOME_INTERIOR",
+                    "photo_vectors": [[1, 0, 0, 0]],
+                    "source": "shipment",
+                    "shipment_in_window": true
+                }
+            ],
+            "frame_vectors": [
+                {"t_ms": 1000, "vec": [0.6, 0.8, 0, 0]},
+                {"t_ms": 3000, "vec": [0, 0, 0, 1]}
+            ],
+            "expected": {"product": "Hearthside Candle Set", "band": "review"},
+            "brief_appearance": true,
+            "reason": "One frame lands in the review band [T_review, T_auto) — the lone-hit rule holds it for humans instead of auto-linking; the brief appearance is CAUGHT, not missed."
+        }
     },
     {
         "platform": "TIKTOK",
@@ -97,6 +134,26 @@
         "is_seeded": true,
         "brand": "Nexon Labs",
         "product": "Nexon Labs Headset",
-        "reason": "Brand identity is embargoed in the caption itself, but the platform product tag still carries the seeded product — true positive via the product_tags fallback, not text."
+        "reason": "Brand identity is embargoed in the caption itself, but the platform product tag still carries the seeded product — true positive via the product_tags fallback, not text.",
+        "visual": {
+            "candidates": [
+                {
+                    "product": "Nexon Labs Headset",
+                    "brand": "Nexon Labs",
+                    "category": "TECH",
+                    "photo_vectors": [[1, 0, 0, 0], [0.9, 0.1, 0, 0]],
+                    "source": "shipment",
+                    "shipment_in_window": true
+                }
+            ],
+            "frame_vectors": [
+                {"t_ms": 1500, "vec": [1, 0, 0, 0]},
+                {"t_ms": 4500, "vec": [0.98, 0.02, 0, 0]},
+                {"t_ms": 7500, "vec": [0, 0, 1, 0]}
+            ],
+            "expected": {"product": "Nexon Labs Headset", "band": "auto"},
+            "brief_appearance": false,
+            "reason": "The embargoed product is visually confirmed across two distinct timestamps — AUTO."
+        }
     }
 ]

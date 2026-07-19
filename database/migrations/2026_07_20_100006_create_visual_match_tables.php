@@ -87,7 +87,9 @@ return new class extends Migration
             // Candidate-source evidence: WHY was this product considered (§4.5).
             $table->string('source', 20);
             $table->boolean('shipment_in_window');
-            $table->foreignId('seeding_campaign_id')->nullable()->constrained()->nullOnDelete();
+            // Nullable on purpose, no plain FK (product_id precedent above):
+            // the composite FK below nulls ONLY this column on campaign delete.
+            $table->unsignedBigInteger('seeding_campaign_id')->nullable()->index();
             $table->timestamp('shipment_anchor_at')->nullable();
             $table->smallInteger('shipment_age_days')->nullable();
             // Visibility evidence (§8): null when frames carry no timestamps.
@@ -101,13 +103,19 @@ return new class extends Migration
 
         DB::statement("ALTER TABLE visual_match_candidates ADD CONSTRAINT visual_match_candidates_band_check CHECK (band IN ('auto', 'review', 'reject'))");
         DB::statement("ALTER TABLE visual_match_candidates ADD CONSTRAINT visual_match_candidates_source_check CHECK (source IN ('shipment', 'roster'))");
-        DB::statement('ALTER TABLE visual_match_candidates ADD CONSTRAINT visual_match_candidates_visual_match_run_tenant_fk FOREIGN KEY (visual_match_run_id, tenant_id) REFERENCES visual_match_runs (id, tenant_id)');
+        // Explicit CASCADE (house pattern) even though the sibling
+        // single-column FK above already cascades the row: two FKs on the
+        // same child referencing the same parent must not disagree on intent.
+        DB::statement('ALTER TABLE visual_match_candidates ADD CONSTRAINT visual_match_candidates_visual_match_run_tenant_fk FOREIGN KEY (visual_match_run_id, tenant_id) REFERENCES visual_match_runs (id, tenant_id) ON DELETE CASCADE');
         // Catalog edits never rewrite the audit trail: product delete nulls
         // ONLY product_id (PostgreSQL 15+ column-scoped SET NULL — pg17
         // everywhere: pgvector/pgvector:pg17-bookworm locally, Neon PG17),
         // product_label survives. The composite reference keeps the pair
         // tenant-coherent while set (MATCH SIMPLE skips rows once nulled).
         DB::statement('ALTER TABLE visual_match_candidates ADD CONSTRAINT visual_match_candidates_product_tenant_fk FOREIGN KEY (product_id, tenant_id) REFERENCES products (id, tenant_id) ON DELETE SET NULL (product_id)');
+        // Same column-scoped SET NULL pattern: a deleted campaign nulls ONLY
+        // seeding_campaign_id — source/shipment evidence and the row itself survive.
+        DB::statement('ALTER TABLE visual_match_candidates ADD CONSTRAINT visual_match_candidates_seeding_campaign_tenant_fk FOREIGN KEY (seeding_campaign_id, tenant_id) REFERENCES seeding_campaigns (id, tenant_id) ON DELETE SET NULL (seeding_campaign_id)');
     }
 
     public function down(): void

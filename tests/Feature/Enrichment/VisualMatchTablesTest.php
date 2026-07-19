@@ -3,6 +3,7 @@
 namespace Tests\Feature\Enrichment;
 
 use App\Modules\CRM\Models\Product;
+use App\Modules\CRM\Models\SeedingCampaign;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\Story;
 use App\Modules\Monitoring\Models\VisualMatchCandidate;
@@ -124,5 +125,41 @@ class VisualMatchTablesTest extends TestCase
 
         // Composite (content_item_id, tenant_id) FK rejects the cross-tenant pair.
         VisualMatchRun::factory()->create(['content_item_id' => $foreignItem->id]);
+    }
+
+    public function test_cross_tenant_seeding_campaign_violates_the_composite_fk(): void
+    {
+        $campaign = SeedingCampaign::factory()->create(); // default tenant
+        $other = $this->makeTenant('Other Workspace');    // context stays on default
+        $otherRun = $this->withTenant($other, fn (): VisualMatchRun => VisualMatchRun::factory()->create());
+
+        try {
+            VisualMatchCandidate::factory()->create([
+                'tenant_id' => $other->id,
+                'visual_match_run_id' => $otherRun->id,
+                'product_id' => null,
+                'seeding_campaign_id' => $campaign->id,
+            ]);
+            $this->fail("A candidate row pointing at another tenant's campaign must violate the composite FK.");
+        } catch (QueryException $e) {
+            $this->assertStringContainsString('visual_match_candidates_seeding_campaign_tenant_fk', $e->getMessage());
+        }
+    }
+
+    public function test_seeding_campaign_delete_nulls_the_link_but_keeps_the_row(): void
+    {
+        $campaign = SeedingCampaign::factory()->create();
+        $candidate = VisualMatchCandidate::factory()->create([
+            'seeding_campaign_id' => $campaign->id,
+        ]);
+
+        DB::table('seeding_campaigns')->where('id', $campaign->id)->delete();
+
+        $candidate->refresh();
+        // SET NULL is column-scoped (PG15+ column list): only
+        // seeding_campaign_id clears — tenant ownership and the row survive.
+        $this->assertNull($candidate->seeding_campaign_id);
+        $this->assertNotNull($candidate->tenant_id);
+        $this->assertTrue(VisualMatchCandidate::query()->whereKey($candidate->id)->exists());
     }
 }

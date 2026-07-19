@@ -5,6 +5,7 @@ namespace Tests\Feature\Enrichment;
 use App\Modules\CRM\Models\ProductReferencePhoto;
 use App\Modules\Monitoring\Models\ProductPhotoEmbedding;
 use App\Platform\Enrichment\VisualMatch\Contracts\EmbeddingProvider;
+use App\Platform\Enrichment\VisualMatch\Jobs\EmbedProductPhotoJob;
 use App\Platform\Enrichment\VisualMatch\ReferencePhotoEmbedder;
 use App\Shared\Tenancy\TenantContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -121,6 +122,42 @@ class ReferencePhotoEmbedderTest extends TestCase
         $photo = $this->makeStoredPhoto();
 
         $this->assertFalse(app(ReferencePhotoEmbedder::class)->embed($photo));
+
+        $this->assertSame(0, $provider->calls);
+        $this->assertDatabaseCount('product_photo_embeddings', 0);
+    }
+
+    public function test_job_unique_id_keys_on_photo_and_model_version(): void
+    {
+        $job = new EmbedProductPhotoJob(42);
+
+        $this->assertSame('photo:42:gemini-embedding-2', $job->uniqueId());
+        $this->assertSame('enrichment', $job->queue);
+        $this->assertSame(4, $job->tries);
+    }
+
+    public function test_job_embeds_under_the_photos_tenant_context(): void
+    {
+        $provider = $this->bindProvider(new FakeEmbeddingProvider);
+        $photo = $this->makeStoredPhoto();
+
+        // Simulate the queue worker: tenant-less context (ADR-0019).
+        app(TenantContext::class)->runAs(null, function () use ($photo): void {
+            (new EmbedProductPhotoJob($photo->id))->handle(app(ReferencePhotoEmbedder::class));
+        });
+
+        $this->assertSame(1, $provider->calls);
+        $this->assertDatabaseHas('product_photo_embeddings', [
+            'product_reference_photo_id' => $photo->id,
+            'tenant_id' => $photo->tenant_id,
+        ]);
+    }
+
+    public function test_job_is_a_quiet_no_op_when_the_photo_is_gone(): void
+    {
+        $provider = $this->bindProvider(new FakeEmbeddingProvider);
+
+        (new EmbedProductPhotoJob(999_999))->handle(app(ReferencePhotoEmbedder::class));
 
         $this->assertSame(0, $provider->calls);
         $this->assertDatabaseCount('product_photo_embeddings', 0);

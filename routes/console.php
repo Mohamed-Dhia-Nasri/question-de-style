@@ -68,6 +68,10 @@ Schedule::command('qds:prune-ingestion-data')->daily();
 // retention window is deleted from the private media disk (DP-005).
 Schedule::command('qds:prune-story-media')->daily();
 
+// Derived-media lifecycle (sub-project B): persisted keyframes past the
+// per-tenant retention window are deleted — file first, then row (DP-005).
+Schedule::command('qds:prune-keyframes')->daily();
+
 // SVC-Export retention: expired artifacts are deleted from private
 // storage on schedule (DP-005; REQ-M1-012 export security).
 Schedule::command('qds:prune-expired-exports')->hourly();

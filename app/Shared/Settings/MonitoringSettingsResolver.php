@@ -51,6 +51,14 @@ class MonitoringSettingsResolver
         return max(0, $row->story_retention_days ?? (int) config('qds.ingestion.media_retention_days'));
     }
 
+    /** Keyframe retention for ONE tenant; 0 = keep forever (sub-project B). */
+    public function keyframeRetentionDaysFor(int $tenantId): int
+    {
+        $row = $this->rowFor($tenantId);
+
+        return max(0, $row->keyframe_retention_days ?? (int) config('qds.enrichment.keyframes.retention_days'));
+    }
+
     /** Communication-log retention for ONE tenant; 0 = keep forever. */
     public function communicationRetentionDaysFor(int $tenantId): int
     {

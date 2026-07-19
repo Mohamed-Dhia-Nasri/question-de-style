@@ -24,6 +24,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Tests\Support\FakeEmbeddingProvider;
 use Tests\TestCase;
 
 class VisualMatchBackfillCommandTest extends TestCase
@@ -185,14 +186,64 @@ class VisualMatchBackfillCommandTest extends TestCase
     public function test_dry_run_reports_without_executing(): void
     {
         $tenantId = (int) $this->defaultTenant->id;
+
+        // Bind a call-counting, CONFIGURED provider (unlike setUp()'s
+        // not-configured default) so the assertions below are not
+        // vacuously true: if dry-run regressed into actually invoking the
+        // matcher, the provider gate would no longer block it either.
+        $provider = new FakeEmbeddingProvider();
+        $this->app->instance(EmbeddingProvider::class, $provider);
+
         $this->makeEligibleContentItem();
-        $this->makeEligibleContentItem();
+
+        // A SECOND target with a FULLY matchable candidate (active
+        // campaign + in-window shipment + an embedded reference photo
+        // whose vector equals the provider's fixed fill, guaranteeing an
+        // AUTO match) plus an active MonitoredSubject — the same shape as
+        // the end-to-end test. If dry-run failed to short-circuit before
+        // process(), this target's pipeline would run all the way through
+        // to a written visual_match_runs/recognition_detections row AND a
+        // re-run Mention — exactly what the assertions below check for.
+        $creator = Creator::factory()->create();
+        MonitoredSubject::factory()->create(['creator_id' => $creator->id]);
+        $account = PlatformAccount::factory()->for($creator)->create();
+        $matchable = ContentItem::factory()->for($account, 'platformAccount')->create([
+            'published_at' => CarbonImmutable::now()->subDays(2),
+        ]);
+        $this->makeKeyframe($matchable, 0, 0);
+        $this->makeKeyframe($matchable, 1, 2000);
+        $this->completedRun($matchable);
+
+        $product = Product::factory()->create(['category' => null]);
+        $campaign = SeedingCampaign::factory()->create([
+            'status' => SeedingCampaignStatus::Active,
+            'product_id' => $product->id,
+        ]);
+        Shipment::factory()->create([
+            'seeding_campaign_id' => $campaign->id,
+            'creator_id' => $creator->id,
+            'product_id' => $product->id,
+            'shipped_at' => CarbonImmutable::now()->subDays(5),
+        ]);
+        $photo = ProductReferencePhoto::factory()->create(['product_id' => $product->id]);
+        DB::table('product_photo_embeddings')->insert([
+            'tenant_id' => $tenantId,
+            'product_reference_photo_id' => $photo->id,
+            'model_version' => 'gemini-embedding-2',
+            'embedding' => VectorLiteral::fromArray(array_fill(0, 3072, $provider->fill)),
+            'created_at' => CarbonImmutable::now(),
+        ]);
 
         $this->artisan('qds:visual-match-backfill', ['--dry-run' => true])
             ->expectsOutputToContain("Tenant {$tenantId}: would process 2 content item(s), 0 story(ies) [dry-run].")
             ->expectsOutputToContain('Dry run — nothing executed.')
             ->doesntExpectOutputToContain('skipped:not-configured')
             ->assertSuccessful();
+
+        $this->assertSame(0, $provider->calls, 'dry-run must never call the embedding provider');
+        $this->assertDatabaseCount('visual_match_runs', 0);
+        $this->assertDatabaseMissing('recognition_detections', ['recognition_type' => 'VISUAL_PRODUCT']);
+        $this->assertDatabaseCount('mentions', 0);
     }
 
     public function test_completed_match_writes_visual_evidence_and_reruns_attribution(): void

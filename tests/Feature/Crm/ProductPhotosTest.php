@@ -147,6 +147,33 @@ class ProductPhotosTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'product.photo_added', 'subject_id' => $photo->id]);
     }
 
+    public function test_upload_stores_with_content_sniffed_extension_not_client_filename(): void
+    {
+        $this->actingAsCrmStaff();
+        $product = Product::factory()->create();
+
+        // The client names the file "photo.html" but its real (sniffed)
+        // mime type is image/jpeg — ->mimeType() stands in for finfo-based
+        // content sniffing the same way Laravel's fake-upload helpers let
+        // you separate "what the browser/filename claims" from "what the
+        // bytes actually are" (Illuminate\Http\Testing\File::getMimeType()
+        // otherwise reports a mime guessed from the NAME, which would make
+        // this scenario untestable). The stored extension must come from
+        // the sniffed type, never the client-supplied name.
+        $upload = UploadedFile::fake()->image('photo.html', 40, 40)->mimeType('image/jpeg');
+
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('upload', $upload)
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $photo = ProductReferencePhoto::query()->where('product_id', $product->id)->firstOrFail();
+
+        $this->assertStringEndsWith('.jpg', $photo->storage_path);
+        Storage::disk((string) $photo->storage_disk)->assertExists($photo->storage_path);
+    }
+
     public function test_wrong_type_and_oversized_uploads_are_refused(): void
     {
         $this->actingAsCrmStaff();
@@ -184,6 +211,32 @@ class ProductPhotosTest extends TestCase
             ->call('save')
             ->assertHasErrors(['upload']);
 
+        $this->assertSame(2, ProductReferencePhoto::query()->where('product_id', $product->id)->count());
+    }
+
+    public function test_over_cap_abort_leaves_no_orphan_blob_or_row(): void
+    {
+        $this->actingAsCrmStaff();
+        $product = Product::factory()->create();
+        config()->set('qds.enrichment.visual_match.photo_cap', 2);
+
+        $this->makeStoredPhoto($product);
+        $this->makeStoredPhoto($product);
+
+        $disk = (string) config('qds.ingestion.media_disk', 'media');
+        $directory = "tenants/{$product->tenant_id}/product-photos/{$product->id}";
+        $filesBefore = Storage::disk($disk)->allFiles($directory);
+
+        // The row-count check happens inside a locked transaction (the
+        // TOCTOU fix): a losing save must delete the blob it already put on
+        // disk before the check aborted it, not leave it dangling.
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('upload', UploadedFile::fake()->image('side.jpg', 40, 40))
+            ->call('save')
+            ->assertHasErrors(['upload']);
+
+        $this->assertSame($filesBefore, Storage::disk($disk)->allFiles($directory));
         $this->assertSame(2, ProductReferencePhoto::query()->where('product_id', $product->id)->count());
     }
 

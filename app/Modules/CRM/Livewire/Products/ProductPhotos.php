@@ -92,6 +92,10 @@ class ProductPhotos extends Component
 
         $cap = (int) config('qds.enrichment.visual_match.photo_cap', 8);
 
+        // Cheap pre-check so an obviously-over-cap request never touches the
+        // disk. NOT the authoritative check (see the locked transaction
+        // below) — this alone would still let two concurrent saves at
+        // cap-1 both pass.
         if (ProductReferencePhoto::query()->where('product_id', $product->id)->count() >= $cap) {
             $this->addError('upload', "This product already has the maximum of {$cap} photos.");
 
@@ -103,7 +107,16 @@ class ProductPhotos extends Component
         $tenantId = app(TenantContext::class)->idOrFail();
 
         $bytes = (string) $this->upload->get();
-        $extension = strtolower($this->upload->getClientOriginalExtension());
+
+        // Content-sniffed extension — never the client-supplied filename (a
+        // real JPEG uploaded as "photo.html" must still store as .jpg). The
+        // `mimes:` rule above already validated guessExtension() resolves
+        // to jpg/jpeg/png/webp, so no fallback is needed here. jpeg -> jpg
+        // matches the keyframe-storage convention (KeyframeExtractor::extensionFor).
+        $extension = match ($this->upload->guessExtension()) {
+            'jpeg' => 'jpg',
+            default => $this->upload->guessExtension(),
+        };
         $disk = (string) config('qds.ingestion.media_disk', 'media');
         $path = "tenants/{$tenantId}/product-photos/{$product->id}/".Str::uuid().'.'.$extension;
 
@@ -114,20 +127,46 @@ class ProductPhotos extends Component
         // Best-effort dimensions (spec §4.1) — a corrupt-but-valid-mime
         // upload stores with null width/height rather than failing.
         $dimensions = @getimagesizefromstring($bytes) ?: null;
+        $viewLabel = $this->view_label !== '' ? $this->view_label : null;
 
-        $photo = ProductReferencePhoto::create([
-            'product_id' => $product->id,
-            'storage_disk' => $disk,
-            'storage_path' => $path,
-            'view_label' => $this->view_label !== '' ? $this->view_label : null,
-            'checksum' => hash('sha256', $bytes),
-            'width' => $dimensions[0] ?? null,
-            'height' => $dimensions[1] ?? null,
-            'uploaded_by' => Auth::id(),
-        ]);
+        // Authoritative cap enforcement: lock the product row so two
+        // concurrent saves can never both read "count < cap" and both
+        // insert (closes the TOCTOU race the pre-check above cannot). A
+        // losing save's blob (already stored above) is cleaned up below —
+        // storing the blob only after a successful insert would instead
+        // require assigning storage_path before the bytes exist on disk,
+        // which trades an orphan blob for a dangling row (worse: rows are
+        // what matching/audit/UI depend on).
+        $photo = DB::transaction(function () use ($product, $cap, $disk, $path, $bytes, $dimensions, $viewLabel, $audit): ?ProductReferencePhoto {
+            Product::query()->whereKey($product->id)->lockForUpdate()->first();
 
-        // Ids only in the immutable audit context (house rule).
-        $audit->record('product.photo_added', $photo, ['product_id' => $product->id]);
+            if (ProductReferencePhoto::query()->where('product_id', $product->id)->count() >= $cap) {
+                return null;
+            }
+
+            $photo = ProductReferencePhoto::create([
+                'product_id' => $product->id,
+                'storage_disk' => $disk,
+                'storage_path' => $path,
+                'view_label' => $viewLabel,
+                'checksum' => hash('sha256', $bytes),
+                'width' => $dimensions[0] ?? null,
+                'height' => $dimensions[1] ?? null,
+                'uploaded_by' => Auth::id(),
+            ]);
+
+            // Ids only in the immutable audit context (house rule).
+            $audit->record('product.photo_added', $photo, ['product_id' => $product->id]);
+
+            return $photo;
+        });
+
+        if ($photo === null) {
+            Storage::disk($disk)->delete($path);
+            $this->addError('upload', "This product already has the maximum of {$cap} photos.");
+
+            return;
+        }
 
         // Embed now only when the capability can actually spend (spec §6);
         // otherwise qds:embed-product-photos picks the photo up later.

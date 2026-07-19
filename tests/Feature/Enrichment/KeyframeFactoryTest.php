@@ -56,8 +56,14 @@ class KeyframeFactoryTest extends TestCase
         // Task 5's keyframe_embeddings composite FK
         // (keyframe_id, tenant_id) → keyframes (id, tenant_id) needs this
         // unique (reach_results tenant-FK pattern, ADR-0019/0020).
-        $this->assertNotNull(DB::selectOne(
-            "SELECT indexname FROM pg_indexes WHERE tablename = 'keyframes' AND indexname = 'keyframes_id_tenant_id_unique'"
-        ));
+        $indexRow = DB::selectOne(
+            "SELECT indexdef FROM pg_indexes WHERE tablename = 'keyframes' AND indexname = 'keyframes_id_tenant_id_unique'"
+        );
+
+        $this->assertNotNull($indexRow);
+        $this->assertTrue(
+            str_contains($indexRow->indexdef, 'UNIQUE'),
+            "Index keyframes_id_tenant_id_unique must be marked UNIQUE; got: {$indexRow->indexdef}"
+        );
     }
 }

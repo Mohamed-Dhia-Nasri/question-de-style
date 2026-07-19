@@ -45,7 +45,10 @@ class KeyframeWriter
                 $stream = @fopen($frame['tempPath'], 'rb');
 
                 if ($stream === false) {
-                    continue;
+                    // An unreadable frame fails the WHOLE batch (complete-set
+                    // doctrine): the generic catch below compensates the files
+                    // already written and rethrows — a retry re-extracts cleanly.
+                    throw new \RuntimeException("Keyframe temp file unreadable: ordinal {$ordinal}");
                 }
 
                 try {

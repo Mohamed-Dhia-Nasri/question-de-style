@@ -120,6 +120,43 @@ class KeyframePipelineTest extends TestCase
         }
     }
 
+    public function test_writer_fails_whole_batch_when_temp_file_is_unreadable(): void
+    {
+        // An unreadable frame fails the WHOLE batch (complete-set doctrine):
+        // ordinals 0, 2 must also roll back; no partial set.
+        $reel = $this->makeReel();
+
+        $entries = [];
+        foreach ([0, 1, 2] as $i) {
+            $path = (string) tempnam(sys_get_temp_dir(), 'qds-unread-frame-');
+            file_put_contents($path, "F{$i}");
+            $entries[] = ['tempPath' => $path, 'timestampMs' => $i * 1000, 'kind' => KeyframeKind::VideoSample, 'extension' => 'jpg', 'sourceChecksum' => str_repeat('b', 64)];
+        }
+
+        try {
+            chmod($entries[1]['tempPath'], 0o000);
+
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessage('Keyframe temp file unreadable: ordinal 1');
+
+            app(KeyframeWriter::class)->persist($reel, $entries);
+        } finally {
+            @chmod($entries[1]['tempPath'], 0o644);
+            foreach ($entries as $entry) {
+                @unlink($entry['tempPath']);
+            }
+        }
+
+        // Verify no keyframes were written (the batch failed all-or-nothing)
+        $this->assertSame(0, Keyframe::query()->where('owner_id', $reel->id)->count());
+
+        // Verify no storage files exist under the owner's keyframes path
+        $ownerSegment = "content-{$reel->external_id}";
+        $keyframesPath = "tenants/{$reel->tenant_id}/keyframes/instagram/{$reel->platform_account_id}/{$ownerSegment}/";
+        $files = Storage::disk('media')->files($keyframesPath);
+        $this->assertEmpty($files);
+    }
+
     public function test_extract_once_a_second_run_skips_and_never_renumbers(): void
     {
         Http::fake(['93.184.216.34/*' => Http::response('REELBYTES', 200, ['Content-Type' => 'video/mp4'])]);

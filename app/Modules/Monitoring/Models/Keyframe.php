@@ -6,6 +6,8 @@ use App\Shared\Casts\AsValueObject;
 use App\Shared\Enums\KeyframeKind;
 use App\Shared\Tenancy\BelongsToTenant;
 use App\Shared\ValueObjects\Provenance;
+use Database\Factories\KeyframeFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 
@@ -34,6 +36,9 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 class Keyframe extends Model
 {
     use BelongsToTenant;
+
+    /** @use HasFactory<KeyframeFactory> */
+    use HasFactory;
 
     protected $fillable = [
         'owner_type',

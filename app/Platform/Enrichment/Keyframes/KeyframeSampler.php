@@ -107,6 +107,7 @@ class KeyframeSampler
     private function probeDurationSeconds(string $videoPath): ?float
     {
         try {
+            // ffprobe has no -nostdin; the fixed arg vector + timeout are the hardening here.
             $result = Process::timeout(self::FFPROBE_TIMEOUT_SECONDS)->run([
                 $this->ffprobePath(),
                 '-v', 'error',

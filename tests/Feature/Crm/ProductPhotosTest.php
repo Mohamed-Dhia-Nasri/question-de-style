@@ -220,4 +220,51 @@ class ProductPhotosTest extends TestCase
             fn (EmbedProductPhotoJob $job): bool => $job->photoId === $expected->id && $job->queue === 'enrichment',
         );
     }
+
+    public function test_delete_removes_row_cascades_embeddings_and_blob_after_commit(): void
+    {
+        $this->actingAsCrmStaff();
+        $product = Product::factory()->create();
+        $photo = $this->makeStoredPhoto($product);
+
+        ProductPhotoEmbedding::factory()->create(['product_reference_photo_id' => $photo->id]);
+
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->call('confirmDelete', $photo->id)
+            ->call('deletePhoto');
+
+        $this->assertDatabaseMissing('product_reference_photos', ['id' => $photo->id]);
+        // Embedding rows cascade at the DB (spec §4.2).
+        $this->assertDatabaseMissing('product_photo_embeddings', ['product_reference_photo_id' => $photo->id]);
+        Storage::disk((string) $photo->storage_disk)->assertMissing($photo->storage_path);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'product.photo_removed', 'subject_id' => $photo->id]);
+    }
+
+    public function test_mutations_require_crm_manage_not_just_crm_view(): void
+    {
+        $this->seedRoles();
+
+        $viewer = User::factory()->create();
+        $viewer->givePermissionTo(PermissionsCatalog::CRM_VIEW);
+        $this->actingAs($viewer);
+
+        $product = Product::factory()->create();
+        $photo = $this->makeStoredPhoto($product);
+
+        // Opening the grid is crm.view; both mutators re-authorize update —
+        // including the direct-property bypass of confirmDelete.
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('upload', UploadedFile::fake()->image('front.jpg', 40, 40))
+            ->call('save')->assertForbidden();
+
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('confirmingDeleteId', $photo->id)
+            ->call('deletePhoto')->assertForbidden();
+
+        $this->assertDatabaseCount('product_reference_photos', 1);
+        Storage::disk((string) $photo->storage_disk)->assertExists($photo->storage_path);
+    }
 }

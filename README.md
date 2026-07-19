@@ -40,7 +40,7 @@ Fixed by [ADR-0012](docs/05-decisions/decision-log.md#adr-0012) and
 ## Quickstart
 
 ```bash
-# 1. Local services (PostgreSQL 17 on 127.0.0.1:5433; --wait blocks until healthy)
+# 1. Local services (PostgreSQL 17 + pgvector on 127.0.0.1:5433; --wait blocks until healthy)
 docker compose up -d --wait postgres
 docker exec qds-postgres psql -U qds -c "CREATE DATABASE qds_test;"   # once, for the test suite
 
@@ -102,6 +102,15 @@ Local logins (non-production only): `admin@qds.test` / `password` (ADMIN) and
 `composer test` runs the suite against the real PostgreSQL `qds_test`
 database (so `ilike`, `jsonb`, and the actual migrations are exercised —
 there is no SQLite fallback by design). Tests never call external providers.
+
+The suite needs the `pgvector` extension in `qds_test`: the compose file's
+`pgvector/pgvector:pg17-bookworm` image ships it, and the
+`enable_pgvector_extension` migration runs `CREATE EXTENSION IF NOT EXISTS`
+per database — so `qds_test` is covered automatically on `migrate:fresh`.
+If your local container predates the image switch, recreate it once with
+`docker compose pull postgres && docker compose up -d --force-recreate --wait postgres`
+(the `qds-pgdata` volume and both databases survive — the image is a drop-in
+`postgres:17`-bookworm derivative).
 
 ## Deployment notes (production)
 

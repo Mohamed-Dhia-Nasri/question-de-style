@@ -21,6 +21,7 @@ use Livewire\Component;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\WithFileUploads;
 use RuntimeException;
+use Throwable;
 
 /**
  * Manage-photos modal for /crm/products (spec §6): reference photos are
@@ -137,29 +138,39 @@ class ProductPhotos extends Component
         // require assigning storage_path before the bytes exist on disk,
         // which trades an orphan blob for a dangling row (worse: rows are
         // what matching/audit/UI depend on).
-        $photo = DB::transaction(function () use ($product, $cap, $disk, $path, $bytes, $dimensions, $viewLabel, $audit): ?ProductReferencePhoto {
-            Product::query()->whereKey($product->id)->lockForUpdate()->first();
+        try {
+            $photo = DB::transaction(function () use ($product, $cap, $disk, $path, $bytes, $dimensions, $viewLabel, $audit): ?ProductReferencePhoto {
+                Product::query()->whereKey($product->id)->lockForUpdate()->first();
 
-            if (ProductReferencePhoto::query()->where('product_id', $product->id)->count() >= $cap) {
-                return null;
-            }
+                if (ProductReferencePhoto::query()->where('product_id', $product->id)->count() >= $cap) {
+                    return null;
+                }
 
-            $photo = ProductReferencePhoto::create([
-                'product_id' => $product->id,
-                'storage_disk' => $disk,
-                'storage_path' => $path,
-                'view_label' => $viewLabel,
-                'checksum' => hash('sha256', $bytes),
-                'width' => $dimensions[0] ?? null,
-                'height' => $dimensions[1] ?? null,
-                'uploaded_by' => Auth::id(),
-            ]);
+                $photo = ProductReferencePhoto::create([
+                    'product_id' => $product->id,
+                    'storage_disk' => $disk,
+                    'storage_path' => $path,
+                    'view_label' => $viewLabel,
+                    'checksum' => hash('sha256', $bytes),
+                    'width' => $dimensions[0] ?? null,
+                    'height' => $dimensions[1] ?? null,
+                    'uploaded_by' => Auth::id(),
+                ]);
 
-            // Ids only in the immutable audit context (house rule).
-            $audit->record('product.photo_added', $photo, ['product_id' => $product->id]);
+                // Ids only in the immutable audit context (house rule).
+                $audit->record('product.photo_added', $photo, ['product_id' => $product->id]);
 
-            return $photo;
-        });
+                return $photo;
+            });
+        } catch (Throwable $e) {
+            // A failure inside the transaction (constraint violation, lock
+            // timeout, deadlock — DB::transaction's default attempts=1
+            // rethrows immediately rather than retrying) must not leave the
+            // already-stored blob orphaned on disk.
+            Storage::disk($disk)->delete($path);
+
+            throw $e;
+        }
 
         if ($photo === null) {
             Storage::disk($disk)->delete($path);

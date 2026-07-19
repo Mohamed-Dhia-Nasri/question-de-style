@@ -14,10 +14,12 @@ use App\Shared\Authorization\PermissionsCatalog;
 use App\Shared\Enums\RoleName;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Livewire\Livewire;
+use RuntimeException;
 use Tests\Support\FakeEmbeddingProvider;
 use Tests\TestCase;
 
@@ -220,24 +222,85 @@ class ProductPhotosTest extends TestCase
         $product = Product::factory()->create();
         config()->set('qds.enrichment.visual_match.photo_cap', 2);
 
-        $this->makeStoredPhoto($product);
+        // Exactly 1 photo, so the cheap pre-check (1 < 2) PASSES and save()
+        // proceeds to store a blob and enter the locked transaction — the
+        // authoritative recount inside it is what must catch the race.
         $this->makeStoredPhoto($product);
 
         $disk = (string) config('qds.ingestion.media_disk', 'media');
         $directory = "tenants/{$product->tenant_id}/product-photos/{$product->id}";
-        $filesBefore = Storage::disk($disk)->allFiles($directory);
+        $raced = false;
 
-        // The row-count check happens inside a locked transaction (the
-        // TOCTOU fix): a losing save must delete the blob it already put on
-        // disk before the check aborted it, not leave it dangling.
-        Livewire::test(ProductPhotos::class)
-            ->call('open', $product->id)
-            ->set('upload', UploadedFile::fake()->image('side.jpg', 40, 40))
-            ->call('save')
-            ->assertHasErrors(['upload']);
+        // Simulates a concurrent save landing its photo between our
+        // pre-check and our authoritative recount. Product::retrieved fires
+        // for every Product retrieval, but the ONLY one that happens while
+        // a transaction is open is save()'s own lockForUpdate()->first()
+        // read (open()'s and render()'s retrievals all run outside any
+        // transaction) — gating on DB::transactionLevel() reliably targets
+        // that one query without depending on Livewire's render-cycle
+        // invocation count.
+        Product::retrieved(function () use (&$raced, $product): void {
+            if ($raced || DB::transactionLevel() === 0) {
+                return;
+            }
 
-        $this->assertSame($filesBefore, Storage::disk($disk)->allFiles($directory));
+            $raced = true;
+            $this->makeStoredPhoto($product);
+        });
+
+        try {
+            // The row-count check happens inside a locked transaction (the
+            // TOCTOU fix): a losing save must delete the blob it already put
+            // on disk before the check aborted it, not leave it dangling.
+            Livewire::test(ProductPhotos::class)
+                ->call('open', $product->id)
+                ->set('upload', UploadedFile::fake()->image('side.jpg', 40, 40))
+                ->call('save')
+                ->assertHasErrors(['upload']);
+        } finally {
+            Product::flushEventListeners();
+        }
+
+        $this->assertTrue($raced, 'the simulated race never fired — test setup is broken');
+        // 2 rows: the original + the racing insert — NOT the aborted save's.
         $this->assertSame(2, ProductReferencePhoto::query()->where('product_id', $product->id)->count());
+        // 2 blobs on disk: same two — the aborted save's blob was deleted.
+        $this->assertCount(2, Storage::disk($disk)->allFiles($directory));
+    }
+
+    public function test_a_failure_inside_the_transaction_cleans_up_the_stored_blob_and_rethrows(): void
+    {
+        $this->actingAsCrmStaff();
+        $product = Product::factory()->create();
+
+        $disk = (string) config('qds.ingestion.media_disk', 'media');
+        $directory = "tenants/{$product->tenant_id}/product-photos/{$product->id}";
+
+        // Simulates a DB failure inside the transaction (constraint
+        // violation, deadlock, lock timeout) that happens AFTER the blob is
+        // already stored — DB::transaction's default attempts=1 rethrows
+        // immediately rather than retrying.
+        ProductReferencePhoto::creating(function (): void {
+            throw new RuntimeException('simulated insert failure');
+        });
+
+        try {
+            try {
+                Livewire::test(ProductPhotos::class)
+                    ->call('open', $product->id)
+                    ->set('upload', UploadedFile::fake()->image('front.jpg', 40, 40))
+                    ->call('save');
+
+                $this->fail('Expected the simulated RuntimeException to propagate from save().');
+            } catch (RuntimeException $e) {
+                $this->assertSame('simulated insert failure', $e->getMessage());
+            }
+        } finally {
+            ProductReferencePhoto::flushEventListeners();
+        }
+
+        $this->assertDatabaseCount('product_reference_photos', 0);
+        $this->assertSame([], Storage::disk($disk)->allFiles($directory));
     }
 
     public function test_upload_queues_the_embed_job_only_when_the_capability_can_spend(): void

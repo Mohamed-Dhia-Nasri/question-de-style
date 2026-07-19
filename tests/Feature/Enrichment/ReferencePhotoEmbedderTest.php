@@ -7,6 +7,9 @@ use App\Modules\Monitoring\Models\ProductPhotoEmbedding;
 use App\Platform\Enrichment\VisualMatch\Contracts\EmbeddingProvider;
 use App\Platform\Enrichment\VisualMatch\Jobs\EmbedProductPhotoJob;
 use App\Platform\Enrichment\VisualMatch\ReferencePhotoEmbedder;
+use App\Platform\Ingestion\Exceptions\ProviderCallException;
+use App\Platform\Ingestion\SourceRegistry;
+use App\Platform\Ingestion\Support\ErrorCategory;
 use App\Shared\Tenancy\TenantContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
@@ -72,6 +75,54 @@ class ReferencePhotoEmbedderTest extends TestCase
             'tenant_id' => $photo->tenant_id,
             'units' => 1,
         ]);
+        // ProviderCallRecorder telemetry: the recorder lives in THIS class,
+        // not the provider (the provider's frozen embedImage() returns a
+        // bare vector, never a ProviderCall).
+        $this->assertDatabaseHas('provider_calls', [
+            'source' => SourceRegistry::GOOGLE_GEMINI_EMBEDDINGS,
+            'operation' => 'embedding.embed',
+            'outcome' => 'SUCCESS',
+        ]);
+    }
+
+    public function test_a_provider_failure_is_telemetered_then_rethrown(): void
+    {
+        $this->app->instance(EmbeddingProvider::class, new class implements EmbeddingProvider
+        {
+            public function embedImage(string $bytes, string $mimeType): array
+            {
+                throw new ProviderCallException(
+                    SourceRegistry::GOOGLE_GEMINI_EMBEDDINGS,
+                    ErrorCategory::UpstreamError,
+                    'simulated upstream failure',
+                );
+            }
+
+            public function modelVersion(): string
+            {
+                return 'gemini-embedding-2';
+            }
+
+            public function isConfigured(): bool
+            {
+                return true;
+            }
+        });
+        $photo = $this->makeStoredPhoto();
+
+        $this->expectException(ProviderCallException::class);
+
+        try {
+            app(ReferencePhotoEmbedder::class)->embed($photo);
+        } finally {
+            $this->assertDatabaseHas('provider_calls', [
+                'source' => SourceRegistry::GOOGLE_GEMINI_EMBEDDINGS,
+                'operation' => 'embedding.embed',
+                'outcome' => 'FAILURE',
+            ]);
+            $this->assertDatabaseCount('product_photo_embeddings', 0);
+            $this->assertDatabaseCount('ai_usage_counters', 0);
+        }
     }
 
     public function test_embed_is_idempotent_per_photo_and_model_version(): void

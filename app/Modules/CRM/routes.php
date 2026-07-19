@@ -1,6 +1,7 @@
 <?php
 
 use App\Modules\CRM\Http\Controllers\DocumentDownloadController;
+use App\Modules\CRM\Http\Controllers\ProductPhotoController;
 use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\Creator;
@@ -72,6 +73,14 @@ Route::middleware(['web', 'auth', 'can:'.PermissionsCatalog::CRM_VIEW, 'subscrib
 Route::middleware(['web', 'auth', 'signed', 'subscribed'])
     ->get('/crm/documents/{documentAttachment}/download', DocumentDownloadController::class)
     ->name('crm.documents.download');
+
+// Product reference-photo thumbnails (sub-project C, spec §6):
+// authenticated + signed + policy-checked, streamed inline from the
+// private media disk (the crm.documents.download precedent). Link TTL is
+// qds.enrichment.visual_match.photo_link_ttl_minutes.
+Route::middleware(['web', 'auth', 'signed', 'subscribed'])
+    ->get('/crm/products/photos/{productReferencePhoto}', ProductPhotoController::class)
+    ->name('crm.products.photo');
 
 // User administration — ENT-User/ENT-Role writes are ADMIN-only
 // (ownership matrix, REQ-M3-012). Route-level gate + Livewire-side

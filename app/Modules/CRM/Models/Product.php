@@ -77,4 +77,10 @@ class Product extends Model
     {
         return $this->hasMany(Shipment::class);
     }
+
+    /** @return HasMany<ProductReferencePhoto, $this> */
+    public function referencePhotos(): HasMany
+    {
+        return $this->hasMany(ProductReferencePhoto::class);
+    }
 }

@@ -6,6 +6,7 @@ use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\Story;
+use App\Platform\Enrichment\Media\MediaWorkspace;
 use App\Platform\Enrichment\Media\MediaWorkspaceFactory;
 use App\Shared\Enums\ContentType;
 use App\Shared\Enums\Platform;
@@ -109,6 +110,26 @@ class MediaWorkspaceTest extends TestCase
         $this->assertNotNull($ws->video());
         $this->assertSame('STORYVIDEO', $ws->video()->bytes());
         Http::assertNothingSent();
+        $ws->close();
+    }
+
+    public function test_acquisition_failure_appends_honest_marker_before_propagating_exception(): void
+    {
+        $ws = new MediaWorkspace(function (): void {
+            throw new \RuntimeException('boom');
+        });
+
+        // First access throws the exception
+        try {
+            $ws->images();
+            $this->fail('Expected RuntimeException to be thrown');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('boom', $e->getMessage());
+        }
+
+        // Subsequent calls should not re-throw, markers() should contain the honest marker
+        $this->assertContains('media:fetch-failed', $ws->markers());
+        $this->assertNull($ws->video());
         $ws->close();
     }
 }

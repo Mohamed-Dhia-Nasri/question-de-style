@@ -108,7 +108,16 @@ class MediaWorkspace
         $this->acquirer = null;
 
         if ($acquirer !== null) {
-            $acquirer($this);
+            try {
+                $acquirer($this);
+            } catch (\Throwable $e) {
+                // Fail-loud on first access, but leave honest state behind:
+                // a caller that catches and re-reads sees WHY media is empty
+                // instead of silently frozen emptiness.
+                $this->markers[] = 'media:fetch-failed';
+
+                throw $e;
+            }
         }
     }
 }

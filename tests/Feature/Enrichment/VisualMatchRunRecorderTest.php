@@ -8,6 +8,7 @@ use App\Modules\CRM\Models\Product;
 use App\Modules\CRM\Models\SeedingCampaign;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\VisualMatchCandidate;
+use App\Modules\Monitoring\Models\VisualMatchRun;
 use App\Platform\AiBudget\Priority;
 use App\Platform\Enrichment\VisualMatch\Candidates\Candidate;
 use App\Platform\Enrichment\VisualMatch\Candidates\CandidateSet;
@@ -20,6 +21,7 @@ use App\Shared\Enums\VisualMatchBand;
 use App\Shared\Enums\VisualMatchOutcome;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use InvalidArgumentException;
 use Tests\TestCase;
 
 class VisualMatchRunRecorderTest extends TestCase
@@ -142,5 +144,55 @@ class VisualMatchRunRecorderTest extends TestCase
         // A skipped run assessed nothing — fabricating per-candidate
         // verdicts would be dishonest.
         $this->assertSame(0, VisualMatchCandidate::query()->count());
+    }
+
+    public function test_skipped_outcome_with_results_throws_before_writing_a_run_row(): void
+    {
+        $content = ContentItem::factory()->create();
+        $brand = Brand::factory()->create(['name' => 'Glossier']);
+        $product = Product::factory()->create(['brand_id' => $brand->id, 'name' => 'You Perfume']);
+        $candidate = new Candidate($product->id, 'You Perfume', 'Glossier', null, 'shipment', true, null, null, 2, true);
+        $candidates = new CandidateSet([$candidate], Priority::Medium);
+        $prep = new FramePreparationResult([], 3, 0, 0, 0);
+        $result = new BandResult(
+            candidate: $candidate, band: VisualMatchBand::Auto,
+            supportingFrames: [], supportCount: 0, marginToRunnerUp: null, rejectionReason: null,
+            firstSupportMs: null, lastSupportMs: null, estimatedVisibleMs: null, bestSimilarity: 0.7,
+        );
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('A skipped run records no candidate verdicts and never needs verification.');
+
+        try {
+            app(VisualMatchRunRecorder::class)->record(
+                $content, 'corr-rec-3', $candidates, $prep, [$result],
+                VisualMatchOutcome::SkippedBudget, 'gemini-embedding-2', 0, 0, 5, false,
+            );
+        } finally {
+            $this->assertSame(0, VisualMatchRun::query()->count()); // the guard precedes the insert
+        }
+    }
+
+    public function test_skipped_outcome_with_needs_verification_throws_before_writing_a_run_row(): void
+    {
+        $content = ContentItem::factory()->create();
+        $brand = Brand::factory()->create(['name' => 'Glossier']);
+        $product = Product::factory()->create(['brand_id' => $brand->id, 'name' => 'You Perfume']);
+        $candidates = new CandidateSet([
+            new Candidate($product->id, 'You Perfume', 'Glossier', null, 'shipment', true, null, null, 2, true),
+        ], Priority::Medium);
+        $prep = new FramePreparationResult([], 3, 0, 0, 0);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('A skipped run records no candidate verdicts and never needs verification.');
+
+        try {
+            app(VisualMatchRunRecorder::class)->record(
+                $content, 'corr-rec-4', $candidates, $prep, [],
+                VisualMatchOutcome::SkippedReadOnly, 'gemini-embedding-2', 0, 0, 5, true,
+            );
+        } finally {
+            $this->assertSame(0, VisualMatchRun::query()->count()); // the guard precedes the insert
+        }
     }
 }

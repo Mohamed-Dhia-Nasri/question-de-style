@@ -14,6 +14,7 @@ use App\Platform\Enrichment\VisualMatch\Matching\FrameScore;
 use App\Platform\Enrichment\VisualMatch\Matching\ThresholdResolver;
 use App\Shared\Enums\VisualMatchBand;
 use App\Shared\Enums\VisualMatchOutcome;
+use InvalidArgumentException;
 
 /**
  * Persists the append-only audit trail of one visual-match analysis run: a
@@ -33,6 +34,20 @@ final class VisualMatchRunRecorder
         FramePreparationResult $prep, array $results, VisualMatchOutcome $outcome,
         string $modelVersion, int $billedCalls, int $cacheHits, int $processingMs, bool $needsVerification): VisualMatchRun
     {
+        // Boundary guard (house pattern precedent: ConfidenceAssessment's
+        // constructor throwing on empty signals): a skipped run assessed
+        // nothing, so it can never carry candidate verdicts or a
+        // verification poll flag. Enforced here — not left to caller
+        // discipline — and BEFORE the run row is inserted, so a violation
+        // never lands a half-recorded run.
+        $skipped = in_array($outcome, [
+            VisualMatchOutcome::SkippedBudget, VisualMatchOutcome::SkippedReadOnly, VisualMatchOutcome::SkippedProvider,
+        ], true);
+
+        if ($skipped && ($results !== [] || $needsVerification)) {
+            throw new InvalidArgumentException('A skipped run records no candidate verdicts and never needs verification.');
+        }
+
         $bestScore = null;
 
         foreach ($results as $result) {
@@ -84,11 +99,8 @@ final class VisualMatchRunRecorder
 
         // Unmatchable candidates (no embedded reference photos) are recorded
         // on COMPLETED runs only — coverage accounting for D and reviewers.
-        // Skipped runs assessed nothing; no per-candidate verdicts there.
-        $skipped = in_array($outcome, [
-            VisualMatchOutcome::SkippedBudget, VisualMatchOutcome::SkippedReadOnly, VisualMatchOutcome::SkippedProvider,
-        ], true);
-
+        // Skipped runs assessed nothing; no per-candidate verdicts there
+        // ($skipped computed once, in the guard above).
         if (! $skipped) {
             foreach ($candidates->candidates as $candidate) {
                 if ($candidate->hasEmbeddedPhotos) {

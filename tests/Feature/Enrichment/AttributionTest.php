@@ -4,6 +4,7 @@ namespace Tests\Feature\Enrichment;
 
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\PlatformAccount;
+use App\Modules\CRM\Models\Product;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\Mention;
 use App\Modules\Monitoring\Models\MonitoredSubject;
@@ -117,14 +118,83 @@ class AttributionTest extends TestCase
         // recognition evidence in the signals (DP-003, AC-M1-003).
         $this->assertInstanceOf(ConfidenceAssessment::class, $mention->classification);
         $this->assertSame(MentionType::Seeded->value, $mention->classification->value);
+
+        // Under the default (text_signals kill switch OFF) legacy
+        // brand-level doctrine, brand alignment alone proves HIGH — the
+        // product-aware tightening (product-unconfirmed → MEDIUM) only
+        // applies when the flag is ON (see AttributionProductEvidenceTest).
         $this->assertSame(ConfidenceLevel::High, $mention->classification->confidenceLevel);
         $this->assertSame(VerificationStatus::AiAssessed, $mention->classification->verificationStatus);
         $this->assertNotEmpty($mention->classification->signals);
         $this->assertContains('shipment-record:42', $mention->classification->signals);
+        $this->assertNotContains('product-unconfirmed', $mention->classification->signals);
 
         // The mention derives from the externally-sourced content: its
         // provenance is the content's provenance (DP-002).
         $this->assertSame($this->content->provenance->source, $mention->provenance->source);
+    }
+
+    /** Bind a fake Module 3 boundary returning one aligned shipment carrying a productId. */
+    private function bindAlignedShipmentSourceWithProductId(string $brandName, int $productId): void
+    {
+        $this->app->instance(SeedingEvidenceSource::class, new class($brandName, $productId) implements SeedingEvidenceSource
+        {
+            public function __construct(private readonly string $brandName, private readonly int $productId) {}
+
+            /** @return list<ShipmentEvidence> */
+            public function forTarget(ContentItem|Story $target): array
+            {
+                return [new ShipmentEvidence(
+                    reference: 'shipment-record:99',
+                    brandName: $this->brandName,
+                    productId: $this->productId,
+                    shippedAt: CarbonImmutable::parse('2026-06-01'),
+                    deliveredAt: CarbonImmutable::parse('2026-06-05'),
+                )];
+            }
+        });
+    }
+
+    public function test_a_stale_recognition_product_id_does_not_align_a_brand_mismatched_shipment_when_the_switch_is_off(): void
+    {
+        // A recognition whose brand was corrected AWAY from the shipment's
+        // brand (e.g. via ReviewService after the flag was previously ON)
+        // but whose product_id column still happens to equal the shipment's
+        // product id. With the kill switch OFF, MentionClassifier's
+        // productId shortcut must never see this productId — evidence
+        // gating strips it — so alignment can only fall back to a brand
+        // name match, which fails here. Before the fix this stray productId
+        // still aligned the shipment and produced SEEDED/HIGH.
+        $product = Product::factory()->create();
+
+        RecognitionDetection::factory()->create([
+            'content_item_id' => $this->content->id,
+            'detected_brand' => 'A Totally Different Brand',
+            'product_id' => $product->id,
+            'assessment' => new ConfidenceAssessment(
+                'A Totally Different Brand',
+                ConfidenceLevel::High,
+                ['logo-match-score:0.95'],
+                VerificationStatus::AiAssessed,
+            ),
+        ]);
+
+        // The shipment is self::BRAND's, not "A Totally Different Brand"'s —
+        // only the stray matching productId could align them.
+        $this->bindAlignedShipmentSourceWithProductId(self::BRAND, $product->id);
+
+        $mentions = app(AttributionService::class)->enrich($this->content);
+
+        $this->assertCount(1, $mentions);
+        $mention = $mentions[0]->fresh();
+
+        // Never SEEDED: with the flag off, the shipment (a different brand)
+        // has no aligned evidence at all — a strong, unlinked recognition of
+        // a brand with no seeding record is LIKELY_ORGANIC (legacy
+        // doctrine), never SEEDED.
+        $this->assertNotSame(MentionType::Seeded, $mention->mention_type);
+        $this->assertSame(MentionType::LikelyOrganic, $mention->mention_type);
+        $this->assertNotContains('shipment-record:99', $mention->classification->signals);
     }
 
     public function test_a_human_corrected_classification_is_never_overwritten_by_ai(): void

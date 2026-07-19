@@ -18,7 +18,7 @@ final readonly class EvidenceBundle
          * Brand-recognition evidence (non-rejected RecognitionDetections
          * carrying a normalized brand label).
          *
-         * @var list<array{type: string, brand: string, level: ConfidenceLevel}>
+         * @var list<array{type: string, brand: string, level: ConfidenceLevel, productId?: int|null, product?: string|null}>
          */
         public array $recognitions = [],
         /**
@@ -41,8 +41,15 @@ final readonly class EvidenceBundle
          */
         public array $shipments = [],
         /** Platform paid-partnership disclosure label present (AC-M1-003). */
-        public bool $paidPartnershipLabel = false,
+        public ?bool $paidPartnershipLabel = null,
         /** When the content was published (timing evidence). */
         public ?CarbonImmutable $publishedAt = null,
+        /** @var list<string> gifting/PR cue signals (relevance booster, not a brand claim) */
+        public array $contextualCues = [],
+        /**
+         * When true, the classifier enforces the product-aware SEEDED
+         * doctrine; when false, the legacy brand-level doctrine applies.
+         */
+        public bool $productDoctrine = false,
     ) {}
 }

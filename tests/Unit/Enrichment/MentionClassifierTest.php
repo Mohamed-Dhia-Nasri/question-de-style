@@ -95,7 +95,11 @@ class MentionClassifierTest extends TestCase
     {
         $this->assertSame(60, config('qds.enrichment.attribution.shipment_window_days'));
 
-        // Published a few days after delivery of the same brand's shipment.
+        // Published a few days after delivery of the same brand's shipment:
+        // under the default (flag-off) legacy brand-level doctrine, brand
+        // alignment alone is sufficient to prove HIGH — no product-level
+        // evidence required (the product-aware tightening only applies when
+        // the text_signals kill switch is ON; see MentionClassifierProductTest).
         $result = $this->classifier->classify(new EvidenceBundle(
             recognitions: [$this->recognition('Maison Lumière')],
             shipments: [new ShipmentEvidence(
@@ -116,6 +120,7 @@ class MentionClassifierTest extends TestCase
         $this->assertContains('shipment-record:42', $result->signals);
         $this->assertContains('recognition:LOGO:Maison Lumière:HIGH', $result->signals);
         $this->assertNotContains('shipment-timing-unverified', $result->signals);
+        $this->assertNotContains('product-unconfirmed', $result->signals);
     }
 
     public function test_a_shipment_of_a_different_brand_is_no_link(): void

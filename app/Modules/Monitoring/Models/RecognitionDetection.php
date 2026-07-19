@@ -31,6 +31,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property RecognitionType $recognition_type
  * @property string|null $detected_text
  * @property string|null $detected_brand
+ * @property string|null $detected_product
+ * @property int|null $product_id
  * @property string|null $provider_label
  * @property ConfidenceAssessment $assessment
  * @property Provenance $provenance
@@ -48,6 +50,12 @@ class RecognitionDetection extends Model
         'recognition_type',
         'detected_text',
         'detected_brand',
+        // detected_product / product_id are human-correctable, same as
+        // detected_brand — kept OUT of the upsert identity (see provider_label
+        // below and Task 10) so a correction is never re-created as a fresh
+        // AI detection (DP-004).
+        'detected_product',
+        'product_id',
         // Immutable raw provider-detected label — the stable upsert identity
         // so a human correction of detected_brand is never re-created as a
         // fresh AI detection (DP-004). FLAGGED DEVIATION: not in the canonical

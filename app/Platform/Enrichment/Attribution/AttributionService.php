@@ -12,9 +12,11 @@ use App\Modules\Monitoring\Models\RecognitionDetection;
 use App\Modules\Monitoring\Models\Story;
 use App\Platform\Enrichment\Contracts\SeedingEvidenceSource;
 use App\Platform\Enrichment\Support\HumanPrecedence;
+use App\Platform\Enrichment\TextSignals\ContextualCueDetector;
 use App\Shared\Enums\ConfidenceLevel;
 use App\Shared\Enums\MentionType;
 use App\Shared\Enums\MonitoredSubjectType;
+use App\Shared\Enums\RecognitionType;
 use App\Shared\Enums\VerificationStatus;
 use App\Shared\ValueObjects\ConfidenceAssessment;
 use App\Shared\ValueObjects\Provenance;
@@ -199,6 +201,13 @@ class AttributionService
 
     private function buildEvidence(ContentItem|Story $target): EvidenceBundle
     {
+        // Kill switch (Tier 0 free-signal detection, sub-project A): OFF
+        // reproduces the legacy brand-level doctrine exactly (precision
+        // gate skipped, no paid label, no contextual cues, no product-id
+        // evidence, no product doctrine); ON enables the full product-aware
+        // behaviour.
+        $enabled = (bool) config('qds.enrichment.text_signals.enabled');
+
         $recognitions = [];
 
         $detectionQuery = RecognitionDetection::query();
@@ -218,10 +227,31 @@ class AttributionService
                 continue;
             }
 
+            // Precision gate: an UNMATCHED logo (brand not in the lexicon) or a
+            // low-confidence logo carries no attribution relevance. Gated
+            // behind the kill switch — OFF reproduces the legacy behaviour
+            // where such detections still carried evidential weight.
+            if ($enabled
+                && $detection->recognition_type === RecognitionType::Logo
+                && (in_array('brand-lexicon:unmatched', $assessment->signals, true)
+                    || $assessment->confidenceLevel === ConfidenceLevel::Low
+                    || $assessment->confidenceLevel === ConfidenceLevel::Unknown)) {
+                continue;
+            }
+
             $recognitions[] = [
                 'type' => $detection->recognition_type->value,
                 'brand' => $detection->detected_brand,
                 'level' => $assessment->confidenceLevel,
+                // Gated behind the kill switch: with it off, no recognition
+                // carries a productId, so MentionClassifier::shipmentAligns's
+                // productId shortcut can never fire — alignment falls back
+                // to brand-name only, the true legacy behaviour. Without
+                // this gate a shipment could still align (and SEEDED at
+                // HIGH) purely on a stale/rolled-back productId even after
+                // the brand itself no longer matches.
+                'productId' => $enabled ? $detection->product_id : null,
+                'product' => $enabled ? $detection->detected_product : null,
             ];
         }
 
@@ -234,8 +264,12 @@ class AttributionService
             hashtagMatches: $hashtagMatches,
             ambiguousHashtags: $ambiguous,
             shipments: $this->seedingEvidence->forTarget($target),
-            paidPartnershipLabel: false,
+            paidPartnershipLabel: $enabled ? ($target instanceof ContentItem ? $target->branded_content_label : null) : false,
+            contextualCues: $enabled && $target instanceof ContentItem
+                ? app(ContextualCueDetector::class)->detect($target->caption)
+                : [],
             publishedAt: $this->publicationDate($target),
+            productDoctrine: $enabled,
         );
     }
 

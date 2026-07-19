@@ -5,6 +5,7 @@ namespace App\Platform\Ingestion\Persistence;
 use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Platform\Ingestion\DTO\ContentData;
+use App\Platform\Ingestion\DTO\ProductTag;
 
 /**
  * Idempotent persistence for ENT-ContentItem (write path of Module 1's
@@ -57,6 +58,10 @@ class ContentItemPersister
                     'external_id' => $item->externalId,
                     'caption' => $item->caption,
                     'media_urls' => $item->mediaUrls,
+                    'mentioned_handles' => $item->mentions,
+                    'product_tags' => $this->mapProductTags($item->productTags),
+                    'collaborators' => $item->collaborators,
+                    'branded_content_label' => $item->brandedContentLabel,
                     'permalink' => $item->permalink,
                     'published_at' => $item->publishedAt,
                     'public_metrics' => $item->publicMetrics,
@@ -75,6 +80,10 @@ class ContentItemPersister
             $updates = [
                 'caption' => $item->caption,
                 'media_urls' => $item->mediaUrls,
+                'mentioned_handles' => $item->mentions,
+                'product_tags' => $this->mapProductTags($item->productTags),
+                'collaborators' => $item->collaborators,
+                'branded_content_label' => $item->brandedContentLabel,
                 // Keep the known permalink when a provider omits it (the
                 // direct-URL refresh depends on it staying populated).
                 'permalink' => $item->permalink ?? $existing->permalink,
@@ -107,5 +116,19 @@ class ContentItemPersister
         $overrides = $item->human_overrides;
 
         return is_array($overrides) ? array_values(array_filter($overrides, 'is_string')) : [];
+    }
+
+    /**
+     * @param  list<ProductTag>  $tags
+     * @return list<array{brand_ref: ?string, product_name: ?string, product_sku: ?string, provider_tag_id: ?string}>
+     */
+    private function mapProductTags(array $tags): array
+    {
+        return array_map(static fn (ProductTag $t): array => [
+            'brand_ref' => $t->brandRef,
+            'product_name' => $t->productName,
+            'product_sku' => $t->productSku,
+            'provider_tag_id' => $t->providerTagId,
+        ], $tags);
     }
 }

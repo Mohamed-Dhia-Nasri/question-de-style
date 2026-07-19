@@ -8,6 +8,7 @@ use App\Modules\CRM\Services\ShipmentEvidenceSource;
 use App\Platform\Analytics\Console\RefreshRollupsCommand;
 use App\Platform\Analytics\Contracts\AnalyticsService;
 use App\Platform\Analytics\NeonAnalyticsService;
+use App\Platform\Enrichment\Console\EvalDetectionCommand;
 use App\Platform\Enrichment\Console\RunEnrichmentCommand;
 use App\Platform\Enrichment\Contracts\EnrichmentService;
 use App\Platform\Enrichment\Contracts\ReachEstimator;
@@ -111,6 +112,7 @@ class PlatformServiceProvider extends ServiceProvider
                 RunEnrichmentCommand::class,
                 LinkSeededContentCommand::class,
                 PruneExpiredExportsCommand::class,
+                EvalDetectionCommand::class,
             ]);
         }
     }

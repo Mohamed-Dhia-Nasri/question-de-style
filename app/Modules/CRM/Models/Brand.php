@@ -24,6 +24,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $name
  * @property SectorLabel|null $sector
  * @property array<int, string>|null $aliases
+ * @property array<int, string>|null $social_handles
  */
 class Brand extends Model
 {
@@ -37,6 +38,7 @@ class Brand extends Model
         'name',
         'sector',
         'aliases',
+        'social_handles',
     ];
 
     /** @return array<string, string> */
@@ -45,6 +47,7 @@ class Brand extends Model
         return [
             'sector' => SectorLabel::class,
             'aliases' => 'array',
+            'social_handles' => 'array',
         ];
     }
 

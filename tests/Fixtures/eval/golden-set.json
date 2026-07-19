@@ -1,0 +1,102 @@
+[
+    {
+        "platform": "INSTAGRAM",
+        "caption": "Obsessed with my new Velura Cosmetics blush, wearing it for the reveal tomorrow!",
+        "mentions": ["veluracosmetics"],
+        "product_tags": [],
+        "is_seeded": true,
+        "brand": "Velura Cosmetics",
+        "product": "Velura Serum 01",
+        "reason": "Brand name written out in full in the caption text — direct lexicon match."
+    },
+    {
+        "platform": "TIKTOK",
+        "caption": "linking my @pureglowskin routine below, swipe up for the products they sent",
+        "mentions": ["pureglowskin"],
+        "product_tags": [],
+        "is_seeded": true,
+        "brand": "PureGlow Skin",
+        "product": "PureGlow Serum 02",
+        "reason": "Handle alias (@pureglowskin) present literally in the caption text."
+    },
+    {
+        "platform": "INSTAGRAM",
+        "caption": "day in my life, nothing fancy today, just errands and coffee",
+        "mentions": [],
+        "product_tags": [],
+        "is_seeded": false,
+        "brand": null,
+        "product": null,
+        "reason": "Organic lifestyle content with no brand mention — correct true negative."
+    },
+    {
+        "platform": "TIKTOK",
+        "caption": "not sponsored, just love my Atelier Nord jacket, bought it with my own money",
+        "mentions": [],
+        "product_tags": [],
+        "is_seeded": false,
+        "brand": "Atelier Nord",
+        "product": null,
+        "reason": "Brand mentioned organically with no seeding partnership behind it — expected false positive: a lexicon hit alone cannot distinguish organic love from a gifted/seeded post."
+    },
+    {
+        "platform": "INSTAGRAM",
+        "caption": "the PR box just arrived and it's stunning, can't wait to try everything inside",
+        "mentions": [],
+        "product_tags": [],
+        "is_seeded": true,
+        "brand": "Hearthside Living",
+        "product": "Hearthside Candle Set",
+        "reason": "Seeded PR unboxing but the caption never names the brand or tags a handle — expected false negative for the deterministic text-signal path (needs image/product-tag evidence, tracked as an A5 follow-up)."
+    },
+    {
+        "platform": "TIKTOK",
+        "caption": "swatching the new CorePulse resistance bands, gifted by the brand for this collab",
+        "mentions": ["corepulse"],
+        "product_tags": [],
+        "is_seeded": true,
+        "brand": "CorePulse",
+        "product": "CorePulse Resistance Kit",
+        "reason": "Brand name directly in the caption text — true positive via lexicon match."
+    },
+    {
+        "platform": "INSTAGRAM",
+        "caption": "grocery haul featuring @verdanafoods snacks they sent over, so good",
+        "mentions": ["verdanafoods"],
+        "product_tags": [],
+        "is_seeded": true,
+        "brand": "Verdana Foods",
+        "product": "Verdana Foods Snack Box",
+        "reason": "Handle mention that is also a literal brand alias in the caption text."
+    },
+    {
+        "platform": "TIKTOK",
+        "caption": "trying random snacks from my pantry, honestly no idea what brand this even is",
+        "mentions": [],
+        "product_tags": [],
+        "is_seeded": false,
+        "brand": null,
+        "product": null,
+        "reason": "Organic, unbranded content — correct true negative."
+    },
+    {
+        "platform": "INSTAGRAM",
+        "caption": "V3lura Cosm3tics sent me this dream set (yes I know the spelling, autocorrect is fighting me)",
+        "mentions": [],
+        "product_tags": [],
+        "is_seeded": true,
+        "brand": "Velura Cosmetics",
+        "product": "Velura Kit 03",
+        "reason": "Leetspeak obfuscation of the brand name defeats the deterministic lexicon match — expected false negative, motivating a fuzzy-match follow-up."
+    },
+    {
+        "platform": "TIKTOK",
+        "caption": "unboxing today's mystery PR package, brand withheld until launch day per their NDA",
+        "mentions": [],
+        "product_tags": ["nexon-labs-headset-2026"],
+        "is_seeded": true,
+        "brand": "Nexon Labs",
+        "product": "Nexon Labs Headset",
+        "reason": "Brand identity is embargoed in the caption itself, but the platform product tag still carries the seeded product — true positive via the product_tags fallback, not text."
+    }
+]

@@ -146,6 +146,10 @@ class YouTubeContentAdapter implements ContentProvider
                     Extract::publicMetric('comments', Extract::int($statistics, 'commentCount')),
                 ])),
                 provenance: new Provenance($this->source(), CarbonImmutable::now(), $response->sourceVersion),
+                mentions: \App\Platform\Ingestion\Normalization\SignalExtract::mentions($item),
+                productTags: \App\Platform\Ingestion\Normalization\SignalExtract::productTags($item),
+                collaborators: \App\Platform\Ingestion\Normalization\SignalExtract::collaborators($item),
+                brandedContentLabel: \App\Platform\Ingestion\Normalization\SignalExtract::brandedContentLabel($item),
             );
         });
     }

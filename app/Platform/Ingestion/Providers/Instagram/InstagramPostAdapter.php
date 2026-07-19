@@ -92,6 +92,10 @@ class InstagramPostAdapter implements ContentProvider
                 ])),
                 provenance: new Provenance($this->source(), CarbonImmutable::now(), $response->sourceVersion),
                 permalink: Extract::string($item, 'url'),
+                mentions: \App\Platform\Ingestion\Normalization\SignalExtract::mentions($item),
+                productTags: \App\Platform\Ingestion\Normalization\SignalExtract::productTags($item),
+                collaborators: \App\Platform\Ingestion\Normalization\SignalExtract::collaborators($item),
+                brandedContentLabel: \App\Platform\Ingestion\Normalization\SignalExtract::brandedContentLabel($item),
             );
         });
     }

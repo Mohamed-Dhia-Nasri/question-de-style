@@ -4,9 +4,11 @@ namespace App\Modules\CRM\Services\Gdpr;
 
 use App\Modules\CRM\Models\Creator;
 use App\Modules\Monitoring\Contracts\RosterEnrollment;
+use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\Mention;
 use App\Modules\Monitoring\Models\RecognitionDetection;
 use App\Modules\Monitoring\Models\SentimentAnalysis;
+use App\Modules\Monitoring\Models\Story;
 use App\Platform\Analytics\NeonAnalyticsService;
 use App\Shared\Audit\AuditLogger;
 use Illuminate\Support\Facades\DB;
@@ -17,8 +19,8 @@ use Illuminate\Support\Facades\Storage;
  * platform holds about one creator — CRM profile, contacts, correspondence,
  * shipments, documents, tasks, monitored accounts, the monitoring history
  * collected from their public profiles (content, stories + archived media,
- * comments, mentions, enrichment artifacts, metric snapshots), and the
- * creator's rows in the analytics star schema.
+ * comments, mentions, enrichment artifacts incl. keyframes + transcripts,
+ * metric snapshots), and the creator's rows in the analytics star schema.
  *
  * This is deliberately STRONGER than CreatorWriter::deleteCreator (the
  * operator's remove-a-stray tool, which monitoring HISTORY rightly blocks):
@@ -41,7 +43,7 @@ class CreatorEraser
     ) {}
 
     /**
-     * @return array<string, int> rows deleted per table (files under 'media_files' / 'document_files')
+     * @return array<string, int> rows deleted per table (files under 'media_files' / 'document_files' / 'keyframe_files')
      */
     public function erase(Creator $creator): array
     {
@@ -49,8 +51,10 @@ class CreatorEraser
         $counts = [];
         $mediaPaths = [];
         $documentPaths = [];
+        /** @var array<string, list<string>> $keyframePathsByDisk paths grouped by their own storage_disk (keyframes carry a per-row disk; media_files/document_files do not) */
+        $keyframePathsByDisk = [];
 
-        DB::transaction(function () use ($creator, $creatorId, &$counts, &$mediaPaths, &$documentPaths): void {
+        DB::transaction(function () use ($creator, $creatorId, &$counts, &$mediaPaths, &$documentPaths, &$keyframePathsByDisk): void {
             // Transaction-local gate for the append-only triggers
             // (metric_snapshots, fact_*). set_config(..., true) is scoped to
             // THIS transaction and is explicitly turned off before commit
@@ -81,6 +85,25 @@ class CreatorEraser
                 ->where(fn ($q) => $q->whereIn('content_item_id', $contentIds)->orWhereIn('story_id', $storyIds))
                 ->pluck('id')->all();
 
+            // Keyframes (sub-project B) are polymorphically owned by either a
+            // ContentItem or a Story — both owner sets must be matched. Paths
+            // are collected BEFORE the rows go, grouped by each row's own
+            // storage_disk (unlike media_files/document_files, keyframes are
+            // not all on one configured disk — Task 15's prune command reads
+            // the same per-row column); the files are deleted after commit.
+            $keyframeRows = ($contentIds === [] && $storyIds === []) ? [] : DB::table('keyframes')
+                ->where(function ($q) use ($contentIds, $storyIds): void {
+                    $q->where(function ($qq) use ($contentIds): void {
+                        $qq->where('owner_type', (new ContentItem)->getMorphClass())->whereIn('owner_id', $contentIds);
+                    })->orWhere(function ($qq) use ($storyIds): void {
+                        $qq->where('owner_type', (new Story)->getMorphClass())->whereIn('owner_id', $storyIds);
+                    });
+                })
+                ->get(['id', 'storage_disk', 'storage_path'])->all();
+            foreach ($keyframeRows as $row) {
+                $keyframePathsByDisk[$row->storage_disk][] = $row->storage_path;
+            }
+
             // Review corrections hold 'original' payloads of the rows being
             // erased (captions, detected labels) — personal data too.
             $counts['review_actions'] =
@@ -93,6 +116,8 @@ class CreatorEraser
             $counts['sentiment_analyses'] = $this->deleteByIds('sentiment_analyses', $sentimentIds);
             $counts['comments'] = $this->deleteByIds('comments', $commentIds);
             $counts['recognition_detections'] = $this->deleteByIds('recognition_detections', $recognitionIds);
+            $counts['keyframes'] = $this->deleteByIds('keyframes', array_map('intval', array_column($keyframeRows, 'id')));
+            $counts['content_transcripts'] = $this->deleteWhereIn('content_transcripts', 'content_item_id', $contentIds);
             $counts['content_hashtags'] = $this->deleteWhereIn('content_hashtags', 'content_item_id', $contentIds);
             $counts['emv_results'] = $this->deleteWhereIn('emv_results', 'content_item_id', $contentIds);
             $counts['reach_results'] = $this->deleteWhereIn('reach_results', 'content_item_id', $contentIds);
@@ -159,6 +184,10 @@ class CreatorEraser
         // Blobs go only after the rows are durably gone.
         $counts['media_files'] = $this->deleteFiles((string) config('qds.ingestion.media_disk'), $mediaPaths);
         $counts['document_files'] = $this->deleteFiles((string) config('qds.documents.disk'), $documentPaths);
+        $counts['keyframe_files'] = 0;
+        foreach ($keyframePathsByDisk as $disk => $paths) {
+            $counts['keyframe_files'] += $this->deleteFiles($disk, $paths);
+        }
 
         // A GDPR access export generated earlier is the single richest PII
         // artifact — purge the creator's dossiers synchronously rather than

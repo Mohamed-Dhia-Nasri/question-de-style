@@ -172,6 +172,75 @@ class YouTubeTranscriptEnricherTest extends TestCase
         $this->assertSame(1, ProviderCall::query()->where('source', SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT)->where('operation', 'transcript.fetch')->count());
     }
 
+    public function test_concurrent_winner_committed_before_our_select_is_never_overwritten(): void
+    {
+        $this->fakeProviderCredentials();
+        $item = $this->makeYouTubeItem();
+
+        // Deterministically reproduce the PRE-SELECT race window: unlike
+        // the sibling test above (whose winner lands between our SELECT
+        // and our INSERT, tripping UniqueConstraintViolationException),
+        // here the winner is already committed BEFORE our own firstOrNew()
+        // SELECT even runs — that SELECT happens right after runActor()
+        // returns, so the winner is inserted from inside the HTTP fake's
+        // response callback (a second, genuinely separate DB connection —
+        // same reasoning as the sibling test: a same-connection insert
+        // done this early would just be found by our own SELECT as a
+        // normal pre-existing row, which is a different, already-covered
+        // case; a truly independent connection is what makes this the
+        // right regression test for the exists()-but-uncaught branch).
+        //
+        // The worst-case scenario this guards: our OWN actor response
+        // (faked here as EMPTY captions) would, without the exists() guard,
+        // fill()+save() the winner's row from AVAILABLE to UNAVAILABLE —
+        // destroying a good transcript and salting the negative cache so
+        // it can never be refetched. Assert that does NOT happen.
+        config(['database.connections.pgsql_race' => config('database.connections.pgsql')]);
+
+        $actorId = (string) config('services.apify.actors.youtube_transcript');
+        Http::fake([
+            "api.apify.com/v2/acts/{$actorId}/run-sync-get-dataset-items*" => function () use ($item) {
+                DB::connection('pgsql_race')->statement('SET session_replication_role = replica');
+                DB::connection('pgsql_race')->table('content_transcripts')->insert([
+                    'tenant_id' => $item->tenant_id,
+                    'content_item_id' => $item->id,
+                    'language' => 'und',
+                    'status' => ContentTranscript::STATUS_AVAILABLE,
+                    'text' => 'winner text (pre-select)',
+                    'segments' => null,
+                    'provider' => SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT,
+                    'provenance' => json_encode([
+                        'source' => SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT,
+                        'fetchedAt' => CarbonImmutable::now()->toIso8601String(),
+                        'sourceVersion' => 'youtube-transcript-v1',
+                    ]),
+                    'checksum' => hash('sha256', 'winner text (pre-select)'),
+                    'fetched_at' => CarbonImmutable::now(),
+                    'created_at' => CarbonImmutable::now(),
+                    'updated_at' => CarbonImmutable::now(),
+                ]);
+                DB::connection('pgsql_race')->disconnect();
+
+                // OUR OWN redundant call comes back with NO captions — the
+                // divergent-response worst case.
+                return Http::response([['data' => []]]);
+            },
+        ]);
+
+        $summary = $this->enrich($item);
+
+        // The winner's AVAILABLE row must survive completely intact — not
+        // flipped to unavailable, not nulled out, not double-counted.
+        $this->assertSame('completed:cached', $summary);
+        $this->assertSame(1, ContentTranscript::query()->where('content_item_id', $item->id)->count());
+        $row = ContentTranscript::query()->where('content_item_id', $item->id)->firstOrFail();
+        $this->assertSame(ContentTranscript::STATUS_AVAILABLE, $row->status);
+        $this->assertSame('winner text (pre-select)', $row->text);
+        // Our own (losing, redundant) actor call still happened and must
+        // stay telemetered.
+        $this->assertSame(1, ProviderCall::query()->where('source', SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT)->where('operation', 'transcript.fetch')->count());
+    }
+
     public function test_kill_switch_off_and_non_youtube_targets_skip_cleanly(): void
     {
         Http::fake();

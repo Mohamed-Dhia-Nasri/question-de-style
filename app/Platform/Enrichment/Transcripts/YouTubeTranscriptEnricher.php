@@ -49,14 +49,20 @@ class YouTubeTranscriptEnricher
         // protected by EnrichContentItemJob's ShouldBeUnique (one job per
         // content item at a time); this synchronous EnrichmentService path
         // has no such lock, so two concurrent callers can both pass this
-        // null check and both bill. The firstOrNew()+save() persists below
-        // (RecognitionService::persist()'s own catch-and-recover pattern —
-        // NOT updateOrCreate(), whose built-in createOrFirst() would just
-        // silently overwrite the winner's row with our stale data instead
-        // of reporting it) catch UniqueConstraintViolationException and
-        // recover by reporting the winning row's outcome instead of
-        // crashing — the residual double-bill on this unwired path is
-        // accepted and documented; the crash is not.
+        // null check and both bill. Because control only reaches the
+        // persist step below when THIS check found nothing, any row that
+        // shows up there can only be a concurrent winner — never ours to
+        // overwrite. Two race windows are covered: the firstOrNew() SELECT
+        // finding an existing() row (winner committed before our SELECT)
+        // and, failing that, save() throwing UniqueConstraintViolationException
+        // (winner committed between our SELECT and our INSERT). Both report
+        // the winner's outcome instead of crashing or clobbering it — the
+        // residual double-bill on this unwired path is accepted and
+        // documented; the crash/clobber is not. (firstOrNew()+save(), not
+        // updateOrCreate(): its built-in createOrFirst() would silently
+        // overwrite the winner's row with our stale data instead of
+        // reporting it — RecognitionService::persist() uses this same
+        // catch-and-recover pattern.)
         $existing = ContentTranscript::query()
             ->where('content_item_id', $target->id)
             ->where('provider', SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT)
@@ -106,6 +112,22 @@ class YouTubeTranscriptEnricher
         if ($text === '') {
             // Successful run, no captions: negative-cache it (never re-bill).
             $row = ContentTranscript::query()->firstOrNew($identity);
+
+            if ($row->exists) {
+                // Pre-INSERT race window: a concurrent run's row already
+                // landed between the existing-row check at the top of
+                // enrich() (which found nothing — that's the only way
+                // control reaches this persist step) and THIS firstOrNew()
+                // SELECT. An existing row here can only be a concurrent
+                // winner, so it must never be fill()+save()-overwritten —
+                // that could flip an available row to unavailable and
+                // destroy a good transcript. Our own actor call still
+                // happened, so it stays telemetered.
+                $this->recorder->recordOperation($context, $response, 0);
+
+                return $this->summaryForRow($row);
+            }
+
             $row->fill([
                 'status' => ContentTranscript::STATUS_UNAVAILABLE,
                 'text' => null,
@@ -124,9 +146,10 @@ class YouTubeTranscriptEnricher
 
                 return 'skipped:no-captions';
             } catch (UniqueConstraintViolationException) {
-                // A concurrent run won the race and persisted first. Our
-                // actor call really happened, so it must stay telemetered —
-                // then report the WINNER's row status, not ours.
+                // Post-SELECT race window: a concurrent run won the INSERT
+                // race after our own SELECT found nothing. Our actor call
+                // really happened, so it must stay telemetered — then
+                // report the WINNER's row status, not ours.
                 $this->recorder->recordOperation($context, $response, 0);
 
                 return $this->summaryForConcurrentWinner($identity);
@@ -134,6 +157,14 @@ class YouTubeTranscriptEnricher
         }
 
         $row = ContentTranscript::query()->firstOrNew($identity);
+
+        if ($row->exists) {
+            // Same pre-INSERT race window as above.
+            $this->recorder->recordOperation($context, $response, 1);
+
+            return $this->summaryForRow($row);
+        }
+
         $row->fill([
             'status' => ContentTranscript::STATUS_AVAILABLE,
             'text' => $text,
@@ -170,11 +201,13 @@ class YouTubeTranscriptEnricher
     {
         $winner = ContentTranscript::query()->where($identity)->first();
 
-        if ($winner === null) {
-            return 'skipped:provider-error';
-        }
+        return $winner === null ? 'skipped:provider-error' : $this->summaryForRow($winner);
+    }
 
-        return $winner->status === ContentTranscript::STATUS_AVAILABLE
+    /** Map an already-loaded transcript row to its outcome summary. */
+    private function summaryForRow(ContentTranscript $row): string
+    {
+        return $row->status === ContentTranscript::STATUS_AVAILABLE
             ? 'completed:cached'
             : 'skipped:no-captions';
     }

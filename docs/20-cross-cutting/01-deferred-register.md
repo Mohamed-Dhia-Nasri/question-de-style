@@ -45,6 +45,7 @@ A deferred capability is distinct from a merely unbuilt one. Per the [status lif
 | [DEF-008](#def-008) | GCS-URI whole-video Video Intelligence for over-cap video | [ADR-0028](../05-decisions/decision-log.md#adr-0028) | [DP-005](00-data-principles.md#dp-005) |
 | [DEF-009](#def-009) | Scene-change keyframe sampling (alternative `KeyframeSampler` mode) | [ADR-0028](../05-decisions/decision-log.md#adr-0028) | — |
 | [DEF-010](#def-010) | Keyframe lifecycle state (`extracted` / `pruned` / `unavailable`) | [ADR-0028](../05-decisions/decision-log.md#adr-0028) | — |
+| [DEF-011](#def-011) | Transcript negative-cache expiry / force-refresh | [ADR-0028](../05-decisions/decision-log.md#adr-0028) | — |
 
 ---
 
@@ -165,6 +166,19 @@ A deferred capability is distinct from a merely unbuilt one. Per the [status lif
 - **Linked decision.** [ADR-0028](../05-decisions/decision-log.md#adr-0028) (Status APPROVED).
 - **UI behaviour.** Not user-facing. Internally, tier-C re-embedding logic must not yet assume it can distinguish the two cases; both currently look identical (zero keyframe rows for the owner).
 
+<a id="def-011"></a>
+### DEF-011
+
+**Transcript negative-cache expiry / force-refresh.**
+
+- **What is deferred.** Any mechanism to re-attempt a transcript fetch for a video whose `content_transcripts` row is `unavailable` — an expiry window on the negative cache, or an operator force-refresh command.
+- **Why it is deferred.** [ADR-0028](../05-decisions/decision-log.md#adr-0028)'s billing doctrine is "at most one successful actor run per video, ever"; a refresh path was deliberately excluded from v1.
+- **Evidence this matters (live probe, 2026-07-19).** A live call to `pintostudio~youtube-transcript-scraper` with an UNFETCHABLE video returned HTTP 201 with `[{"data": []}]` — byte-identical to the genuine no-captions response. The actor exposes no signal separating "video has no captions" from "the actor transiently failed to fetch the video", so a transient failure can be permanently negative-cached as `unavailable` for that video.
+- **What v1 does instead.** The `unavailable` row stands until an operator deletes it (the enricher then re-fetches on the next enrichment run). Transport-level errors (non-2xx) are NOT cached and retry normally — only a successful-but-empty response caches.
+- **What would be needed later.** Either a re-fetch-after-N-days rule keyed on `fetched_at` for `unavailable` rows, or a `qds:refresh-transcript {content_item}` operator command — both preserving the one-billed-run norm for the common case.
+- **Linked decision.** [ADR-0028](../05-decisions/decision-log.md#adr-0028) (Status APPROVED).
+- **UI behaviour.** Not user-facing; a YouTube item without a transcript simply shows no SPOKEN_BRAND detections (unavailable-never-empty rule).
+
 ## Dependency map
 
 ```mermaid
@@ -180,6 +194,7 @@ flowchart LR
   ADR0028 --> DEF008["DEF-008\nGCS whole-video VI"]
   ADR0028 --> DEF009["DEF-009\nScene-change sampling"]
   ADR0028 --> DEF010["DEF-010\nKeyframe lifecycle state"]
+  ADR0028 --> DEF011["DEF-011\nTranscript negative-cache expiry"]
 ```
 
 DEF-003 cannot be delivered before DEF-004, because `CONFIRMED` reach can only originate from authorized-creator analytics.

@@ -7,6 +7,7 @@ use App\Modules\Monitoring\Models\Story;
 use App\Platform\Enrichment\Attribution\AttributionService;
 use App\Platform\Enrichment\Emv\EmvCalculator;
 use App\Platform\Enrichment\Hashtags\HashtagEnricher;
+use App\Platform\Enrichment\Media\MediaWorkspaceFactory;
 use App\Platform\Enrichment\Models\EnrichmentRun;
 use App\Platform\Enrichment\Reach\ReachCalculator;
 use App\Platform\Enrichment\Recognition\RecognitionService;
@@ -39,6 +40,7 @@ class EnrichmentPipeline
         private readonly AttributionService $attribution,
         private readonly EmvCalculator $emv,
         private readonly ReachCalculator $reach,
+        private readonly MediaWorkspaceFactory $workspaces,
     ) {}
 
     public function run(ContentItem|Story $target, string $correlationId, int $retryCount = 0): EnrichmentRun
@@ -51,6 +53,7 @@ class EnrichmentPipeline
         ]);
 
         $stages = [];
+        $workspace = $this->workspaces->forTarget($target);
 
         try {
             if ($target instanceof ContentItem) {
@@ -62,7 +65,7 @@ class EnrichmentPipeline
                 $stages['hashtags'] = 'skipped:stories-have-no-caption';
             }
 
-            $recognition = $this->recognition->enrich($target, $correlationId, $retryCount);
+            $recognition = $this->recognition->enrich($target, $correlationId, $retryCount, $workspace);
             $stages['recognition'] = sprintf(
                 '%s:created=%d,updated=%d%s',
                 $recognition['status'],
@@ -135,6 +138,8 @@ class EnrichmentPipeline
             ]);
 
             throw $e;
+        } finally {
+            $workspace->close();
         }
 
         return $run;

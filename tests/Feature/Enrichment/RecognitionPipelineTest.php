@@ -98,6 +98,15 @@ class RecognitionPipelineTest extends TestCase
             {
                 return $this->audioBytes;
             }
+
+            // The recognition service now reads the already-materialized
+            // MediaWorkspace file (Slice B1) instead of raw video bytes —
+            // stub the same fixed result here so existing direct-bytes
+            // callers of extract() keep working too.
+            public function extractFromFile(string $videoPath): ?string
+            {
+                return $this->audioBytes;
+            }
         });
     }
 
@@ -641,5 +650,24 @@ class RecognitionPipelineTest extends TestCase
         $this->assertContains('speech:not-configured', $result['skipped']);
         $this->assertSame(0, ProviderCall::query()->where('source', SourceRegistry::GOOGLE_SPEECH_TO_TEXT)->count());
         Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'speech.googleapis.com'));
+    }
+
+    public function test_video_over_the_inline_cap_skips_whole_video_vi_with_the_distinct_marker(): void
+    {
+        // [seam audit 7b] the file's real helpers: reel() builds the video
+        // ContentItem (media_urls hardcoded to self::MEDIA_URL on the literal-IP
+        // host) and enrich() is the direct RecognitionService call.
+        config([
+            'services.google_video_intelligence.api_key' => 'test-vi-key',
+            'qds.enrichment.recognition.inline_max_bytes' => 10, // force the split
+        ]);
+        Http::fake([
+            '93.184.216.34/*' => Http::response(str_repeat('V', 100), 200, ['Content-Type' => 'video/mp4']),
+        ]);
+
+        $result = $this->enrich($this->reel());
+
+        $this->assertContains('recognition:whole-video-skipped-too-large', $result['skipped']);
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'videointelligence'));
     }
 }

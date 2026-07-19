@@ -26,4 +26,6 @@ enum AlertType: string
     case MetricAnomaly = 'METRIC_ANOMALY';
     /** A monitored account's snapshot time series has stopped growing. */
     case SnapshotGap = 'SNAPSHOT_GAP';
+    /** An AI capability crossed a configured budget threshold (spec §10): warning below 100 %, critical at 100 %. */
+    case AiBudgetThreshold = 'AI_BUDGET_THRESHOLD';
 }

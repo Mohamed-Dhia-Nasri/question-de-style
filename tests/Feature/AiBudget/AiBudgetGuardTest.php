@@ -271,4 +271,53 @@ class AiBudgetGuardTest extends TestCase
 
         CarbonImmutable::setTestNow();
     }
+
+    public function test_record_increments_one_row_atomically_and_prices_units(): void
+    {
+        $this->configureBudget();
+        $guard = app(AiBudgetGuard::class);
+        $tenantId = $this->defaultTenant->id;
+
+        $guard->record('embedding', $tenantId, 8, postsProcessed: 1);
+        $guard->record('embedding', $tenantId, 4, postsProcessed: 1, postsSkippedBudget: 2, postsSkippedNoCandidates: 3);
+
+        // ONE row per (capability, tenant, day) — the second call incremented, never duplicated.
+        $this->assertSame(1, AiUsageCounter::query()->count());
+
+        $row = AiUsageCounter::query()->firstOrFail();
+        $this->assertSame(12, $row->units);
+        $this->assertSame(12 * 120, $row->estimated_cost_micro_usd); // units × price_micro_usd_per_unit
+        $this->assertSame(2, $row->posts_processed);
+        $this->assertSame(2, $row->posts_skipped_budget);
+        $this->assertSame(3, $row->posts_skipped_no_candidates);
+        $this->assertSame($tenantId, $row->tenant_id);
+        $this->assertSame(CarbonImmutable::now()->toDateString(), $row->usage_date->toDateString());
+    }
+
+    public function test_threshold_crossings_raise_deduplicated_tenant_attributed_alerts(): void
+    {
+        $this->configureBudget(); // tenant daily 100 is the only dimension in alert reach
+        $guard = app(AiBudgetGuard::class);
+        $tenantId = $this->defaultTenant->id;
+
+        $guard->record('embedding', $tenantId, 85); // crosses 50 and 80
+
+        $alerts = IngestionAlert::query()->where('alert_type', AlertType::AiBudgetThreshold->value)->get();
+        $this->assertCount(2, $alerts);
+        $this->assertTrue($alerts->every(fn (IngestionAlert $alert): bool => $alert->tenant_id === $tenantId));
+        $this->assertTrue($alerts->every(fn (IngestionAlert $alert): bool => $alert->severity === 'warning'));
+
+        $guard->record('embedding', $tenantId, 15); // 100 of 100 — crosses 95 and 100
+
+        $alerts = IngestionAlert::query()->where('alert_type', AlertType::AiBudgetThreshold->value)->get();
+        $this->assertCount(4, $alerts);
+        $this->assertSame(1, $alerts->where('severity', 'critical')->count()); // only the 100 % crossing
+        $this->assertNotNull($alerts->firstWhere(
+            'source', 'embedding:tenant-daily:100:'.CarbonImmutable::now()->toDateString(),
+        ));
+
+        // Spend past 100 % crosses nothing new → no alert spam.
+        $guard->record('embedding', $tenantId, 5);
+        $this->assertSame(4, IngestionAlert::query()->where('alert_type', AlertType::AiBudgetThreshold->value)->count());
+    }
 }

@@ -152,6 +152,12 @@ class ContentItem extends Model
         return $this->hasMany(EnrichmentRun::class);
     }
 
+    /** @return HasMany<ContentTranscript, $this> */
+    public function transcripts(): HasMany
+    {
+        return $this->hasMany(ContentTranscript::class);
+    }
+
     /** @return MorphMany<Keyframe, $this> */
     public function keyframes(): MorphMany
     {

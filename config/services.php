@@ -129,6 +129,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Google multimodal embeddings (SRC-google-gemini-embeddings — ADR-0029)
+    |--------------------------------------------------------------------------
+    | Sub-project C visual product matching. Model-based naming (survives
+    | Google platform-brand churn). Bearer-token auth ONLY — API keys cannot
+    | call :embedContent (verified 2026-07-19); credentials come ONLY from
+    | environment-managed secrets. The eu multi-region endpoint is the only
+    | EU location serving gemini-embedding-2 (residency: ML processing stays
+    | within EU member states); the global endpoint has NO guarantee.
+    */
+    'google_embeddings' => [
+        'credentials_path' => env('GOOGLE_EMBEDDINGS_CREDENTIALS'),   // service-account JSON key file
+        'project_id' => env('GOOGLE_EMBEDDINGS_PROJECT'),
+        'location' => env('GOOGLE_EMBEDDINGS_LOCATION', 'eu'), // EU multi-region — the only EU location serving this model (§5)
+        'base_url' => env('GOOGLE_EMBEDDINGS_BASE_URL'),              // default derived from location
+        'timeout' => (int) env('GOOGLE_EMBEDDINGS_TIMEOUT_SECONDS', 30),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Stripe (ADR-0021 — SaaS billing processor, NOT a data provider)
     |--------------------------------------------------------------------------
     | Outside the frozen SRC-* data-provider set (ADR-0001): Stripe processes

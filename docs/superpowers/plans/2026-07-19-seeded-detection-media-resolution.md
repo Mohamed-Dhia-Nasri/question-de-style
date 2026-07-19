@@ -61,6 +61,8 @@ Run the focused test after each step, the file's suite after each task, and the 
 11. **`MonitoringSetting`** — required fields on create (is `updated_by` nullable?) for Task 15's test.
 12. **Enum case names** — `ContentType::{ImagePost, Carousel, Reel, Short, Video}`, `Platform::{Instagram, TikTok, YouTube}`, `RecognitionType::SpokenBrand`: confirm exact case names used throughout the plan.
 13. **Oversized-media marker assertions** — `grep -rn "fetch-failed\|too-large" tests/`: which existing tests assert the old markers (Task 7 changes some to the new split markers).
+14. **Database conventions** — id strategy (bigint vs UUID) on the monitoring tables; the existing unique/partial-index conventions (e.g. the partial unique index behind `recognition_detections`' upsert) and any polymorphic-index precedent — confirm the planned plain `unique (owner_type, owner_id, ordinal)` on `keyframes` matches them (Task 8's migration).
+15. **Media disk + scheduling conventions** — the `media` disk's actual name/visibility in `config/filesystems.php` and the `qds.ingestion.media_disk` default; the retention-command convention (registration in `PlatformServiceProvider::boot()`'s `$this->commands([...])` + a `routes/console.php` daily schedule block) that Task 15 mirrors.
 
 - [ ] **Step 2: Write the deviation report** to `docs/superpowers/plans/2026-07-19-seam-audit.md`: one section per seam, `OK`/`DEVIATION` verdict, the actual signature, and — for each DEVIATION — the concrete amendment to the affected task(s).
 
@@ -198,7 +200,7 @@ git commit -m "feat(enrichment): add keyframe/transcript config + SRC-apify-yout
 
 **Interfaces:**
 - Consumes: `Extract::string(array, ...keys): ?string`.
-- Produces: TikTok `ContentData::mediaUrls` = `[<real CDN download URL>]` (falls back to `webVideoUrl` when the actor omits it); `permalink` unchanged (`webVideoUrl`).
+- Produces: TikTok `ContentData::mediaUrls` = `[<real CDN download URL>]`, or `[]` when the actor supplies none — **the watch page is NEVER a media candidate** (an empty list surfaces downstream as the existing `media:none` marker instead of a wasted fetch of HTML). `permalink` unchanged (`webVideoUrl`).
 
 - [ ] **Step 1: Update the fixture**
 
@@ -214,27 +216,51 @@ To item 2 (id `7301234567890123457`) change `"videoMeta": {"duration": 184}` to:
     "videoMeta": {"duration": 184, "downloadAddr": "https://cdn.tiktok.example/download/7301234567890123457.mp4"},
 ```
 
-Item 3 (the broken marker item) stays unchanged.
+Add a THIRD valid item (before the broken marker item) carrying NO download field — the no-source case:
+
+```json
+  {
+    "id": "7301234567890123458",
+    "text": "Clip ohne Download-URL",
+    "webVideoUrl": "https://www.tiktok.com/@styleicon/video/7301234567890123458",
+    "createTimeISO": "2026-07-03T09:00:00.000Z",
+    "playCount": 1000,
+    "videoMeta": {"duration": 20},
+    "authorMeta": {"name": "styleicon", "signature": "Mode & Lifestyle", "fans": 480000}
+  },
+```
+
+The broken marker item stays unchanged (it is now item 4).
 
 - [ ] **Step 2: Write the failing test**
 
 Add to `tests/Feature/Ingestion/ProviderNormalizationTest.php` (match the file's existing setup helpers for running the TikTok adapter over the fixture):
 
 ```php
-    public function test_tiktok_media_urls_carry_the_real_download_url_not_the_watch_page(): void
+    public function test_tiktok_media_urls_carry_the_real_download_url_never_the_watch_page(): void
     {
         $this->fakeProviderCredentials();
         $this->fakeApifyActor((string) config('services.apify.actors.tiktok'), $this->fixture('tiktok-items'));
 
         $batch = app(\App\Platform\Ingestion\Providers\TikTok\TikTokContentAdapter::class)->fetchContent('styleicon');
-        $items = array_values(array_filter($batch->items, fn ($i) => $i instanceof \App\Platform\Ingestion\DTO\ContentData));
+        // Key by externalId — never by array position (fixture ordering and
+        // rejected-item behaviour must not break unrelated assertions).
+        $items = collect($batch->items)
+            ->filter(fn ($i) => $i instanceof \App\Platform\Ingestion\DTO\ContentData)
+            ->keyBy(fn (\App\Platform\Ingestion\DTO\ContentData $i) => $i->externalId);
 
-        // Item 1: the actor's mediaUrls list wins.
-        $this->assertSame(['https://cdn.tiktok.example/video/7301234567890123456.mp4'], $items[0]->mediaUrls);
-        $this->assertSame('https://www.tiktok.com/@styleicon/video/7301234567890123456', $items[0]->permalink);
+        // The actor's mediaUrls list wins.
+        $this->assertSame(['https://cdn.tiktok.example/video/7301234567890123456.mp4'], $items['7301234567890123456']->mediaUrls);
+        $this->assertSame('https://www.tiktok.com/@styleicon/video/7301234567890123456', $items['7301234567890123456']->permalink);
 
-        // Item 2: videoMeta.downloadAddr is the fallback.
-        $this->assertSame(['https://cdn.tiktok.example/download/7301234567890123457.mp4'], $items[1]->mediaUrls);
+        // videoMeta.downloadAddr is the secondary source.
+        $this->assertSame(['https://cdn.tiktok.example/download/7301234567890123457.mp4'], $items['7301234567890123457']->mediaUrls);
+
+        // No download URL from the actor → NO media candidate (the watch
+        // page is never media; downstream reports media:none). The page URL
+        // survives as the permalink only.
+        $this->assertSame([], $items['7301234567890123458']->mediaUrls);
+        $this->assertSame('https://www.tiktok.com/@styleicon/video/7301234567890123458', $items['7301234567890123458']->permalink);
     }
 ```
 
@@ -249,7 +275,7 @@ In `TikTokContentAdapter.php`, change the `mediaUrls:` argument to:
 
 ```php
                 mediaUrls: array_values(array_filter([
-                    $this->downloadUrl($item) ?? Extract::string($item, 'webVideoUrl'),
+                    $this->downloadUrl($item),
                 ])),
 ```
 
@@ -258,9 +284,9 @@ and add this private method after `captureProfile()`:
 ```php
     /**
      * The actor's direct CDN media URL — the REAL video file (sub-project B).
-     * Falls back to null when absent; the caller then keeps webVideoUrl so
-     * media_urls never goes empty (downstream degrades to media:fetch-failed
-     * exactly as before, never silently).
+     * Null when the actor supplies none: media_urls then stays EMPTY — the
+     * watch page is NEVER a media candidate (downstream reports the existing
+     * media:none marker instead of wasting a fetch on HTML).
      *
      * @param  array<array-key, mixed>  $item
      */
@@ -281,7 +307,7 @@ and add this private method after `captureProfile()`:
 - [ ] **Step 5: Run the full ingestion test file; fix stale assertions**
 
 Run: `XDEBUG_MODE=off vendor/bin/phpunit tests/Feature/Ingestion/ProviderNormalizationTest.php`
-Expected: the new test PASSES. If any pre-existing assertion expects TikTok `media_urls` to equal the watch URL (grep the file for `webVideoUrl`), update it to the new fixture CDN URL — `permalink` assertions stay on the watch URL.
+Expected: the new test PASSES. If any pre-existing assertion expects TikTok `media_urls` to equal the watch URL (grep the file for `webVideoUrl`), update it: items with a download URL now carry the CDN URL; items without one carry an EMPTY list. The new third fixture item may also shift item-count assertions — update those. `permalink` assertions stay on the watch URL.
 
 - [ ] **Step 6: Commit**
 
@@ -301,17 +327,17 @@ git commit -m "feat(ingestion): TikTok media_urls carry the actor's real downloa
 
 **Interfaces:**
 - Consumes: `Extract::string`.
-- Produces: YouTube `ContentData::mediaUrls` = `[<best thumbnail URL>]` (maxres → standard → high → medium → default; `[]` when none), `permalink` = the watch URL. NOTE for later tasks: the row stays `content_type = VIDEO/SHORT` while `media_urls` holds an IMAGE — Task 5's content-type routing is what makes that safe.
+- Produces: YouTube `ContentData::mediaUrls` = `[<best DECLARED thumbnail candidate>]` (maxres → standard → high → medium → default; `[]` when none), `permalink` = the watch URL. The adapter guarantees NOTHING about the payload behind that URL — `MediaWorkspace` verifies the downloaded MIME type (Task 5), which is also what makes the `content_type = VIDEO/SHORT` + image-URL combination safe.
 
 - [ ] **Step 1: Update the fixture**
 
-In `tests/Fixtures/providers/youtube-videos.json`: to item 1 (`vid00000001`) extend `snippet` with:
+In `tests/Fixtures/providers/youtube-videos.json`: REPLACE item 1's (`vid00000001`) entire `snippet` object with the following — do NOT add a second `snippet` key (duplicate JSON keys silently mask data depending on the parser):
 
 ```json
       "snippet": {"title": "Lookbook Sommer 2026", "publishedAt": "2026-06-28T14:00:00Z", "thumbnails": {"maxres": {"url": "https://i.ytimg.example/vi/vid00000001/maxresdefault.jpg"}, "high": {"url": "https://i.ytimg.example/vi/vid00000001/hqdefault.jpg"}}},
 ```
 
-To item 2 (`vid00000002`) extend `snippet` with only a `high` thumbnail:
+Likewise REPLACE item 2's (`vid00000002`) entire `snippet` object (only a `high` thumbnail — exercises the fallback ladder):
 
 ```json
       "snippet": {"title": "Quick Tipp #shorts", "publishedAt": "2026-07-01T08:00:00Z", "thumbnails": {"high": {"url": "https://i.ytimg.example/vi/vid00000002/hqdefault.jpg"}}},
@@ -328,12 +354,15 @@ Add to `ProviderNormalizationTest.php`:
         $this->fakeYouTubeApi();
 
         $batch = app(\App\Platform\Ingestion\Providers\YouTube\YouTubeContentAdapter::class)->fetchContent('stylechannel');
-        $items = array_values(array_filter($batch->items, fn ($i) => $i instanceof \App\Platform\Ingestion\DTO\ContentData));
+        // Key by externalId — never by array position.
+        $items = collect($batch->items)
+            ->filter(fn ($i) => $i instanceof \App\Platform\Ingestion\DTO\ContentData)
+            ->keyBy(fn (\App\Platform\Ingestion\DTO\ContentData $i) => $i->externalId);
 
-        $this->assertSame(['https://i.ytimg.example/vi/vid00000001/maxresdefault.jpg'], $items[0]->mediaUrls);
-        $this->assertSame('https://www.youtube.com/watch?v=vid00000001', $items[0]->permalink);
-        // Item 2 has no maxres → the ladder falls back to high.
-        $this->assertSame(['https://i.ytimg.example/vi/vid00000002/hqdefault.jpg'], $items[1]->mediaUrls);
+        $this->assertSame(['https://i.ytimg.example/vi/vid00000001/maxresdefault.jpg'], $items['vid00000001']->mediaUrls);
+        $this->assertSame('https://www.youtube.com/watch?v=vid00000001', $items['vid00000001']->permalink);
+        // vid00000002 has no maxres → the ladder falls back to high.
+        $this->assertSame(['https://i.ytimg.example/vi/vid00000002/hqdefault.jpg'], $items['vid00000002']->mediaUrls);
     }
 ```
 

@@ -97,7 +97,7 @@ final class VisualProductMatcher
             // Nothing scorable (no embedded reference photos, or no frame
             // survived preparation): zero spend, but the run IS recorded —
             // the coverage accounting is exactly what D and reviewers need.
-            return $this->complete($target, $correlationId, $candidates, $prep, [], $modelVersion, 0, 0, $startedAt, $tenantId, spend: false);
+            return $this->complete($target, $correlationId, $candidates, $prep, [], $modelVersion, 0, 0, $startedAt, $tenantId, spend: false, scoredFrames: count($prep->frames));
         }
 
         // Paid path from here: consult the breaker BEFORE spending —
@@ -145,13 +145,13 @@ final class VisualProductMatcher
 
         $results = $this->bands->map($this->scorer->score($scorable, $matchable, $modelVersion), $prep);
 
-        return $this->complete($target, $correlationId, $candidates, $prep, $results, $modelVersion, $embedding['billedCalls'], $embedding['cacheHits'], $startedAt, $tenantId, spend: true);
+        return $this->complete($target, $correlationId, $candidates, $prep, $results, $modelVersion, $embedding['billedCalls'], $embedding['cacheHits'], $startedAt, $tenantId, spend: true, scoredFrames: count($scorable));
     }
 
     /** @param list<BandResult> $results */
     private function complete(ContentItem|Story $target, string $correlationId, CandidateSet $candidates,
         FramePreparationResult $prep, array $results, string $modelVersion,
-        int $billedCalls, int $cacheHits, float $startedAt, int $tenantId, bool $spend): string
+        int $billedCalls, int $cacheHits, float $startedAt, int $tenantId, bool $spend, int $scoredFrames): string
     {
         if (! $spend) {
             $this->budget->record(self::CAPABILITY, $tenantId, 0, postsProcessed: 1);
@@ -174,6 +174,18 @@ final class VisualProductMatcher
         }
 
         $outcome = $this->bands->runOutcome($results, $prep, $candidates);
+
+        // Unavailable ≠ false (spec §8/§11). BandMapper::runOutcome's
+        // signature is frozen (the eval command consumes it), so this seam
+        // catches what its prep-time coverage counters (skippedFormat/
+        // skippedQuality) cannot see: embed-time failures. A transient
+        // failure on SOME prepared frames still lets the rest score clean,
+        // so runOutcome sees no banding and would report a clean NO_MATCH —
+        // but we did not actually look at every frame. Downgrade to
+        // INCONCLUSIVE instead of masquerading as "looked and did not see it".
+        if ($outcome === VisualMatchOutcome::NoMatch && $scoredFrames < count($prep->frames)) {
+            $outcome = VisualMatchOutcome::Inconclusive;
+        }
 
         $this->recorder->record($target, $correlationId, $candidates, $prep, $results, $outcome,
             $modelVersion, $billedCalls, $cacheHits, $this->elapsedMs($startedAt), $this->needsVerification($results, $candidates));

@@ -117,6 +117,29 @@ class VisualProductMatcherTest extends TestCase
         return $product;
     }
 
+    /** Product with one embedded reference photo, reachable ONLY via an ACTIVE roster (no shipment at all). */
+    private function rosterOnlyProduct(Creator $creator, array $photoVector): Product
+    {
+        $brand = Brand::factory()->create(['name' => 'Glossier']);
+        $product = Product::factory()->create(['brand_id' => $brand->id, 'name' => 'Roster Perfume', 'category' => SectorLabel::Tech]);
+        $campaign = SeedingCampaign::factory()->create([
+            'brand_id' => $brand->id,
+            'campaign_id' => Campaign::factory()->create(['brand_id' => $brand->id])->id,
+            'product_id' => $product->id,
+            'status' => SeedingCampaignStatus::Active,
+        ]);
+        $campaign->creators()->attach($creator->id);
+
+        $photo = ProductReferencePhoto::factory()->create(['product_id' => $product->id]);
+        ProductPhotoEmbedding::factory()->create([
+            'product_reference_photo_id' => $photo->id,
+            'model_version' => 'gemini-embedding-2',
+            'embedding' => VectorLiteral::fromArray(array_pad($photoVector, 3072, 0.0)),
+        ]);
+
+        return $product;
+    }
+
     /** Stores frame bytes on the media disk, registers the fake vector, returns the row. */
     private function storeFrame(ContentItem $content, int $ordinal, ?int $timestampMs, array $vector, string $extension = 'jpg'): Keyframe
     {
@@ -335,6 +358,73 @@ class VisualProductMatcherTest extends TestCase
         $this->assertDatabaseHas('visual_match_candidates', ['band' => 'reject', 'rejection_reason' => 'below-review-threshold']);
     }
 
+    /**
+     * Whole-branch review Fix 1: a transient embed failure on SOME (not
+     * all) prepared frames must not masquerade as a clean NO_MATCH — the
+     * prep-time coverage counters (skippedFormat/skippedQuality) see
+     * nothing wrong here, so without the matcher-level adjustment this
+     * would read as "we looked properly and did not see it". Roster-only
+     * candidate (no shipment at all) keeps needs_verification false per
+     * spec §11 — INCONCLUSIVE alone does not escalate.
+     */
+    public function test_partial_embed_failure_with_no_shipment_is_inconclusive_not_no_match(): void
+    {
+        [$content, $creator] = $this->wiredContent();
+        $this->rosterOnlyProduct($creator, [1.0]); // reference photo hot at index 0
+        $this->storeFrame($content, 0, 1000, [0.0, 1.0]); // orthogonal: would reject, not band
+        $this->storeFrame($content, 1, 2000, [0.0, 1.0]);
+        $failing = $this->storeFrame($content, 2, 3000, [0.0, 1.0]);
+        $this->provider->failFor[$failing->checksum] = true;
+
+        $marker = app(VisualProductMatcher::class)->enrich($content, 'corr-vm-1');
+
+        $this->assertSame('completed:inconclusive', $marker);
+        $this->assertSame(2, $this->provider->calls); // 1 of 3 frames never embedded
+        $this->assertSame(0, RecognitionDetection::query()->count());
+        $this->assertDatabaseHas('visual_match_runs', [
+            'outcome' => 'inconclusive',
+            'frames_available' => 3,
+            'frames_processed' => 2, // 1 of 3 never embedded — the partial-failure signature
+            'needs_verification' => false,
+        ]);
+    }
+
+    /** Same partial embed failure, but the candidate is reachable via an in-window shipment: D must be told to look. */
+    public function test_partial_embed_failure_with_in_window_shipment_flags_verification(): void
+    {
+        [$content, $creator] = $this->wiredContent();
+        $this->shippedProduct($creator, [1.0]);
+        $this->storeFrame($content, 0, 1000, [0.0, 1.0]);
+        $this->storeFrame($content, 1, 2000, [0.0, 1.0]);
+        $failing = $this->storeFrame($content, 2, 3000, [0.0, 1.0]);
+        $this->provider->failFor[$failing->checksum] = true;
+
+        $marker = app(VisualProductMatcher::class)->enrich($content, 'corr-vm-1');
+
+        $this->assertSame('completed:inconclusive', $marker);
+        $this->assertSame(2, $this->provider->calls);
+        $this->assertDatabaseHas('visual_match_runs', [
+            'outcome' => 'inconclusive',
+            'needs_verification' => true,
+        ]);
+    }
+
+    /** Regression: zero embed failures + nothing banding stays a clean NO_MATCH (full coverage, multi-frame). */
+    public function test_full_embed_coverage_with_nothing_banding_stays_no_match(): void
+    {
+        [$content, $creator] = $this->wiredContent();
+        $this->shippedProduct($creator, [1.0]);
+        $this->storeFrame($content, 0, 1000, [0.0, 1.0]);
+        $this->storeFrame($content, 1, 2000, [0.0, 1.0]);
+        $this->storeFrame($content, 2, 3000, [0.0, 1.0]);
+
+        $marker = app(VisualProductMatcher::class)->enrich($content, 'corr-vm-1');
+
+        $this->assertSame('completed:no-match', $marker);
+        $this->assertSame(3, $this->provider->calls); // no transient failure this time
+        $this->assertDatabaseHas('visual_match_runs', ['outcome' => 'no_match']);
+    }
+
     public function test_exhausted_global_hard_budget_skips_before_any_call(): void
     {
         config(['qds.ai_budget.capabilities.embedding.global_daily_hard_units' => 0]);
@@ -432,17 +522,22 @@ final class VisualProductMatcherFakeProvider implements EmbeddingProvider
 
     public bool $failAll = false;
 
+    /** @var array<string, true> sha256(bytes) => fail this one call only (transient, per-frame) */
+    public array $failFor = [];
+
     public int $calls = 0;
 
     public function embedImage(string $bytes, string $mimeType): array
     {
-        if ($this->failAll) {
+        $hash = hash('sha256', $bytes);
+
+        if ($this->failAll || isset($this->failFor[$hash])) {
             throw new ProviderCallException(SourceRegistry::GOOGLE_GEMINI_EMBEDDINGS, ErrorCategory::UpstreamError, 'upstream boom', 500);
         }
 
         $this->calls++;
 
-        return $this->vectors[hash('sha256', $bytes)] ?? array_pad([1.0], 3072, 0.0);
+        return $this->vectors[$hash] ?? array_pad([1.0], 3072, 0.0);
     }
 
     public function modelVersion(): string

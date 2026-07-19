@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /**
  * ENT-Story — ephemeral story content archived before platform expiry
@@ -96,5 +97,11 @@ class Story extends Model
     public function enrichmentRuns(): HasMany
     {
         return $this->hasMany(EnrichmentRun::class);
+    }
+
+    /** @return MorphMany<Keyframe, $this> */
+    public function keyframes(): MorphMany
+    {
+        return $this->morphMany(Keyframe::class, 'owner');
     }
 }

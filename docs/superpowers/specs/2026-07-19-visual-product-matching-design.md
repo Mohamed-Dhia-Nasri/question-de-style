@@ -24,8 +24,16 @@ tenant's plausible catalog — not open-ended object recognition (that is sub-pr
 - The Gemini verifier for ambiguous/high-value cases = sub-project D. C emits candidates and an
   escalation flag; C never calls Gemini.
 - Multi-signal fusion and confidence calibration = sub-project E. C contributes its own signal and
-  explicitly-placeholder thresholds; it does not build the fusion engine.
+  explicitly-placeholder thresholds; it does not build the fusion engine. **C's confidence is
+  visual-only by design**: similarity, runner-up margin, and cross-frame support — never caption,
+  speech, shipment timing, or Gemini agreement.
 - Full-catalog matching, open-set recognition, cropped-region embeddings (v2, §17).
+- **Frame extraction stays B's.** C consumes the stored `KeyframeSet` through
+  `KeyframeRepository` only — it never touches the `keyframes` table, ffmpeg, or media
+  acquisition. Adaptive extraction, scene-change sampling, and denser re-extraction are B-contract
+  follow-ups (§16), never C-side shortcuts. (B's sampling is already duration-adaptive — 3 frames
+  for a short Reel up to 12 for a long video — so C's coverage scales with duration for free;
+  coverage beyond 12 frames for long videos is B's `max_frames` knob.)
 
 **Locked decisions inherited (not re-litigated).** Augment, don't replace; Google multimodal
 embeddings + pgvector on Neon; EU data residency; tiered; per-tenant isolation (ADR-0019/0020);
@@ -109,7 +117,9 @@ EnrichmentPipeline (per post, inside EnrichContentItemJob/EnrichStoryJob, queue 
                                                         ▼
    CandidateScope ──────────── products from in-window shipments + ACTIVE/SHIPPING roster
                                                         ▼
-   KeyframeEmbedder ────────── embed stored frames (cached per keyframe + model_version)
+   FramePreparation ────────── local + free: format check, quality filter, near-dup removal
+                                                        ▼
+   KeyframeEmbedder ────────── embed surviving frames (cached per keyframe + model_version)
                                                         ▼
    FrameProductScorer ──────── exact cosine scan in pgvector over candidate photo embeddings
                                                         ▼
@@ -125,10 +135,13 @@ EnrichmentPipeline (per post, inside EnrichContentItemJob/EnrichStoryJob, queue 
 
 | Component | Responsibility |
 |---|---|
-| `VertexEmbeddingClient` | HTTP client for the Vertex AI multimodal embedding model (§5) |
+| `EmbeddingProvider` (interface) | `embedImage(bytes): array`, `modelVersion()`, `isConfigured()` — the provider seam; container-bound so C is never coupled to Google (§5) |
+| `VertexMultimodalEmbeddingProvider` | First implementation: HTTP client for the Vertex AI multimodal embedding model (§5) |
 | `GoogleServiceAccountTokenProvider` | Signs/caches OAuth tokens from a service-account key (§5) |
 | `ReferencePhotoEmbedder` + `EmbedProductPhotoJob` | Embed reference photos on upload / backfill (§6) |
-| `KeyframeEmbedder` | Embed keyframes on first need, cache per `(keyframe, model_version)` |
+| `FrameQualityFilter` | Local, free: drop undecodable / extreme-dark / overexposed / flat frames before spending (§8) |
+| `FrameDeduplicator` | Local, free: perceptual-hash near-duplicate grouping; one representative embedded per group (§8) |
+| `KeyframeEmbedder` | Embed surviving keyframes on first need, cache per `(keyframe, model_version)` |
 | `CandidateScope` | Resolve candidate products + their priority tier for a post (§7) |
 | `FrameProductScorer` | One SQL exact-scan producing per-frame best similarity per candidate |
 | `BandMapper` | Pure function: scores + category thresholds + margin → band (§8) |
@@ -189,10 +202,13 @@ deletes and the daily `qds:prune-keyframes` retention prune.
 | correlation_id | varchar(64) | ties to enrichment run / provider calls |
 | model_version | varchar(64) | |
 | priority | varchar(10) | CHECK IN (high, medium) — low never produces a run (§10) |
-| frames_available / frames_processed / frames_skipped_format | smallint | coverage accounting |
+| frames_available / frames_processed | smallint | stored vs actually embedded |
+| frames_skipped_format / frames_skipped_quality / frames_deduped | smallint | coverage accounting: unsupported format, failed quality filter, near-duplicates represented by another frame |
+| cache_hits | smallint | embeddings served from `keyframe_embeddings` (billed calls = embedding_calls) |
+| processing_ms | int | wall-clock for the stage (observability) |
 | candidates_checked | smallint | |
 | best_score | numeric(5,4) nullable | best similarity across all candidates |
-| outcome | varchar(30) | CHECK IN (matched, review, no_match, inconclusive, skipped_budget, skipped_read_only, skipped_provider) |
+| outcome | varchar(30) | CHECK IN (matched, review, no_match, inconclusive, skipped_budget, skipped_read_only, skipped_provider) — `no_match` vs `inconclusive` split defined in §8 |
 | rejection_reason | varchar(100) nullable | e.g. `below-review-threshold`, `margin-ambiguous` |
 | thresholds | jsonb | snapshot `{category_map_used, auto, review, margin}` per candidate category |
 | embedding_calls | smallint | billed calls this run (cache hits excluded) |
@@ -208,9 +224,13 @@ is kept for calibration (E) and debugging. Erased with the creator (§13).
 **nullOnDelete** (+composite FK), product_label varchar(255) (denormalized — audit survives
 catalog edits), category varchar(50) nullable, rank smallint, best_similarity numeric(5,4),
 margin_to_runner_up numeric(5,4) nullable, supporting_frames jsonb (list of {ordinal,
-timestamp_ms, similarity, photo_id}), band varchar(15) CHECK IN (auto, review, reject),
-rejection_reason varchar(100) nullable, source varchar(20) CHECK IN (shipment, roster),
-shipment_in_window boolean, created_at`.
+timestamp_ms, similarity, photo_id, represented_frames}), band varchar(15) CHECK IN (auto,
+review, reject), rejection_reason varchar(100) nullable, created_at`
+— plus **candidate-source evidence** (why was this product considered): `source varchar(20)
+CHECK IN (shipment, roster), shipment_in_window boolean, seeding_campaign_id FK nullOnDelete,
+shipment_anchor_at timestamp nullable, shipment_age_days smallint nullable (anchor → post
+published_at)` — and **visibility evidence**: `first_support_ms / last_support_ms int nullable,
+estimated_visible_ms int nullable` (§8; null when frames carry no timestamps).
 
 ### 4.6 Budget tables (platform-level, §10)
 - **`ai_usage_counters`**: `id, capability varchar(40), tenant_id FK, usage_date date, units int,
@@ -244,6 +264,14 @@ via the FKs suffices.
 ---
 
 ## 5. The embedding provider
+
+**Abstraction first.** C depends on an **`EmbeddingProvider` interface**
+(`embedImage(string $bytes): array` returning the vector, `modelVersion(): string`,
+`isConfigured(): bool`), container-bound. `VertexMultimodalEmbeddingProvider` is the first and
+only v1 implementation; a future provider (or the v2 crop variant) is a new binding plus a new
+`model_version`, with zero changes to the matcher, embedders, or persistence. YAGNI applies: no
+provider-selection config knob until a second implementation exists — the container binding is
+the seam.
 
 **Model.** Vertex AI `multimodalembedding@001`, image input, full **1408 dimensions**, cosine
 similarity. `model_version` config string is stamped on every embedding row; changing it is a
@@ -345,8 +373,21 @@ meaning).
 
 ## 8. Matching algorithm and confidence bands (approved Q4/Q5)
 
-**Scoring.** Embed all stored frames up to `frame_budget` (default 12 = everything B stores; the
-knob is purely a cost guard), skipping unsupported formats. Frame embeddings are cached
+**Frame preparation (local, free, before any spend).** From the stored `KeyframeSet`, in order:
+1. **Format check** — only `jpg`/`jpeg`/`png` proceed (§5); others → `frames_skipped_format`.
+2. **Quality filter** (`FrameQualityFilter`, config-gated, conservative defaults) — drop frames
+   that cannot produce a reliable match: undecodable bytes, extreme darkness or overexposure
+   (mean luminance outside bounds on a downsampled grayscale copy), or near-zero luminance
+   variance (flat/blank/heavily blurred proxy). Dropped → `frames_skipped_quality`. Defaults are
+   deliberately loose — this filter exists to skip garbage, not to judge photography.
+3. **Near-duplicate removal** (`FrameDeduplicator`) — 64-bit difference-hash on the downsampled
+   grayscale copy; frames within `hamming_threshold` (default 6) of an earlier frame join its
+   group; only the earliest **representative** is embedded (`frames_deduped` counts the rest).
+   A representative carries `represented_frames` (its group size) and the group's timestamp span
+   — dedup reduces cost, never evidence (see support counting below).
+
+**Scoring.** Embed the surviving frames up to `frame_budget` (default 12 = everything B stores;
+the knob is purely a cost guard). Frame embeddings are cached
 (`keyframe_embeddings`), so retries, multi-candidate scoring, and later re-runs are free. One SQL
 exact scan computes, per candidate product, per frame, the **best cosine similarity across that
 product's reference photos**: `1 - (ke.embedding <=> pe.embedding)` maxed per (frame, product),
@@ -360,7 +401,17 @@ outcome; ties between products break on lower `product_id`.
 | **AUTO** | ≥ 2 distinct frames with similarity ≥ `T_auto` **and** the top candidate beats the runner-up's best similarity by ≥ `margin` | `VISUAL_PRODUCT` at **HIGH** |
 | **REVIEW** | exactly 1 frame ≥ `T_auto`, **or** ≥ 1 frame in `[T_review, T_auto)`, **or** AUTO support but margin ambiguous | `VISUAL_PRODUCT` at **LOW** (queues for humans) |
 | **REJECT** | best similarity < `T_review` | none — scores + reason live in `visual_match_candidates` only |
-| **INCONCLUSIVE** (run-level) | no candidate reached a band **and** ≥ 1 candidate had `shipment_in_window` | none — run outcome `inconclusive`, `needs_verification = true` (§11) |
+| **NO_MATCH** (run-level) | no candidate reached a band and coverage was **clean**: every available frame was processed (no format/quality skips, `frames_processed > 0`) | none — run outcome `no_match`: "we looked properly and did not see it" |
+| **INCONCLUSIVE** (run-level) | no candidate reached a band and coverage **may be insufficient**: any `frames_skipped_format`/`frames_skipped_quality` > 0, or zero frames survived preparation | none — run outcome `inconclusive`: "we could not look properly" (unavailable ≠ false) |
+
+**Support counting (dedup-aware).** "Distinct frames" for the AUTO rule means distinct
+**timestamps**, counting represented frames: a video-frame dedup group contributes its full
+`represented_frames` count (a product continuously on screen across a near-identical 30-second
+span IS repeated visibility — cheap to verify, not one isolated moment). Null-timestamp frames
+(carousel/story images) count **once per distinct visual** — two identical uploaded images are
+one piece of evidence, not two. **Visibility evidence** per candidate: `first_support_ms` /
+`last_support_ms` from supporting timestamps, and `estimated_visible_ms` ≈ supported represented
+frames × the video's sampling span (duration / frames_available); null when timestamps are null.
 
 Single-frame posts (stories, YouTube thumbnails) cap at REVIEW by construction — the locked
 "never auto-accept one isolated match" rule; sub-project D's verifier is how they earn
@@ -368,7 +419,8 @@ automation. A lone strong hit is never auto-rejected: it lands REVIEW.
 
 **"Denser re-sample" honestly resolved.** B cannot extract more frames (once-only, source bytes
 gone). v1's dense pass = matching over **all** stored frames (no subset), and the
-shipment-but-no-match case goes `INCONCLUSIVE → needs_verification` instead of pretending. True
+shipment-but-no-match case sets `needs_verification` (outcome `no_match` or `inconclusive` per
+the §8 split) instead of pretending. True
 denser re-extraction is registered in the deferred register, blocked on B's future operator
 re-extract command (with DEF-009 scene-change).
 
@@ -473,8 +525,12 @@ detection kind; the backfill command (§14) is the manual remedy.
   warning < 100 %, critical at 100 %) through the existing `AlertService` → operations alert feed.
 - **Cost dashboard.** New AI-spend panel on `/monitoring/operations` (staff): per capability —
   calls today/this month, estimated spend (units × list-price constants), skipped-by-budget,
-  skipped-no-candidates, average cost per processed post; per-tenant breakdown (top spenders).
-  Reads `ai_usage_counters` live on render. The plan page (`/monitoring/plan`) additionally gains
+  skipped-no-candidates, average cost per processed post; per-tenant breakdown (top spenders);
+  plus quality/efficiency aggregates from recent `visual_match_runs`: **cache-hit rate,
+  embeddings created, frame-skip breakdown (format / quality / dedup), provider failures (from
+  provider health), budget denials, average candidates per run, average processing time** — the
+  quick lens for both cost and quality problems.
+  Reads `ai_usage_counters` + recent runs live on render. The plan page (`/monitoring/plan`) additionally gains
   a forward-looking "Visual product matching (embeddings)" estimate row in
   `IngestionCostEstimator::perService()` (list price `EMBEDDING_PER_IMAGE = 0.0001` USD,
   assumption constants documented as estimates).
@@ -483,12 +539,14 @@ detection kind; the backfill command (§14) is the manual remedy.
 
 ## 11. INCONCLUSIVE and the hand-off to sub-project D
 
-INCONCLUSIVE means "visual coverage may be insufficient", **never** "product absent" (the
-codebase's unavailable ≠ false doctrine). It is represented as run/candidate data — no fabricated
-detections:
+INCONCLUSIVE means "visual coverage may be insufficient", **never** "product absent"; NO_MATCH
+means "coverage was clean and thresholds were not met" (§8 defines the split). Neither is ever a
+fabricated detection — both are run/candidate data:
 
-- run outcome `inconclusive` + `needs_verification = true` when no candidate banded but an
-  in-window shipment existed;
+- `needs_verification = true` when no candidate banded but an in-window shipment existed —
+  **regardless of the `no_match` / `inconclusive` split** (a clean miss can still be a product
+  shown in a form the reference photos don't cover; that is exactly what D verifies). The outcome
+  field tells D and reviewers *why* verification is wanted;
 - `needs_verification = true` also on runs whose best result was REVIEW (D verifies lone hits);
 - D's contract: poll latest-run-per-post where `needs_verification` and not yet consumed
   (D adds its own consumption bookkeeping; C deliberately does not pre-build it), with
@@ -520,6 +578,16 @@ inconclusiveness adds no fake signal in either direction.
             // per-category overrides, keys = SectorLabel values; packaging-prone stricter:
             'BEAUTY' => ['auto' => 0.70], 'FOOD_BEVERAGE' => ['auto' => 0.70],
             // NOTE: placeholders — calibration is sub-project E's mandate (eval golden set).
+        ],
+        'quality_filter' => [
+            'enabled' => (bool) env('QDS_ENRICHMENT_VISUAL_MATCH_QUALITY_FILTER', true),
+            'min_mean_luminance' => (int) env('QDS_ENRICHMENT_VISUAL_MATCH_MIN_LUMINANCE', 10),   // 0–255
+            'max_mean_luminance' => (int) env('QDS_ENRICHMENT_VISUAL_MATCH_MAX_LUMINANCE', 245),
+            'min_luminance_stddev' => (float) env('QDS_ENRICHMENT_VISUAL_MATCH_MIN_STDDEV', 4.0), // flat/blank proxy
+        ],
+        'dedup' => [
+            'enabled' => (bool) env('QDS_ENRICHMENT_VISUAL_MATCH_DEDUP', true),
+            'hamming_threshold' => (int) env('QDS_ENRICHMENT_VISUAL_MATCH_DEDUP_HAMMING', 6),     // of 64 dHash bits
         ],
     ],
 ],
@@ -601,16 +669,25 @@ accepted, documented gap.
 Scored through the **real** `BandMapper` (pure function; cosine over fixture vectors in PHP —
 dimension-agnostic, so fixtures use small vectors): reports **product-level precision/recall**
 (product identity compared — fixing the wrong-brand-counts-as-TP blindness for visual cases),
-band distribution, missed-brief-appearance count (`brief_appearance: true` cases ending
-reject/inconclusive), and estimated embedding cost per case (frame count × list price). The
-existing text metrics are untouched; the visual section needs no DB and no network
-(deterministic). Growing this set is how sub-project E later calibrates the §12 placeholders.
+**false positives broken down by category**, band distribution, missed-brief-appearance count
+(`brief_appearance: true` cases ending reject/no-match/inconclusive), **average similarity margin**
+across cases, **unsupported/quality-skipped frame rate** (from per-case frame metadata), and
+estimated embedding cost per case (billable frame count × list price). Runtime-only metrics —
+provider latency, real cache-hit rate — deliberately live on the operations dashboard (§10), not
+in eval, because fixtures cannot measure them honestly. The existing text metrics are untouched;
+the visual section needs no DB and no network (deterministic). Growing this set is how
+sub-project E later calibrates the §12 placeholders.
 
 **Tests (TDD, PHPUnit, base `Tests\TestCase`, `RefreshDatabase` on real Postgres — now with
 pgvector — factories/fixtures, `XDEBUG_MODE=off`).** Highlights per component:
 
 - `BandMapper` pure unit tests: band boundaries, margin ambiguity, single-frame cap, category
-  threshold resolution, determinism/tie-breaks.
+  threshold resolution, determinism/tie-breaks, dedup-aware support counting (represented-frame
+  groups vs null-timestamp images), NO_MATCH vs INCONCLUSIVE outcome split.
+- `FrameQualityFilter` unit tests: undecodable bytes, dark/overexposed/flat synthetic images
+  (generated with GD in-test), conservative-defaults pass-through of normal frames, config off.
+- `FrameDeduplicator` unit tests: identical frames group, near-identical within hamming
+  threshold, distinct frames survive, representative carries group size + span, config off.
 - `VectorLiteral` + pgvector round-trip; exact-scan scorer against seeded vectors (known cosine
   geometry) asserting per-frame/per-candidate maxima and ordering.
 - `VertexEmbeddingClient`: `Http::fake` (house pattern) + faked token provider; error taxonomy;
@@ -638,7 +715,9 @@ pgvector — factories/fixtures, `XDEBUG_MODE=off`).** Highlights per component:
 ## 16. Deferred, documented, and doc amendments
 
 **New deferred-register entries:** denser re-extraction (blocked on B's future force re-extract;
-links DEF-009/DEF-010); product-level correction in the review UI (brand-only today); human
+links DEF-009/DEF-010); long-video coverage beyond 12 frames (B's `max_frames` knob — any
+adaptive/scene-change extraction goes through B's contract, never C-side); product-level
+correction in the review UI (brand-only today); human
 review does not re-trigger attribution (pre-existing, backfill command is the remedy);
 webp/heic frame transcoding; off-peak queue for low-priority work (awaits D); tenant offboarding
 purge (pre-existing platform gap); billing-plan quota purchase (billing module follow-up);
@@ -663,7 +742,8 @@ the enum gains VISUAL_PRODUCT it will fabricate such rows in demo data; acceptab
   coverage; when B grows scene-change (DEF-009) and re-extraction, pass 2/3 slot into
   `VisualProductMatcher` as frame-selection strategies. Transcript cues (`{start, dur}` — the
   only timestamped non-visual signal today) can window frame selection without B changes.
-- **Cropped-region embeddings.** `KeyframeEmbedder` is the seam: a future
-  object-localization step (new billed Vision feature — not requested today) yields crops
-  embedded under a distinct `model_version` suffix, so full-frame and crop embeddings coexist
-  without schema change.
+- **Cropped-region embeddings.** The `EmbeddingProvider` interface + `KeyframeEmbedder` are the
+  seam: a future object-localization step (new billed Vision feature — not requested today)
+  yields crops embedded through the same interface under a distinct `model_version` suffix, so
+  full-frame and crop embeddings coexist without schema change and the matcher never learns the
+  difference.

@@ -306,6 +306,7 @@ caption become distinct rows.
 - `qds.enrichment.text_signals.short_brand_allowlist` — short brands allowed to match despite the ≥3-char noise guard (e.g. `dm`).
 - `qds.enrichment.visual_match.enabled` — the visual product-matching kill switch (sub-project C, ADR-0029, default off); `qds.enrichment.visual_match.*` carries model version, frame budget, photo cap, and the E-calibrated placeholder thresholds.
 - `qds.ai_budget.*` — capability-keyed AI spend governance (capability `embedding`); emergency stop `qds:ai-read-only`, per-tenant overrides `qds:ai-quota`.
+- The plan-page "Visual product matching (embeddings)" row's `active` flag requires all three of the master enrichment switch (`qds.enrichment.enabled`), the visual-match kill switch above, and configured Google Embeddings service-account credentials to be true.
 - `qds.enrichment.confidence.{high,medium}` — score→level cut-points (0.85 / 0.60, ADR-0026).
 - `qds.enrichment.attribution.shipment_window_days` — default gift-link window (60), per-tenant via Settings → Monitoring (ADR-0025).
 - `qds.matching.enabled` / `qds.matching.lookback_hours` — the `SeededContentLinker` sweep.

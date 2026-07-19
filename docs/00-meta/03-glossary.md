@@ -375,6 +375,10 @@ Kind of brand signal produced by the recognition pipeline (see [`GL-RecognitionD
 | `LOGO` | Detected logo. |
 | `SPOKEN_BRAND` | Brand name detected in audio/speech. |
 | `ON_SCREEN_TEXT` | Text detected on-screen in video. |
+| `CAPTION_TEXT` | Brand/product name found in the caption prose (sub-project A). |
+| `MENTION` | An `@handle` in the caption resolved to a CRM brand (sub-project A). |
+| `PRODUCT_TAG` | A structured platform product tag resolved to a CRM brand and product (sub-project A). |
+| `VISUAL_PRODUCT` | A product visually matched against the tenant's reference photos via multimodal embeddings ([ADR-0029](../05-decisions/decision-log.md#adr-0029)); carries `product_id`. |
 
 <a id="enum-sentimentlabel"></a>
 ### ENUM-SentimentLabel

@@ -41,12 +41,15 @@ Ingestion (per tenant, per monitored creator)
    │  writes ContentItem / Story with caption, media URLs, and the free structured signals
    ▼
 EnrichmentPipeline  (App\Platform\Enrichment\EnrichmentPipeline)
-   hashtags → recognition → text-signals → sentiment → SEEDED ATTRIBUTION → EMV → reach
+   hashtags → transcript → recognition → keyframes → VISUAL MATCH → text-signals → sentiment → SEEDED ATTRIBUTION → EMV → reach
    │            │             │                              │
    │            │             │                              └─ AttributionService: assemble evidence, classify, upsert the Mention
    │            │             └─ TextSignalRecognizer: mine caption + platform tags → RecognitionDetection rows (kill-switch gated)
    │            └─ RecognitionService: media → Google Vision/Video/Speech → RecognitionDetection rows
    └─ HashtagEnricher: caption #tags → ContentHashtag rows matched to configured lists
+   (transcript + keyframes: sub-project B, ADR-0028 — YouTube captions text and persisted ffmpeg
+   frames; VISUAL MATCH: sub-project C, ADR-0029 — keyframes vs reference-photo embeddings →
+   VISUAL_PRODUCT detections, §3f; each of these stages is kill-switched)
    ▼
 SeededContentLinker  (scheduled, separate)
    materialises shipment ↔ content links from the SEEDED mentions produced above
@@ -105,6 +108,22 @@ Caption `#tags` matched against configured campaign/brand/product/agency hashtag
 The tenant's documented seeding shipments for the creator. **Only dispatched shipments count**
 (`shipped_at` is not null). Each carries `brandId/brandName`, `productLabel/productId`, `campaignId`,
 `shippedAt`, `deliveredAt`.
+
+### 3f. Visual product matching (sub-project C, `VisualProductMatcher`)
+`App\Platform\Enrichment\VisualMatch\VisualProductMatcher` (gated by
+`qds.enrichment.visual_match.enabled`, default OFF) matches B's stored keyframes against the
+tenant's product **reference photos** (uploaded on `/crm/products`, embedded with Google multimodal
+embeddings, stored in pgvector) and writes `recognition_detections` of type:
+
+- `VISUAL_PRODUCT` — the product itself seen on screen (brand + product + `product_id`), at HIGH
+  for the AUTO band (≥ 2 distinct-timestamp supporting frames above the category threshold plus a
+  runner-up margin) or LOW for the REVIEW band (routes to human review; the §9 evidence gate
+  withholds `product_id` until a human approves).
+
+Candidates are scoped to the creator's plausible catalog only (in-window shipments + ACTIVE/SHIPPING
+roster primaries — an empty candidate set costs nothing); every run and its ranked candidate scores
+persist in `visual_match_runs` / `visual_match_candidates`, and `needs_verification` flags the
+posts sub-project D's VLM verifier should look at (ADR-0029).
 
 ---
 
@@ -264,7 +283,7 @@ reproduces the old behaviour. All of this is in `AttributionService::buildEviden
 | Table | Detection-relevant columns |
 |---|---|
 | `content_items` | `caption`, `media_urls`, `mentioned_handles`, `product_tags`, `collaborators`, `branded_content_label` |
-| `recognition_detections` | `recognition_type` (LOGO / IMAGE_TEXT_OCR / ON_SCREEN_TEXT / SPOKEN_BRAND / CAPTION_TEXT / MENTION / PRODUCT_TAG — DB CHECK constraint), `detected_brand`, `detected_product`, `product_id`, `provider_label` (immutable per-match key), `assessment`, `provenance` |
+| `recognition_detections` | `recognition_type` (LOGO / IMAGE_TEXT_OCR / ON_SCREEN_TEXT / SPOKEN_BRAND / CAPTION_TEXT / MENTION / PRODUCT_TAG / VISUAL_PRODUCT — DB CHECK constraint), `detected_brand`, `detected_product`, `product_id`, `provider_label` (immutable per-match key), `assessment`, `provenance` |
 | `mentions` | `mention_type`, `classification` (confidence envelope + signals), `campaign_id` |
 | `content_hashtags` | `normalized`, `matches`, `is_ambiguous`, `resolved_*` |
 | `brands` | `name`, `aliases`, `social_handles` |
@@ -285,6 +304,8 @@ caption become distinct rows.
 - `qds.enrichment.text_signals.enabled` — the product-aware kill switch (§8).
 - `qds.enrichment.text_signals.gifting_cues` — DE/EN/FR cue phrase lists.
 - `qds.enrichment.text_signals.short_brand_allowlist` — short brands allowed to match despite the ≥3-char noise guard (e.g. `dm`).
+- `qds.enrichment.visual_match.enabled` — the visual product-matching kill switch (sub-project C, ADR-0029, default off); `qds.enrichment.visual_match.*` carries model version, frame budget, photo cap, and the E-calibrated placeholder thresholds.
+- `qds.ai_budget.*` — capability-keyed AI spend governance (capability `embedding`); emergency stop `qds:ai-read-only`, per-tenant overrides `qds:ai-quota`.
 - `qds.enrichment.confidence.{high,medium}` — score→level cut-points (0.85 / 0.60, ADR-0026).
 - `qds.enrichment.attribution.shipment_window_days` — default gift-link window (60), per-tenant via Settings → Monitoring (ADR-0025).
 - `qds.matching.enabled` / `qds.matching.lookback_hours` — the `SeededContentLinker` sweep.
@@ -293,7 +314,9 @@ caption become distinct rows.
 (`App\Platform\Enrichment\Console\EvalDetectionCommand`) scores the deterministic text path against a
 labelled golden set (`tests/Fixtures/eval/golden-set.json`) and prints recall/precision. First recorded
 baseline: **recall ≈ 0.71, precision ≈ 0.83** (10-case seed set). Extend the golden set to make the
-baseline meaningful before gating future work on it.
+baseline meaningful before gating future work on it. Cases may also carry a "visual" block (candidate
+photo vectors + frame vectors) scored through the real BandMapper — product-level precision/recall,
+false positives by category, band distribution, and estimated embedding cost per case.
 
 ---
 
@@ -302,19 +325,22 @@ baseline meaningful before gating future work on it.
 Detection today is **brand/name-based**, not visual — a product is only found when a brand *name* is
 legible/spoken/typed, a *known logo* is detected, or a *structured tag* names it. In particular:
 
-- **No visual product recognition** — a product shown on camera with no legible brand text and no tag
-  is missed. Planned: per-tenant seeded-product reference-photo **embeddings** (pgvector) + **Gemini
-  VLM** grounding.
-- **TikTok & YouTube media are not analysed** — their ingestion adapters store *watch-page* URLs, so
-  Vision/OCR/Speech never run on them; those platforms rely on caption/tag text + hashtags only.
-  Planned: media resolution + keyframe sampling.
+- **Visual product recognition is closed-set embeddings only** — sub-project C (ADR-0029) matches
+  keyframes against the tenant's *uploaded reference photos* for *candidate* products (in-window
+  shipments + active roster). A product with no reference photos, or shown in a form the photos do
+  not cover, is still missed; open-set **Gemini VLM** grounding is sub-project D
+  (`needs_verification` on `visual_match_runs` is its pickup).
+- **YouTube video files are not downloaded** (DEF-007) — YouTube's visual signal is the single
+  Data-API thumbnail keyframe; TikTok and Instagram get real multi-frame coverage since
+  sub-project B (ADR-0028), and every platform's frames feed §3f.
 - **Speech is de-DE only, capped at ~60 s**; non-German or later-in-video spoken mentions are missed.
 - **Confidence is bucketed provider scores**, not calibrated seeding probabilities.
 - **Comments** are not used for seeding evidence.
 
-The forward plan (media resolution → reference-photo embeddings → VLM grounding → confidence
-calibration) is tracked in `docs/superpowers/specs/2026-07-18-seeded-detection-media-resolution-design.md`
-and the programme memory. This document describes the **current** behaviour; update it when those land.
+Media resolution/keyframes (B, ADR-0028) and reference-photo embeddings (C, ADR-0029) have landed;
+the forward plan (VLM grounding → confidence calibration) is tracked in
+`docs/50-modules/seeded-product-detection-roadmap.md`. This document describes the **current**
+behaviour; update it when D/E land.
 
 ---
 
@@ -334,7 +360,10 @@ and the programme memory. This document describes the **current** behaviour; upd
 | Confidence & precedence | `app/Platform/Enrichment/Support/ConfidenceScore.php`, `app/Shared/ValueObjects/ConfidenceAssessment.php`, `app/Platform/Enrichment/Support/HumanPrecedence.php` |
 | Content ↔ shipment linking | `app/Platform/Enrichment/Matching/SeededContentLinker.php` |
 | Quality scorecard | `app/Platform/Enrichment/Console/EvalDetectionCommand.php` |
+| Visual product matching (C) | `app/Platform/Enrichment/VisualMatch/` — `VisualProductMatcher`, `CandidateScope`, `FrameProductScorer`, `BandMapper`, `VisualMatchWriter`, frame/photo embedders |
+| AI budget governance | `app/Platform/AiBudget/` — `AiBudgetGuard`, `TenantQuotaResolver`, `qds:ai-read-only`, `qds:ai-quota` |
 
 **Related docs:** `docs/50-modules/module-1-monitoring.md`, `docs/50-modules/module-3-crm-seeding.md`,
 `ADR-0008` (attribution doctrine), `ADR-0019`/`ADR-0020` (tenancy), `ADR-0023` (per-pull enrichment),
-`ADR-0025` (per-tenant settings), `ADR-0026` (confidence cut-points), and the design spec noted at the top.
+`ADR-0025` (per-tenant settings), `ADR-0026` (confidence cut-points), `ADR-0028` (media/keyframes),
+`ADR-0029` (visual matching), and the design spec noted at the top.

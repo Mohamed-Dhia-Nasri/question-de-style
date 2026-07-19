@@ -11,7 +11,7 @@ depends_on:
   - ADR-0007
   - docs/05-decisions/decision-log.md
   - docs/20-cross-cutting/00-data-principles.md
-last_reviewed: 2026-07-03
+last_reviewed: 2026-07-19
 ---
 
 # Deferred Register
@@ -46,6 +46,16 @@ A deferred capability is distinct from a merely unbuilt one. Per the [status lif
 | [DEF-009](#def-009) | Scene-change keyframe sampling (alternative `KeyframeSampler` mode) | [ADR-0028](../05-decisions/decision-log.md#adr-0028) | — |
 | [DEF-010](#def-010) | Keyframe lifecycle state (`extracted` / `pruned` / `unavailable`) | [ADR-0028](../05-decisions/decision-log.md#adr-0028) | — |
 | [DEF-011](#def-011) | Transcript negative-cache expiry / force-refresh | [ADR-0028](../05-decisions/decision-log.md#adr-0028) | — |
+| [DEF-012](#def-012) | Denser keyframe re-extraction for visual matching | [ADR-0029](../05-decisions/decision-log.md#adr-0029) | — |
+| [DEF-013](#def-013) | Long-video keyframe coverage beyond 12 frames | [ADR-0029](../05-decisions/decision-log.md#adr-0029) | — |
+| [DEF-014](#def-014) | Product-level correction in the recognition review UI | [ADR-0029](../05-decisions/decision-log.md#adr-0029) | [DP-004](00-data-principles.md#dp-004) |
+| [DEF-015](#def-015) | Human review re-triggering attribution | [ADR-0029](../05-decisions/decision-log.md#adr-0029) | — |
+| [DEF-016](#def-016) | HEIC/HEIF reference-photo uploads (server-side transcoding) | [ADR-0029](../05-decisions/decision-log.md#adr-0029) | — |
+| [DEF-017](#def-017) | Off-peak queue for low-priority AI work | [ADR-0029](../05-decisions/decision-log.md#adr-0029) | — |
+| [DEF-018](#def-018) | Tenant offboarding data purge | [ADR-0029](../05-decisions/decision-log.md#adr-0029) | — |
+| [DEF-019](#def-019) | Self-serve billing-plan AI-quota purchase | [ADR-0029](../05-decisions/decision-log.md#adr-0029) | — |
+| [DEF-020](#def-020) | EU residency for the existing Vision/Speech clients | [ADR-0029](../05-decisions/decision-log.md#adr-0029) | — |
+| [DEF-021](#def-021) | Shipped-but-frameless posts invisible to sub-project D's needs_verification poll | [ADR-0029](../05-decisions/decision-log.md#adr-0029) | — |
 
 ---
 
@@ -179,6 +189,126 @@ A deferred capability is distinct from a merely unbuilt one. Per the [status lif
 - **Linked decision.** [ADR-0028](../05-decisions/decision-log.md#adr-0028) (Status APPROVED).
 - **UI behaviour.** Not user-facing; a YouTube item without a transcript simply shows no SPOKEN_BRAND detections (unavailable-never-empty rule).
 
+<a id="def-012"></a>
+### DEF-012
+
+**Denser keyframe re-extraction for visual matching.**
+
+- **What is deferred.** Extracting additional or denser keyframes for a post whose visual match ended `no_match`/`inconclusive`, to give the matcher (or sub-project D's verifier) more frames to look at.
+- **Why it is deferred.** [ADR-0028](../05-decisions/decision-log.md#adr-0028) extraction is once-only and the source video bytes are discarded (TikTok CDN URLs expire) — there is nothing left to re-sample. The prerequisites are B-contract work: an operator force re-extract command, scene-change sampling ([DEF-009](#def-009)), and keyframe lifecycle state ([DEF-010](#def-010)). A C-side shortcut around B's contract is explicitly rejected.
+- **What v1 does instead.** The "dense pass" is matching over **all** stored frames (no subset), and a shipment with no visual match sets `needs_verification` on the run instead of pretending — that flag is exactly what sub-project D verifies.
+- **What would be needed later.** B's re-extraction path (with DEF-009/DEF-010), then a frame-selection strategy pass in `VisualProductMatcher` (spec §17 designs the slot).
+- **Linked decision.** [ADR-0029](../05-decisions/decision-log.md#adr-0029) (Status APPROVED).
+- **UI behaviour.** Not user-facing; the run records `no_match`/`inconclusive` honestly (unavailable ≠ false).
+
+<a id="def-013"></a>
+### DEF-013
+
+**Long-video keyframe coverage beyond 12 frames.**
+
+- **What is deferred.** More than 12 sampled frames for long videos (and any adaptive or scene-change frame selection serving visual matching).
+- **Why it is deferred.** Frame extraction is sub-project B's contract: B's sampling is already duration-adaptive (3–12 frames) and the ceiling is B's `max_frames` knob. [ADR-0029](../05-decisions/decision-log.md#adr-0029) forbids C-side extraction changes; C's `frame_budget` (default 12) is purely a cost guard.
+- **What v1 does instead.** C matches every stored frame up to `frame_budget`; long-video coverage scales with B's duration-adaptive sampling.
+- **What would be needed later.** Raising B's `max_frames` (config) and/or DEF-009 scene-change sampling — both through B's contract, never C-side.
+- **Linked decision.** [ADR-0029](../05-decisions/decision-log.md#adr-0029) (Status APPROVED).
+- **UI behaviour.** Not user-facing; coverage accounting on `visual_match_runs` records what was available vs processed.
+
+<a id="def-014"></a>
+### DEF-014
+
+**Product-level correction in the recognition review UI.**
+
+- **What is deferred.** Letting a reviewer correct a `VISUAL_PRODUCT` detection to a *different product*. The correction path is brand-only today.
+- **Why it is deferred.** [ADR-0029](../05-decisions/decision-log.md#adr-0029) keeps the existing generic review queue (approve/reject already work for `VISUAL_PRODUCT` rows at LOW, and the signals trail — frames, similarities, thresholds — already renders); reject covers the v1 need.
+- **What v1 does instead.** Approve (unlocks `product_id` into evidence per the §9 gate) or reject (nulls the value + `human-rejected`, honoured by `buildEvidence`).
+- **What would be needed later.** A product picker in the review correction flow writing a DP-004-compliant human correction with the corrected `product_id`.
+- **Linked decision.** [ADR-0029](../05-decisions/decision-log.md#adr-0029) (Status APPROVED).
+- **UI behaviour.** The review queue offers approve/reject only for visual detections; no fake "correct product" affordance is shown.
+
+<a id="def-015"></a>
+### DEF-015
+
+**Human review re-triggering attribution.**
+
+- **What is deferred.** Automatically re-running attribution for an already-enriched post after a human approves/rejects one of its detections, so the mention reflects the decision immediately.
+- **Why it is deferred.** Pre-existing behaviour for every detection kind, not new to C; the classification refresh has always waited for the next natural enrichment run. C documents rather than changes it.
+- **What v1 does instead.** `qds:visual-match-backfill` (which re-runs visual matching AND attribution over a window, through the normal budget guard) is the operator remedy; the next natural enrichment also picks the decision up.
+- **What would be needed later.** A review-action hook dispatching a targeted attribution-only re-run for the affected post.
+- **Linked decision.** [ADR-0029](../05-decisions/decision-log.md#adr-0029) (Status APPROVED).
+- **UI behaviour.** Not user-facing beyond timing: a human decision is visible on the detection immediately and on the mention after the next run/backfill.
+
+<a id="def-016"></a>
+### DEF-016
+
+**HEIC/HEIF reference-photo uploads (server-side transcoding).**
+
+- **What is deferred.** Accepting HEIC/HEIF product reference-photo uploads, which requires server-side transcoding to a browser-renderable format for the management UI.
+- **Why it is deferred.** The embedding model officially accepts HEIC/HEIF (spec §18) — B's *keyframes* in those formats are embedded natively with no transcoding — but browsers cannot render HEIC in the photo-management grid, so [ADR-0029](../05-decisions/decision-log.md#adr-0029) restricts uploads to `jpg/jpeg/png/webp` rather than shipping a transcoder.
+- **What v1 does instead.** Upload validation rejects HEIC with a clear message; keyframe-side `frames_skipped_format` remains only for unknown/undecodable content.
+- **What would be needed later.** A transcode-on-upload step (e.g. imagick HEIC→JPEG) storing the derived render alongside (or instead of) the original.
+- **Linked decision.** [ADR-0029](../05-decisions/decision-log.md#adr-0029) (Status APPROVED).
+- **UI behaviour.** The upload control lists the accepted formats; a rejected HEIC upload shows a validation error, never a silent drop.
+
+<a id="def-017"></a>
+### DEF-017
+
+**Off-peak queue for low-priority AI work.**
+
+- **What is deferred.** A deferred/off-peak processing lane for low-priority visual work (posts with no candidate products, speculative re-scans).
+- **Why it is deferred.** In C, "low priority" ≡ empty candidate set ⇒ the post is already skipped at zero cost — an off-peak lane has nothing to carry until sub-project D's open-set verifier gives low-priority work meaning.
+- **What v1 does instead.** Priorities high/medium gate budget behaviour ([ADR-0029](../05-decisions/decision-log.md#adr-0029) §5); empty-candidate posts record `skipped:no-candidates`.
+- **What would be needed later.** D's verifier plus a scheduled off-peak queue honouring the same `AiBudgetGuard`.
+- **Linked decision.** [ADR-0029](../05-decisions/decision-log.md#adr-0029) (Status APPROVED).
+- **UI behaviour.** Not user-facing.
+
+<a id="def-018"></a>
+### DEF-018
+
+**Tenant offboarding data purge.**
+
+- **What is deferred.** A complete purge path for a departing tenant's data — now including reference photos, embeddings, visual-match runs, and AI-usage counters.
+- **Why it is deferred.** A pre-existing, documented platform gap (no tenant offboarding flow exists anywhere); C inherits and re-documents it rather than building a partial purge for its tables alone.
+- **What v1 does instead.** Creator-level GDPR erasure covers personal data (visual-match runs/candidates and keyframe embeddings are erased with the creator); catalog data (photos + embeddings) lives with the product; counters prune with telemetry retention.
+- **What would be needed later.** A tenant-offboarding workflow (rows + blobs across all modules, in FK order, with the append-only-gate precedent) authorized by its own ADR.
+- **Linked decision.** [ADR-0029](../05-decisions/decision-log.md#adr-0029) (Status APPROVED).
+- **UI behaviour.** Not user-facing in v1.
+
+<a id="def-019"></a>
+### DEF-019
+
+**Self-serve billing-plan AI-quota purchase.**
+
+- **What is deferred.** Buying higher AI budgets (embedding, later VLM) through the billing module / subscription plans.
+- **Why it is deferred.** [ADR-0029](../05-decisions/decision-log.md#adr-0029) ships the enforcement hook (`tenant_ai_quotas`, NULL → config default) and an operator command; plan integration belongs to the billing module (ADR-0021 line of work), not to C.
+- **What v1 does instead.** Operators set per-tenant quotas with `qds:ai-quota {tenant} {capability} --daily= --monthly=`; the operations dashboard shows usage.
+- **What would be needed later.** Plan catalog entries mapping to quota rows plus a purchase/upgrade flow writing them.
+- **Linked decision.** [ADR-0029](../05-decisions/decision-log.md#adr-0029) (Status APPROVED).
+- **UI behaviour.** No self-serve purchase surface is shown; quota state is visible to staff on the operations dashboard.
+
+<a id="def-020"></a>
+### DEF-020
+
+**EU residency for the existing Vision/Speech clients.**
+
+- **What is deferred.** Moving the pre-existing Google Cloud Vision / Video Intelligence / Speech clients from global endpoints to EU-resident endpoints.
+- **Why it is deferred.** Pre-existing posture, out of C's scope; C's own provider ([ADR-0029](../05-decisions/decision-log.md#adr-0029)) uses the EU multi-region endpoint from day one, which surfaced the inconsistency.
+- **What v1 does instead.** The recognition clients keep their current global endpoints; the gap is recorded here and in ADR-0029's consequences.
+- **What would be needed later.** Per-service EU endpoint/location support verified against official docs, config plumbing, and a residency follow-up decision.
+- **Linked decision.** [ADR-0029](../05-decisions/decision-log.md#adr-0029) (Status APPROVED).
+- **UI behaviour.** Not user-facing.
+
+<a id="def-021"></a>
+### DEF-021
+
+**Shipped-but-frameless posts invisible to sub-project D's needs_verification poll.**
+
+- **What is deferred.** A post whose keyframe extraction produced zero frames (no media acquired, extraction failure, or an unsupported format) never reaches `VisualProductMatcher` far enough to write a `visual_match_runs` row — so no run exists to carry `needs_verification`. Sub-project D's verifier, designed to poll `visual_match_runs.needs_verification` for posts that need a closer look, has no anchor row to discover these posts by at all — they are simply absent from D's queue, not flagged and not skipped-with-a-marker.
+- **Why it is deferred.** Flagged during Task 19's review of the matcher. Closing it needs a design decision that belongs to sub-project D, not C: either C starts writing a placeholder/inconclusive run for zero-frame shipped posts (which changes C's append-only "a run means a real match attempt happened" semantics), or D's poll is widened to independently discover shipped-but-frameless posts (e.g. by scanning `keyframes`/`content_items` directly rather than `visual_match_runs` alone). Neither belongs in C's scope.
+- **What v1 does instead.** `VisualProductMatcher` records `skipped:no-frames` in its own run log (not a `visual_match_runs` row) and moves on; a shipped, seeded-eligible post with no extracted frames surfaces nowhere in the visual-match review surfaces today — it looks identical to a post that was never a candidate at all.
+- **What would be needed later.** A decision, made at sub-project D's kickoff, on which of the two designs above (placeholder run row, or widened D-side discovery) closes the gap — recorded here as the design tension D's brainstorming must resolve, not a solved problem.
+- **Linked decision.** [ADR-0029](../05-decisions/decision-log.md#adr-0029) (Status APPROVED); related to [DEF-010](#def-010) (keyframe lifecycle state), which would let a future job tell "never extractable" apart from other zero-frame cases.
+- **UI behaviour.** Not user-facing; a shipped-but-frameless post shows no visual-match evidence and no review-queue entry — indistinguishable today from "matched cleanly, found nothing."
+
 ## Dependency map
 
 ```mermaid
@@ -195,9 +325,23 @@ flowchart LR
   ADR0028 --> DEF009["DEF-009\nScene-change sampling"]
   ADR0028 --> DEF010["DEF-010\nKeyframe lifecycle state"]
   ADR0028 --> DEF011["DEF-011\nTranscript negative-cache expiry"]
+  ADR0029["ADR-0029"] --> DEF012["DEF-012\nDenser re-extraction"]
+  ADR0029 --> DEF013["DEF-013\n>12-frame coverage"]
+  ADR0029 --> DEF014["DEF-014\nProduct-level review correction"]
+  ADR0029 --> DEF015["DEF-015\nReview-triggered re-attribution"]
+  ADR0029 --> DEF016["DEF-016\nHEIC photo uploads"]
+  ADR0029 --> DEF017["DEF-017\nOff-peak low-priority queue"]
+  ADR0029 --> DEF018["DEF-018\nTenant offboarding purge"]
+  ADR0029 --> DEF019["DEF-019\nBilling quota purchase"]
+  ADR0029 --> DEF020["DEF-020\nVision/Speech EU residency"]
+  ADR0029 --> DEF021["DEF-021\nFrameless posts invisible to D"]
+  DEF009 --> DEF012
+  DEF010 --> DEF012
+  DEF010 --> DEF021
 ```
 
 DEF-003 cannot be delivered before DEF-004, because `CONFIRMED` reach can only originate from authorized-creator analytics.
+DEF-012 cannot be delivered before DEF-009/DEF-010 land on sub-project B's side — extraction is once-only and source bytes are discarded.
 
 ## Related documents
 

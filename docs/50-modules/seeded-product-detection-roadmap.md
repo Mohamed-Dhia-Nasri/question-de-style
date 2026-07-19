@@ -37,13 +37,13 @@ that each **augment** the existing enrichment pipeline (they feed the same
 | Piece | Meaningful name | Status | Depends on |
 |---|---|---|---|
 | A | **Free-signal detection** (captions, @mentions, product tags, gifting cues, product-aware doctrine, eval scorecard) | ✅ DONE — merged to `main` (merge `55e96db`) | — |
-| B | **Media resolution & keyframe sampling** (real media for TikTok/YouTube/long video; ffmpeg keyframes for all platforms) | 🏗️ In progress in a parallel session — spec committed on `feat/seeded-detection-media`, TDD plan pending | — (independent of A) |
-| C | **Visual product matching** (reference photos + Google multimodal embeddings in pgvector; match keyframes → seeded-SKU catalog) | ⬜ Not started | **B** |
+| B | **Media resolution & keyframe sampling** (real media for TikTok/YouTube/long video; ffmpeg keyframes for all platforms) | ✅ DONE — merged to `main` (merge `9c9ef89`, ADR-0028) | — (independent of A) |
+| C | **Visual product matching** (reference photos + Google multimodal embeddings in pgvector; match keyframes → seeded-SKU catalog) | ✅ DONE — built on `feat/seeded-detection-visual-match` (spec `docs/superpowers/specs/2026-07-19-visual-product-matching-design.md`, ADR-0029) | **B** |
 | D | **VLM grounding & multilingual speech** (Gemini over keyframes+caption+transcript+tags → grounded product; ASR language-ID + >60s) | ⬜ Not started | **B, C** |
 | E | **Confidence calibration & eval expansion** (calibrate scores vs a labelled golden set; per-surface thresholds; multi-signal fusion; drift) | ⬜ Not started (eval-expansion part can begin any time on top of A) | A (feeds on B–D) |
 
-**Critical path to "see the product on screen":** B → C → D. C can begin the moment B lands; D the
-moment B **and** C land. E's eval-harness expansion can start now; its calibration needs C/D producing signals.
+**Critical path to "see the product on screen":** B ✅ → C ✅ → D. D can start now (B and C have landed);
+E's calibration feeds on C's `visual_match_runs` history and the eval visual metrics.
 
 ---
 

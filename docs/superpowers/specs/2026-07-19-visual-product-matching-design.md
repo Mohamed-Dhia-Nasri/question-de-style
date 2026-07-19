@@ -175,7 +175,8 @@ children composite-FK them, composite `(fk, tenant_id)` FKs per the `reach_resul
 | timestamps | | |
 
 App rules: min 1 to be matchable, recommend 3–5 diverse views (UI copy), hard cap
-`photo_cap` = 8 per product; jpg/png only in v1 (§6), 10 MB max. Blob deletion is app-managed:
+`photo_cap` = 8 per product; jpg/png/webp in v1 (§6 — all model-supported; heic excluded from
+uploads only because browsers can't render it in the management UI), 10 MB max. Blob deletion is app-managed:
 collect paths in-transaction, delete rows (cascade), blobs after commit (house order).
 
 ### 4.2 `product_photo_embeddings`
@@ -185,9 +186,10 @@ model_version)`. Immutable per key: photo replaced ⇒ new photo row; model upgr
 rows, never in-place mutation. The `vector(3072)` column width is part of the DDL: a future model
 with different dimensions is a schema migration (new column/table), not a config flip — the
 config `dimensions` knob exists to keep request and DDL visibly in agreement. (3072 exceeds
-pgvector's 2000-dimension **index** limit — irrelevant for the exact-scan design, and one more
-reason it is right; if ANN indexing is ever wanted, the model's Matryoshka truncation to 1536 is
-the sanctioned path, as a new `model_version`.)
+pgvector's verified 2000-dimension **index** limit for the `vector` type — irrelevant for the
+exact-scan design, and one more reason it is right. If ANN indexing is ever wanted there are two
+sanctioned paths: an expression index over a `halfvec(3072)` cast — halfvec indexes up to 4000
+dims — or Matryoshka truncation to ≤ 2000 as a new `model_version`.)
 
 ### 4.3 `keyframe_embeddings`
 `id, tenant_id, keyframe_id FK **ON DELETE CASCADE** (+composite (keyframe_id, tenant_id) FK —
@@ -248,21 +250,33 @@ estimated_visible_ms int nullable` (§8; null when frames carry no timestamps).
 
 ### 4.7 Plumbing migrations
 1. `CREATE EXTENSION IF NOT EXISTS vector` (raw `DB::statement`, established pattern; installs
-   into `public`, the hard-coded search_path).
+   into `public`, the hard-coded search_path; per **database**, not per cluster — the migration
+   covers dev, `qds_test`, and Neon alike; on Neon it needs no special role).
 2. `RecognitionType::VisualProduct = 'VISUAL_PRODUCT'` enum case + DROP/re-ADD of
    `recognition_detections_recognition_type_check` with the widened set.
 3. `(id, tenant_id)` unique on `keyframes` (prerequisite for 4.3's composite FK).
 4. `SourceRegistry::GOOGLE_GEMINI_EMBEDDINGS = 'SRC-google-gemini-embeddings'` (+ ADR, §16).
-5. `docker-compose.yml` image `postgres:17` → `pgvector/pgvector:pg17` (same Postgres major,
-   existing `qds-pgdata` volume compatible); README note: the extension must exist in `qds_test`
-   too — the migration's `IF NOT EXISTS` handles it once the image ships pgvector.
+5. `docker-compose.yml` image `postgres:17` → **`pgvector/pgvector:pg17-bookworm`** (verified: the
+   official image is built `FROM postgres:$PG_MAJOR-$DEBIAN_CODENAME`, so entrypoint/PGDATA/env
+   are identical and the existing `qds-pgdata` volume keeps working; the bookworm pin matches the
+   Debian base the volume was created on). Version reality (verified): upstream pgvector is
+   0.8.5, but **Neon ships pgvector 0.8.0 on Postgres 17** — the spec pins itself to **0.8.0
+   semantics** (no post-0.8.0 features; 0.8.0 already includes halfvec and the `<=>` operator
+   set). README note: the extension must exist in `qds_test` too — the migration's
+   `IF NOT EXISTS` handles it once the image ships pgvector.
 
 **No new composer dependency.** Vectors are written as pgvector text literals
 (`'[0.1,0.2,…]'::vector`) and queried with raw operators through the query builder; a tiny
-`VectorLiteral` helper owns formatting/validation. Exact scan only — **no HNSW/IVFFlat index**
+`VectorLiteral` helper owns formatting/validation. Cosine similarity is spelled exactly as the
+pgvector README prescribes: `1 - (embedding <=> query)` (`<=>` is cosine **distance**;
+`ORDER BY embedding <=> query` is nearest-first). Exact scan only — **no HNSW/IVFFlat index**
 (candidate sets are ~15–50 vectors; exact is faster there, has zero approximate-recall loss, and
-is fully deterministic, a stated priority). A plain btree on `(tenant_id, product_reference_photo_id)`
-via the FKs suffices.
+is fully deterministic, a stated priority). Neon's own guidance blesses index-free exact scan for
+small, full-recall workloads and puts full-table comfort at ~10k rows — our scans are
+btree-pre-filtered to double digits, far below it; a documented **review trigger at ~50k
+embedding rows per tenant** (only reachable with future full-catalog matching) is when the
+halfvec-cast HNSW path (§4.2) gets revisited. A plain btree on
+`(tenant_id, product_reference_photo_id)` via the FKs suffices.
 
 ---
 
@@ -276,40 +290,69 @@ only v1 implementation; a future provider (or the v2 crop variant) is a new bind
 provider-selection config knob until a second implementation exists — the container binding is
 the seam.
 
-**Model.** **Gemini Embedding 2** (`gemini-embedding-2`; pin the exact versioned id current at
-implementation time — it launched as `gemini-embedding-2-preview`), Google's natively multimodal
-embedding model; image input (PNG/JPEG — matches §8's format gate), full **3072 dimensions**
-(Matryoshka truncation to 1536/768 exists but v1 keeps full width for precision; storage is
-trivial at this scale), cosine similarity, list price **$0.0001 per image**. The predecessor
-`multimodalembedding@001` is NOT an option: deprecated 2025-06-24, API access removed
-**2026-06-24**, retirement 2027-04-01. `model_version` config string is stamped on every
-embedding row; changing it is a re-embed backfill, never a mutation.
+**Model.** **Gemini Embedding 2** — model id **`gemini-embedding-2`**, **GA since 2026-04-22**
+(official model card; do NOT use `gemini-embedding-2-preview` — Google warns the preview model
+and its quotas may be deleted). Natively multimodal; image and text embeddings share one semantic
+space; full **3072 dimensions** default (Matryoshka truncation 128–3072, recommended 768/1536/
+3072; v1 keeps full width for precision — storage is trivial at this scale; non-default
+dimensions come back L2-normalized, and cosine is scale-invariant anyway); cosine similarity;
+official list price **$0.00012 per image** (per image, not per token; text $0.20/1M tokens; no
+output charge). Quotas are GLOBAL per project (shared across locations): 40,000 requests/min,
+10,000,000 input tokens/min — far above C's needs; Provisioned Throughput and batch inference
+are NOT supported (no batch-discount assumptions). Embedding-2 vectors are **incompatible** with
+`gemini-embedding-001` vectors — never mix models in one column (the `model_version` key already
+enforces this). The predecessor `multimodalembedding@001` is legacy: retirement **2027-04-01**
+(the previously-cited 2025/2026 "deprecation/removal" dates belong to the Vertex AI SDK's
+generative-AI module, not the model API — corrected after official-docs verification, §18).
+`model_version` config string is stamped on every embedding row; changing it is a re-embed
+backfill, never a mutation.
 
-**Endpoint & residency.** Served through the **Vertex AI platform** endpoints
-(`{location}-aiplatform.googleapis.com`, path `projects/{project}/locations/{location}/publishers/google/models/{model}`)
-— the platform name survives even as Google's docs migrate under the "Gemini Enterprise Agent
-Platform" umbrella, which is why the class/config naming here is model-based (Gemini), not
-platform-based. Default location `europe-west4` (locked EU-residency decision). **Caveat found in
-verification (2026-07): EU single regions still serve a limited model list — whether the
-embedding model is available in `europe-west4` (vs another EU region) must be confirmed against
-the real project as an early implementation task; if no EU location serves it, the capability
-stays dark (fail-closed on the locked residency decision) and we escalate.** The Gemini API
-(`generativelanguage.googleapis.com`, API-key auth) also serves the model but offers no residency
-control — rejected. `base_url`, `project_id`, `location` env-overridable in
-`config/services.php` under `services.google_embeddings`. (The existing Vision/Speech clients
-still use global endpoints — pre-existing, out of C's scope, flagged in the ADR.)
+**Endpoint & residency (verified against official docs, §18).** The platform was officially
+renamed on 2026-04-22: "Vertex AI" → **Gemini Enterprise Agent Platform** (docs frozen/redirected;
+the API service is unchanged: `aiplatform.googleapis.com`, same v1 paths) — which is why the
+class/config naming here is model-based (Gemini), not platform-based. `gemini-embedding-2` is
+served from exactly **three locations: `global`, `us`, `eu`** — **no single region serves it**
+(europe-west1/3/4 etc. all unsupported for this model). For the locked EU-residency decision the
+spec therefore uses the **EU multi-region endpoint**:
+`POST https://aiplatform.eu.rep.googleapis.com/v1/projects/{project}/locations/eu/publishers/google/models/gemini-embedding-2:embedContent`.
+Official residency guarantees for `eu`: machine-learning processing stays within European Union
+member states (United Kingdom and Switzerland explicitly excluded) and data at rest stays in the
+selected location; the `global` endpoint provides **no** residency guarantee and must not be
+used. (If a single-country-only requirement ever appears, this model cannot satisfy it — only
+older embedding models sit in single EU regions; documented trade-off.) The Gemini API
+(`generativelanguage.googleapis.com`, API-key auth) also serves the model but its terms allow
+data to be "stored transiently or cached in any country" — no residency control — rejected.
+`base_url`, `project_id`, `location` env-overridable in `config/services.php` under
+`services.google_embeddings`; an early implementation task smoke-tests one real call against the
+`eu` endpoint on the actual project. (The existing Vision/Speech clients still use global
+endpoints — pre-existing, out of C's scope, flagged in the ADR.)
 
-**Auth.** First service-account machinery in the repo: `GoogleServiceAccountTokenProvider` reads a
-JSON key file path from config, signs a JWT (`RS256`, openssl — no new dependency), exchanges it
-for an OAuth token at Google's token endpoint, caches until ~60 s before expiry. The client sends
-`Authorization: Bearer …`; the key material never appears in URLs, logs, or exceptions (house
-rule). `isConfigured()` = key file readable + project set — unconfigured ⇒ the stage skips with a
+**Auth (verified).** **API keys cannot call `embedContent`** — Google supports them only for
+`generateContent`/`streamGenerateContent` (and "express mode" is Preview with no embedding
+models), so the house API-key pattern is unusable here. First service-account machinery in the
+repo: `GoogleServiceAccountTokenProvider` reads a JSON key file path from config, signs a
+self-signed JWT (`RS256` via openssl — no new dependency; `aud` = `https://oauth2.googleapis.com/token`,
+lifetime ≤ 1 h), exchanges it at that token endpoint with
+`grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer` for a bearer token with scope
+`https://www.googleapis.com/auth/cloud-platform` (the scope the API's discovery document
+requires), caches until ~60 s before expiry. This is Google's documented flow for servers outside
+Google Cloud without an OpenID Connect provider (workload identity federation is their stated
+preference *when* such a provider exists — noted as a possible later hardening). The client sends
+`Authorization: Bearer …`; key material never appears in URLs, logs, or exceptions (house rule).
+`isConfigured()` = key file readable + project set — unconfigured ⇒ the stage skips with a
 marker, exactly like `vision:not-configured`.
 
-**Request/response.** Image bytes inline as base64; the exact payload shape follows the model's
-current Vertex reference at implementation time (the model accepts up to 6 images per request —
-batching frames per call is a permitted implementation optimization; budget units are counted
-**per image** regardless). Requested dimension = config `dimensions` (3072).
+**Request/response (verified shape).** Method **`:embedContent`** (the legacy
+`:predict`/`instances`/`predictions` shape belongs only to `multimodalembedding@001` — do not use
+it). Request body: one `content` object with `parts[]`; an inline image is a part
+`{"inlineData": {"mimeType": "image/jpeg", "data": "<base64>"}}`; output width via
+`embedContentConfig: {"outputDimensionality": 3072}` (the top-level `taskType`/
+`outputDimensionality` fields are deprecated, and `taskType` does not apply to this model).
+Response: the vector at `embedding.values`. **One call returns ONE vector for the whole input**
+— so per-frame vectors require **one call per image** (the model's 6-images-per-request
+capacity fuses them into a single embedding; useless for us). Practical limits: image = 258
+tokens against a shared 8,192-token context with SILENT truncation (a single image per call is
+always safely inside it); max 16,384×16,384 px (B's 1280-px frames are fine).
 Every payload passes `AiPayloadGuard::assertSafe` (bytes inline — no URLs, no personal data).
 Timeout `services.google_vertex_embeddings.timeout` default 30 s, connect 10 s. Errors map onto
 the existing `ErrorCategory` taxonomy and throw `ProviderCallException` (429 → RateLimited with
@@ -325,9 +368,10 @@ recognition stage's posture, justified because every call bills); open breaker �
 run-level marker (`skipped_provider` outcome, mirroring `speech:provider-error`) so it never
 fails the enrichment run or re-bills completed stages; already-cached embeddings are kept.
 
-**Frame formats.** v1 embeds `jpg`/`jpeg`/`png` frames. `webp`/`heic` frames (possible for
-`source_image` kinds) are skipped per-frame and counted in `frames_skipped_format` — insufficient
-coverage accounting, never "absent". (Transcoding is a deferred nicety.)
+**Frame formats (verified — better than assumed).** The model officially accepts JPEG, PNG,
+WebP, BMP, HEIC, HEIF, and AVIF — every format B's keyframes can carry. v1 therefore embeds
+`jpg`/`jpeg`/`png`/`webp`/`heic`/`heif`; `frames_skipped_format` remains only for unknown or
+undecodable content (still counted as coverage loss, never "absent").
 
 ---
 
@@ -336,7 +380,7 @@ coverage accounting, never "absent". (Transcoding is a deferred nicety.)
 **Surface (approved Q1).** A "Photos" action on each row of `/crm/products` opens a manage-photos
 modal (`ProductPhotos` Livewire component, registered alongside `crm.products-index`):
 thumbnail grid (served via a new short-TTL **signed route** mirroring the documents download
-pattern), upload (`WithFileUploads`; validation `required|file|max:10240|mimes:jpg,jpeg,png`),
+pattern), upload (`WithFileUploads`; validation `required|file|max:10240|mimes:jpg,jpeg,png,webp`),
 optional `view_label` select, delete per photo, photo-count badge on the product row, helper copy
 recommending 3–5 diverse views (front/back/side/packaging/real-world). Cap 8 enforced
 server-side. Mutations require the same authorization as product create/edit in `ProductsIndex`
@@ -392,7 +436,8 @@ meaning).
 ## 8. Matching algorithm and confidence bands (approved Q4/Q5)
 
 **Frame preparation (local, free, before any spend).** From the stored `KeyframeSet`, in order:
-1. **Format check** — only `jpg`/`jpeg`/`png` proceed (§5); others → `frames_skipped_format`.
+1. **Format check** — `jpg`/`jpeg`/`png`/`webp`/`heic`/`heif` proceed (all officially supported
+   by the model, §5); unknown/undecodable → `frames_skipped_format`.
 2. **Quality filter** (`FrameQualityFilter`, config-gated, conservative defaults) — drop frames
    that cannot produce a reliable match: undecodable bytes, extreme darkness or overexposure
    (mean luminance outside bounds on a downsampled grayscale copy), or near-zero luminance
@@ -550,8 +595,8 @@ detection kind; the backfill command (§14) is the manual remedy.
   quick lens for both cost and quality problems.
   Reads `ai_usage_counters` + recent runs live on render. The plan page (`/monitoring/plan`) additionally gains
   a forward-looking "Visual product matching (embeddings)" estimate row in
-  `IngestionCostEstimator::perService()` (list price `EMBEDDING_PER_IMAGE = 0.0001` USD,
-  assumption constants documented as estimates).
+  `IngestionCostEstimator::perService()` (verified list price `EMBEDDING_PER_IMAGE = 0.00012`
+  USD, assumption constants documented as estimates).
 
 ---
 
@@ -614,7 +659,7 @@ inconclusiveness adds no fake signal in either direction.
     'alert_thresholds' => [50, 80, 95, 100],
     'capabilities' => [
         'embedding' => [
-            'price_micro_usd_per_unit' => (int) env('QDS_AI_EMBEDDING_PRICE_MICRO_USD', 100), // $0.0001
+            'price_micro_usd_per_unit' => (int) env('QDS_AI_EMBEDDING_PRICE_MICRO_USD', 120), // $0.00012/image (verified 2026-07-19)
             'per_post_units' => (int) env('QDS_AI_EMBEDDING_PER_POST', 12),
             'tenant_daily_units' => (int) env('QDS_AI_EMBEDDING_TENANT_DAILY', 2000),
             'tenant_monthly_units' => (int) env('QDS_AI_EMBEDDING_TENANT_MONTHLY', 40000),
@@ -631,7 +676,7 @@ inconclusiveness adds no fake signal in either direction.
 'google_embeddings' => [
     'credentials_path' => env('GOOGLE_EMBEDDINGS_CREDENTIALS'),   // service-account JSON key file
     'project_id' => env('GOOGLE_EMBEDDINGS_PROJECT'),
-    'location' => env('GOOGLE_EMBEDDINGS_LOCATION', 'europe-west4'), // EU-availability spike may adjust (§5)
+    'location' => env('GOOGLE_EMBEDDINGS_LOCATION', 'eu'), // EU multi-region — the only EU location serving this model (§5)
     'base_url' => env('GOOGLE_EMBEDDINGS_BASE_URL'),              // default derived from location
     'timeout' => (int) env('GOOGLE_EMBEDDINGS_TIMEOUT_SECONDS', 30),
 ],
@@ -765,3 +810,48 @@ the enum gains VISUAL_PRODUCT it will fabricate such rows in demo data; acceptab
   yields crops embedded through the same interface under a distinct `model_version` suffix, so
   full-frame and crop embeddings coexist without schema change and the matcher never learns the
   difference.
+
+---
+
+## 18. External-dependency verification (2026-07-19)
+
+Per the project's external-verification mandate, every external-technology claim in this spec was
+verified against **official documentation only** on 2026-07-19 (four independent research passes;
+blogs used only as pointers, never as citations). Key verified values:
+
+| Claim | Verified value |
+|---|---|
+| Model id / status | `gemini-embedding-2`, **GA 2026-04-22** (preview id exists but may be deleted) |
+| Recommended / replacement | Latest stable multimodal embedding model; no newer replacement in release notes through 2026-07 |
+| API method | `:embedContent` (`content.parts[].inlineData`; `embedContentConfig.outputDimensionality`; response `embedding.values`); one call → ONE vector |
+| Image formats / limits | JPEG, PNG, WebP, BMP, HEIC, HEIF, AVIF; 258 tokens/image, 8,192-token window (silent truncation); 16,384² px max |
+| Dimensions | Default 3072; MRL 128–3072 (recommended 768/1536/3072); non-default L2-normalized; v1↔v2 vector spaces incompatible |
+| Pricing | **$0.00012 per image** (per image, not per token); text $0.20/1M tokens; no output charge. (Google's pricing table still says "Preview" despite GA — internal inconsistency noted; figure is the only published one) |
+| Quotas | Global per project: 40,000 req/min, 10M input tokens/min; no Provisioned Throughput / batch |
+| Locations / residency | Only `global` / `us` / `eu`; **no single region**. `eu` = ML processing within EU member states (UK/CH excluded) + data at rest in-location; `global` = no guarantee. Endpoint `aiplatform.eu.rep.googleapis.com` |
+| Auth | API keys **cannot** call `embedContent`; service-account RS256 JWT-bearer flow current (`aud` = token endpoint, ≤ 1 h, scope `cloud-platform`); workload identity federation preferred only with an OIDC provider |
+| `multimodalembedding@001` | Retirement **2027-04-01**; the 2025-06-24/2026-06-24 dates are the Vertex AI **SDK module** deprecation, not the model API (corrects spec revision `13192bb`) |
+| Platform naming | "Vertex AI" officially renamed **Gemini Enterprise Agent Platform** 2026-04-22; API service `aiplatform.googleapis.com` unchanged |
+| pgvector | Upstream 0.8.5 (2026-07-08), Postgres 13+; `vector` stores ≤ 16,000 dims, **indexes ≤ 2,000** (halfvec ≤ 4,000); `<=>` = cosine distance, exact scan = perfect-recall sequential scan; official image `pgvector/pgvector:pg17*` is `FROM postgres:…` (drop-in) |
+| Neon | pgvector **0.8.0** on PG17 (spec pins 0.8.0 semantics); `CREATE EXTENSION` per database, no special role; Frankfurt `aws-eu-central-1` current; extensions not region-dependent; exact scan officially fine at small scale (~10k rows comfort, ~50k review point) |
+
+**Unresolved / watch items:** overall request-byte cap for `embedContent` undocumented (per-file
+"no limit" is stated; our frames are ≤ ~200 KB — non-issue); Google's pricing-page "Preview"
+label vs GA status; Neon lag behind upstream pgvector (upgrades need a Neon release + compute
+restart + `ALTER EXTENSION`); known Google issue #504505771 (audio-track extraction broken for
+this model — unused by C).
+
+**Citations (official):**
+Model card & versions: docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/embedding-2 · …/models/model-versions ·
+multimodal how-to: …/models/embeddings/get-multimodal-embeddings · REST: …/reference/rest/v1/projects.locations.publishers.models/embedContent · …/reference/rest/v1/Content ·
+pricing: cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing · quotas: …/models/quotas ·
+locations: docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations · residency: …/learn/data-residency ·
+deprecations: docs.cloud.google.com/vertex-ai/generative-ai/docs/deprecations · release notes: docs.cloud.google.com/gemini-enterprise-agent-platform/release-notes ·
+auth: docs.cloud.google.com/vertex-ai/docs/authentication · developers.google.com/identity/protocols/oauth2/service-account · API discovery: aiplatform.googleapis.com/$discovery/rest?version=v1 ·
+Gemini API residency terms: ai.google.dev/gemini-api/terms · ai.google.dev/gemini-api/docs/available-regions ·
+pgvector: github.com/pgvector/pgvector (README/CHANGELOG/Dockerfile/tags) · hub.docker.com/r/pgvector/pgvector ·
+Neon: neon.com/docs/extensions/pgvector · …/extensions/pg-extensions · …/reference/compatibility · …/introduction/regions · …/ai/ai-vector-search-optimization
+
+**Re-verify at implementation time** (dedicated early plan task): one real `embedContent` smoke
+call against the `eu` endpoint on the actual project; pin model id, price, and quota values
+observed then.

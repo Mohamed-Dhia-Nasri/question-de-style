@@ -182,8 +182,10 @@ class EnrichmentPipelineTest extends TestCase
 
         // Stages recorded up to the failure point only.
         $this->assertArrayHasKey('hashtags', $run->stages);
+        $this->assertArrayHasKey('transcript', $run->stages);
         $this->assertArrayNotHasKey('recognition', $run->stages);
         $this->assertArrayNotHasKey('sentiment', $run->stages);
+        $this->assertArrayNotHasKey('keyframes', $run->stages);
 
         // Sanitized error: classified provider message, no key, no raw body.
         $this->assertNotNull($run->error);

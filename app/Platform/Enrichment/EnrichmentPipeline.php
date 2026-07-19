@@ -15,6 +15,7 @@ use App\Platform\Enrichment\Recognition\RecognitionService;
 use App\Platform\Enrichment\Sentiment\SentimentEnricher;
 use App\Platform\Enrichment\Support\EnrichmentRunStatus;
 use App\Platform\Enrichment\TextSignals\TextSignalRecognizer;
+use App\Platform\Enrichment\Transcripts\YouTubeTranscriptEnricher;
 use App\Platform\Ingestion\Exceptions\ProviderCallException;
 use Carbon\CarbonImmutable;
 use Throwable;
@@ -22,7 +23,7 @@ use Throwable;
 /**
  * The SVC-EnrichmentAI pipeline over one ContentItem or Story:
  *
- *   hashtags → recognition → keyframes → text signals → sentiment → seeded attribution → EMV → reach
+ *   hashtags → transcript → recognition → keyframes → text signals → sentiment → seeded attribution → EMV → reach
  *
  * Stage outcomes are recorded on an EnrichmentRun row (operational
  * telemetry, sanitized values only). Unavailable boundaries (sentiment
@@ -43,6 +44,7 @@ class EnrichmentPipeline
         private readonly ReachCalculator $reach,
         private readonly MediaWorkspaceFactory $workspaces,
         private readonly KeyframeExtractor $keyframes,
+        private readonly YouTubeTranscriptEnricher $transcripts,
     ) {}
 
     public function run(ContentItem|Story $target, string $correlationId, int $retryCount = 0): EnrichmentRun
@@ -66,6 +68,8 @@ class EnrichmentPipeline
                 // ENT-Story carries no caption field.
                 $stages['hashtags'] = 'skipped:stories-have-no-caption';
             }
+
+            $stages['transcript'] = $this->transcripts->enrich($target, $correlationId, $retryCount);
 
             $recognition = $this->recognition->enrich($target, $correlationId, $retryCount, $workspace);
             $stages['recognition'] = sprintf(

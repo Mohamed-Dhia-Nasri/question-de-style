@@ -8,8 +8,10 @@ use InvalidArgumentException;
  * pgvector text-literal formatting/parsing — the ONLY vector serialization
  * in the codebase (no composer dependency, ADR-0029). pgvector accepts
  * `'[0.1,0.2,...]'::vector` as input and prints the same shape on `::text`
- * output; PHP 8's locale-independent shortest-round-trip float casting
- * keeps the conversion lossless at the precision similarity scoring needs.
+ * output; json_encode(), under PHP's `serialize_precision=-1` default,
+ * formats each float with the shortest round-trip representation (locale-
+ * independent), keeping the conversion lossless at the precision similarity
+ * scoring needs.
  */
 final class VectorLiteral
 {

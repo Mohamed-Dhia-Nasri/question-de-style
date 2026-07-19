@@ -159,10 +159,17 @@ product-level RecognitionDetection rows (new type, e.g. VLM_PRODUCT) feeding the
 unchanged. Also fix speech: multilingual ASR (Google alternativeLanguageCodes / language-ID, enhanced
 model, >60s via async/chunking) so EN/FR/DE and accented spoken mentions are caught.
 
+Note: a shipped post can have NO `visual_match_runs` row at all (frameless extraction, DEF-021) — and even
+when a row exists, a skipped run (budget/read-only/provider) never sets `needs_verification`. D's trigger
+policy must treat BOTH as "unavailable", never as "verified absent" — absence of the flag is not evidence
+of a clean look.
+
 ## Locked decisions (do not re-litigate): augment; Gemini + Google, EU residency; TIERED — the VLM is the
 expensive last resort, gated to run only when cheaper tiers (A free signals, C embeddings) are
 inconclusive OR the post is high-value (creator has an active shipment); per-tenant isolation;
-fail-closed; DP-004; kill switch default OFF; qds:eval-detection is the metric.
+fail-closed; DP-004; kill switch default OFF; qds:eval-detection is the metric. C's INCONCLUSIVE now also
+covers a partial embed shortfall (some prepared frames transiently failed to embed) — treat that the same
+as any other INCONCLUSIVE trigger, not as a clean NO_MATCH.
 
 ## Open questions to brainstorm (ask one at a time)
 1. Exact VLM trigger policy (which posts, cost caps per tenant/day) and how it composes with C's cheaper

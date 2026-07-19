@@ -204,6 +204,19 @@ class GeminiMultimodalEmbeddingProviderTest extends TestCase
         $this->assertSame(ErrorCategory::MalformedResponse, $this->embedExpectingFailure()->category);
     }
 
+    public function test_a_response_with_no_vector_key_maps_to_malformed_response(): void
+    {
+        $this->configureProvider();
+        // Well-formed JSON, but the embedding.values key is simply absent —
+        // distinct from "present but wrong shape/width" (SchemaDrift).
+        Http::fake(['aiplatform.eu.rep.googleapis.com/*' => Http::response('{}')]);
+
+        $e = $this->embedExpectingFailure();
+
+        $this->assertSame(ErrorCategory::MalformedResponse, $e->category);
+        $this->assertStringNotContainsString('{}', $e->getMessage());
+    }
+
     public function test_a_wrong_width_vector_maps_to_schema_drift(): void
     {
         $this->configureProvider();

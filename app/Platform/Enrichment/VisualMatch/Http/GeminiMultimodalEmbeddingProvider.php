@@ -110,8 +110,20 @@ final class GeminiMultimodalEmbeddingProvider implements EmbeddingProvider
 
         // Verified response shape: the vector lives at embedding.values —
         // and its width must match the pinned outputDimensionality (a
-        // mismatch is provider drift, never silently stored).
+        // mismatch is provider drift, never silently stored). A
+        // well-formed body with the key simply absent is MalformedResponse
+        // (the shape contract itself was broken), distinct from a
+        // present-but-wrong-shape/width value, which is SchemaDrift.
         $values = $body['embedding']['values'] ?? null;
+
+        if ($values === null) {
+            throw new ProviderCallException(
+                SourceRegistry::GOOGLE_GEMINI_EMBEDDINGS,
+                ErrorCategory::MalformedResponse,
+                SourceRegistry::GOOGLE_GEMINI_EMBEDDINGS.' response carried no vector.',
+                $response->status(),
+            );
+        }
 
         if (! is_array($values) || ! array_is_list($values) || count($values) !== $dimensions) {
             throw new ProviderCallException(

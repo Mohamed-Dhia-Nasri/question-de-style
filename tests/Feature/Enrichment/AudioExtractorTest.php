@@ -49,6 +49,25 @@ class AudioExtractorTest extends TestCase
         $this->assertNull($this->extractor->extract(''));
     }
 
+    public function test_extract_from_file_produces_the_same_flac_as_extract(): void
+    {
+        // [seam audit D1] makeVideo(bool $withAudio): string returns MP4 BYTES,
+        // not a path — write them to our own temp file for the path variant.
+        $videoBytes = $this->makeVideo(withAudio: true);
+        $videoPath = (string) tempnam(sys_get_temp_dir(), 'qds-test-video-');
+        file_put_contents($videoPath, $videoBytes);
+
+        try {
+            $fromFile = $this->extractor->extractFromFile($videoPath);
+            $fromBytes = $this->extractor->extract($videoBytes);
+
+            $this->assertNotNull($fromFile);
+            $this->assertSame($fromBytes, $fromFile);
+        } finally {
+            @unlink($videoPath);
+        }
+    }
+
     /** One-second synthetic MP4 (test pattern ± sine tone), rendered locally. */
     private function makeVideo(bool $withAudio): string
     {

@@ -62,19 +62,8 @@ class AudioExtractor
         }
 
         $in = tempnam(sys_get_temp_dir(), 'qds-audio-in-');
-        $out = tempnam(sys_get_temp_dir(), 'qds-audio-out-');
 
-        if ($in === false || $out === false) {
-            // One tempnam may have created a real (0-byte) file while the
-            // other failed — clean up the survivor so it does not leak, since
-            // the try/finally below is never entered on this path.
-            if (is_string($in)) {
-                @unlink($in);
-            }
-            if (is_string($out)) {
-                @unlink($out);
-            }
-
+        if ($in === false) {
             return null;
         }
 
@@ -83,11 +72,36 @@ class AudioExtractor
                 return null;
             }
 
+            return $this->extractFromFile($in);
+        } finally {
+            @unlink($in);
+        }
+    }
+
+    /**
+     * Same contract as extract(), reading an EXISTING video file — the
+     * MediaWorkspace already materialized the bytes once (sub-project B);
+     * writing them to a second temp file would double the disk footprint.
+     * The caller keeps ownership of $videoPath.
+     */
+    public function extractFromFile(string $videoPath): ?string
+    {
+        if (! is_file($videoPath) || (int) @filesize($videoPath) === 0) {
+            return null;
+        }
+
+        $out = tempnam(sys_get_temp_dir(), 'qds-audio-out-');
+
+        if ($out === false) {
+            return null;
+        }
+
+        try {
             $result = Process::timeout(self::FFMPEG_TIMEOUT_SECONDS)->run([
                 $this->ffmpegPath(),
                 '-nostdin',
                 '-v', 'error',
-                '-i', $in,
+                '-i', $videoPath,
                 '-vn', // drop the video stream
                 '-ac', '1', // mono
                 '-ar', '16000', // 16 kHz
@@ -110,7 +124,6 @@ class AudioExtractor
         } catch (Throwable) {
             return null;
         } finally {
-            @unlink($in);
             @unlink($out);
         }
     }

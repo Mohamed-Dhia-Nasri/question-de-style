@@ -229,22 +229,24 @@ class ProductPhotosTest extends TestCase
 
         $disk = (string) config('qds.ingestion.media_disk', 'media');
         $directory = "tenants/{$product->tenant_id}/product-photos/{$product->id}";
-        $raced = false;
+        $racedCount = 0;
 
         // Simulates a concurrent save landing its photo between our
         // pre-check and our authoritative recount. Product::retrieved fires
-        // for every Product retrieval, but the ONLY one that happens while
-        // a transaction is open is save()'s own lockForUpdate()->first()
-        // read (open()'s and render()'s retrievals all run outside any
-        // transaction) — gating on DB::transactionLevel() reliably targets
-        // that one query without depending on Livewire's render-cycle
-        // invocation count.
-        Product::retrieved(function () use (&$raced, $product): void {
-            if ($raced || DB::transactionLevel() === 0) {
+        // for every Product retrieval, but RefreshDatabase already wraps
+        // the whole test in an outer transaction, so DB::transactionLevel()
+        // is 1 even during open()/render() — gating on "> 0" (tried first)
+        // fires too early, on open()'s own Product::findOrFail, landing the
+        // racing insert before save()'s cheap pre-check ever runs. save()'s
+        // own DB::transaction() nests INSIDE that outer wrapper and runs at
+        // level 2, so gating on ">= 2" targets exactly (and only) the
+        // lockForUpdate()->first() read inside it.
+        Product::retrieved(function () use (&$racedCount, $product): void {
+            if ($racedCount > 0 || DB::transactionLevel() < 2) {
                 return;
             }
 
-            $raced = true;
+            $racedCount++;
             $this->makeStoredPhoto($product);
         });
 
@@ -261,7 +263,10 @@ class ProductPhotosTest extends TestCase
             Product::flushEventListeners();
         }
 
-        $this->assertTrue($raced, 'the simulated race never fired — test setup is broken');
+        // With the ">= 2" gate this can ONLY have fired inside save()'s own
+        // transaction — proof the authoritative recount (not the cheap
+        // pre-check) is what caught the race.
+        $this->assertSame(1, $racedCount, 'the simulated race never fired — test setup is broken');
         // 2 rows: the original + the racing insert — NOT the aborted save's.
         $this->assertSame(2, ProductReferencePhoto::query()->where('product_id', $product->id)->count());
         // 2 blobs on disk: same two — the aborted save's blob was deleted.

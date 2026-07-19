@@ -3,6 +3,7 @@
     "id": "7301234567890123456",
     "text": "Outfit check #fyp",
     "webVideoUrl": "https://www.tiktok.com/@styleicon/video/7301234567890123456",
+    "mediaUrls": ["https://cdn.tiktok.example/video/7301234567890123456.mp4"],
     "createTimeISO": "2026-07-02T12:00:00.000Z",
     "playCount": 250000,
     "diggCount": 21000,
@@ -21,7 +22,16 @@
     "diggCount": 4000,
     "commentCount": 120,
     "shareCount": 60,
-    "videoMeta": {"duration": 184},
+    "videoMeta": {"duration": 184, "downloadAddr": "https://cdn.tiktok.example/download/7301234567890123457.mp4"},
+    "authorMeta": {"name": "styleicon", "signature": "Mode & Lifestyle", "fans": 480000}
+  },
+  {
+    "id": "7301234567890123458",
+    "text": "Clip ohne Download-URL",
+    "webVideoUrl": "https://www.tiktok.com/@styleicon/video/7301234567890123458",
+    "createTimeISO": "2026-07-03T09:00:00.000Z",
+    "playCount": 1000,
+    "videoMeta": {"duration": 20},
     "authorMeta": {"name": "styleicon", "signature": "Mode & Lifestyle", "fans": 480000}
   },
   {

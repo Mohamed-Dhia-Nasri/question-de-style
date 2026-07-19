@@ -108,9 +108,9 @@ class TikTokContentAdapter implements ProvidesProfileFromContent
                     ? ContentType::Short
                     : ContentType::Video,
                 caption: Extract::string($item, 'text'),
-                mediaUrls: array_filter([
-                    Extract::string($item, 'webVideoUrl'),
-                ]),
+                mediaUrls: array_values(array_filter([
+                    $this->downloadUrl($item),
+                ])),
                 publishedAt: Extract::timestamp($item, 'createTimeISO', 'createTime'),
                 publicMetrics: array_values(array_filter([
                     Extract::publicMetric('views', Extract::int($item, 'playCount')),
@@ -167,5 +167,26 @@ class TikTokContentAdapter implements ProvidesProfileFromContent
             followerCount: Extract::publicMetric('followers', Extract::int($author, 'fans', 'followers')),
             provenance: new Provenance($this->source(), CarbonImmutable::now(), $response->sourceVersion),
         );
+    }
+
+    /**
+     * The actor's direct CDN media URL — the REAL video file (sub-project B).
+     * Null when the actor supplies none: media_urls then stays EMPTY — the
+     * watch page is NEVER a media candidate (downstream reports the existing
+     * media:none marker instead of wasting a fetch on HTML).
+     *
+     * @param  array<array-key, mixed>  $item
+     */
+    private function downloadUrl(array $item): ?string
+    {
+        $urls = $item['mediaUrls'] ?? null;
+
+        if (is_array($urls) && is_string($urls[0] ?? null) && $urls[0] !== '') {
+            return $urls[0];
+        }
+
+        $videoMeta = is_array($item['videoMeta'] ?? null) ? $item['videoMeta'] : [];
+
+        return Extract::string($videoMeta, 'downloadAddr');
     }
 }

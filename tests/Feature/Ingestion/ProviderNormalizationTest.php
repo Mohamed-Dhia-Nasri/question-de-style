@@ -169,7 +169,7 @@ class ProviderNormalizationTest extends TestCase
         $adapter = app(TikTokContentAdapter::class);
         $batch = $adapter->fetchContent('styleicon');
 
-        $this->assertCount(2, $batch->items);
+        $this->assertCount(3, $batch->items);
         // The id-less item carries authorMeta — under rec 4 it is the
         // quiet-day profile marker, silently skipped rather than
         // quarantined, and the profile is captured from the payload.
@@ -225,6 +225,32 @@ class ProviderNormalizationTest extends TestCase
         // silently returned-as-null and dropped.
         $this->assertCount(1, $batch->items);
         $this->assertCount(1, $batch->rejected);
+    }
+
+    public function test_tiktok_media_urls_carry_the_real_download_url_never_the_watch_page(): void
+    {
+        $this->fakeProviderCredentials();
+        $this->fakeApifyActor((string) config('services.apify.actors.tiktok'), $this->fixture('tiktok-items'));
+
+        $batch = app(\App\Platform\Ingestion\Providers\TikTok\TikTokContentAdapter::class)->fetchContent('styleicon');
+        // Key by externalId — never by array position (fixture ordering and
+        // rejected-item behaviour must not break unrelated assertions).
+        $items = collect($batch->items)
+            ->filter(fn ($i) => $i instanceof \App\Platform\Ingestion\DTO\ContentData)
+            ->keyBy(fn (\App\Platform\Ingestion\DTO\ContentData $i) => $i->externalId);
+
+        // The actor's mediaUrls list wins.
+        $this->assertSame(['https://cdn.tiktok.example/video/7301234567890123456.mp4'], $items['7301234567890123456']->mediaUrls);
+        $this->assertSame('https://www.tiktok.com/@styleicon/video/7301234567890123456', $items['7301234567890123456']->permalink);
+
+        // videoMeta.downloadAddr is the secondary source.
+        $this->assertSame(['https://cdn.tiktok.example/download/7301234567890123457.mp4'], $items['7301234567890123457']->mediaUrls);
+
+        // No download URL from the actor → NO media candidate (the watch
+        // page is never media; downstream reports media:none). The page URL
+        // survives as the permalink only.
+        $this->assertSame([], $items['7301234567890123458']->mediaUrls);
+        $this->assertSame('https://www.tiktok.com/@styleicon/video/7301234567890123458', $items['7301234567890123458']->permalink);
     }
 
     public function test_youtube_profile_maps_channel_and_respects_hidden_subscribers(): void

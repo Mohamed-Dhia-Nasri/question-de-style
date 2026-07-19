@@ -7,12 +7,15 @@ use App\Modules\Monitoring\Models\Story;
 use App\Platform\Enrichment\Attribution\AttributionService;
 use App\Platform\Enrichment\Emv\EmvCalculator;
 use App\Platform\Enrichment\Hashtags\HashtagEnricher;
+use App\Platform\Enrichment\Keyframes\KeyframeExtractor;
+use App\Platform\Enrichment\Media\MediaWorkspaceFactory;
 use App\Platform\Enrichment\Models\EnrichmentRun;
 use App\Platform\Enrichment\Reach\ReachCalculator;
 use App\Platform\Enrichment\Recognition\RecognitionService;
 use App\Platform\Enrichment\Sentiment\SentimentEnricher;
 use App\Platform\Enrichment\Support\EnrichmentRunStatus;
 use App\Platform\Enrichment\TextSignals\TextSignalRecognizer;
+use App\Platform\Enrichment\Transcripts\YouTubeTranscriptEnricher;
 use App\Platform\Ingestion\Exceptions\ProviderCallException;
 use Carbon\CarbonImmutable;
 use Throwable;
@@ -20,7 +23,7 @@ use Throwable;
 /**
  * The SVC-EnrichmentAI pipeline over one ContentItem or Story:
  *
- *   hashtags → recognition → text signals → sentiment → seeded attribution → EMV → reach
+ *   hashtags → transcript → recognition → keyframes → text signals → sentiment → seeded attribution → EMV → reach
  *
  * Stage outcomes are recorded on an EnrichmentRun row (operational
  * telemetry, sanitized values only). Unavailable boundaries (sentiment
@@ -39,6 +42,9 @@ class EnrichmentPipeline
         private readonly AttributionService $attribution,
         private readonly EmvCalculator $emv,
         private readonly ReachCalculator $reach,
+        private readonly MediaWorkspaceFactory $workspaces,
+        private readonly KeyframeExtractor $keyframes,
+        private readonly YouTubeTranscriptEnricher $transcripts,
     ) {}
 
     public function run(ContentItem|Story $target, string $correlationId, int $retryCount = 0): EnrichmentRun
@@ -51,6 +57,7 @@ class EnrichmentPipeline
         ]);
 
         $stages = [];
+        $workspace = $this->workspaces->forTarget($target);
 
         try {
             if ($target instanceof ContentItem) {
@@ -62,7 +69,9 @@ class EnrichmentPipeline
                 $stages['hashtags'] = 'skipped:stories-have-no-caption';
             }
 
-            $recognition = $this->recognition->enrich($target, $correlationId, $retryCount);
+            $stages['transcript'] = $this->transcripts->enrich($target, $correlationId, $retryCount);
+
+            $recognition = $this->recognition->enrich($target, $correlationId, $retryCount, $workspace);
             $stages['recognition'] = sprintf(
                 '%s:created=%d,updated=%d%s',
                 $recognition['status'],
@@ -70,6 +79,14 @@ class EnrichmentPipeline
                 $recognition['updated'],
                 $recognition['skipped'] !== [] ? ' skipped='.implode('|', $recognition['skipped']) : '',
             );
+
+            if ((bool) config('qds.enrichment.keyframes.enabled')) {
+                // Runs even with no Google provider configured — frames are
+                // for tiers C/D, independent of the recognition providers.
+                $stages['keyframes'] = $this->keyframes->enrich($target, $workspace);
+            } else {
+                $stages['keyframes'] = 'skipped:disabled';
+            }
 
             if (config('qds.enrichment.text_signals.enabled')) {
                 $stages['text_signals'] = $this->textSignals->enrich($target);
@@ -135,6 +152,8 @@ class EnrichmentPipeline
             ]);
 
             throw $e;
+        } finally {
+            $workspace->close();
         }
 
         return $run;

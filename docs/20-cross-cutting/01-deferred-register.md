@@ -41,6 +41,11 @@ A deferred capability is distinct from a merely unbuilt one. Per the [status lif
 | [DEF-004](#def-004) | OAuth authorized-creator analytics flows | [ADR-0007](../05-decisions/decision-log.md#adr-0007) | — |
 | [DEF-005](#def-005) | Comment collection & audience-reaction analysis (REQ-M1-010) | [ADR-0009](../05-decisions/decision-log.md#adr-0009) | — |
 | [DEF-006](#def-006) | Open-web brand/keyword/hashtag listening (mentions from non-roster creators) | [ADR-0011](../05-decisions/decision-log.md#adr-0011) | — |
+| [DEF-007](#def-007) | Real YouTube video-file download (frame-level YouTube visual) | [ADR-0028](../05-decisions/decision-log.md#adr-0028) | — |
+| [DEF-008](#def-008) | GCS-URI whole-video Video Intelligence for over-cap video | [ADR-0028](../05-decisions/decision-log.md#adr-0028) | [DP-005](00-data-principles.md#dp-005) |
+| [DEF-009](#def-009) | Scene-change keyframe sampling (alternative `KeyframeSampler` mode) | [ADR-0028](../05-decisions/decision-log.md#adr-0028) | — |
+| [DEF-010](#def-010) | Keyframe lifecycle state (`extracted` / `pruned` / `unavailable`) | [ADR-0028](../05-decisions/decision-log.md#adr-0028) | — |
+| [DEF-011](#def-011) | Transcript negative-cache expiry / force-refresh | [ADR-0028](../05-decisions/decision-log.md#adr-0028) | — |
 
 ---
 
@@ -113,6 +118,67 @@ A deferred capability is distinct from a merely unbuilt one. Per the [status lif
 - **Linked decision.** [ADR-0011](../05-decisions/decision-log.md#adr-0011) (Status APPROVED).
 - **UI behaviour.** Open-web mention feeds and non-roster mention counts render **"unavailable"** per the rule above.
 
+<a id="def-007"></a>
+### DEF-007
+
+**Real YouTube video-file download — frame-level YouTube visual signal.**
+
+- **What is deferred.** Downloading actual YouTube video bytes (for example via `yt-dlp` or a downloader Apify actor) so YouTube content gets the same multi-frame visual coverage as TikTok and Instagram. In v1, YouTube's only visual signal is the single Data-API max-res thumbnail.
+- **Why it is deferred.** [ADR-0028](../05-decisions/decision-log.md#adr-0028) explicitly **rejected** downloading YouTube video files for v1 on ToS grounds — no downloader mechanism was evaluated as compliant, and the frozen stack ([ADR-0001](../05-decisions/decision-log.md#adr-0001)) admits no such provider. `SRC-apify-youtube-transcript` (also added by ADR-0028) is captions-text-only and never fetches video or audio bytes.
+- **What v1 does instead.** YouTube's visual signal stays the one Data-API thumbnail frame (`KeyframeKind::Thumbnail`); spoken/on-screen brand content is covered instead by the transcript-text pipeline (`SPOKEN_BRAND` from captions).
+- **What would be needed later.** An explicit ToS risk decision plus a superseding ADR authorizing a specific, compliant download mechanism before frame-level YouTube keyframes can be produced.
+- **Linked decision.** [ADR-0028](../05-decisions/decision-log.md#adr-0028) (Status APPROVED).
+- **UI behaviour.** Multi-frame YouTube visual detections render **"unavailable"**; the single thumbnail-derived detection is unaffected.
+
+<a id="def-008"></a>
+### DEF-008
+
+**GCS-URI whole-video Video Intelligence for over-cap video.**
+
+- **What is deferred.** Routing video that exceeds the inline byte cap to Google Cloud Video Intelligence via a `gs://` URI so the whole-video (on-screen text + logo) pass still runs on oversized files, instead of skipping that pass.
+- **Why it is deferred.** [ADR-0028](../05-decisions/decision-log.md#adr-0028) keeps v1 with **no Google Cloud Storage**: over-cap video only skips the whole-video Video-Intelligence pass (`recognition:whole-video-skipped-too-large`). Moving Video Intelligence to a `gs://` input would reverse the inline-only doctrine governed by [DP-005](00-data-principles.md#dp-005) and stand up a second storage backend (the first GCS bucket) — a real architectural addition, not a config change.
+- **What v1 does instead.** Keyframes (deterministic even-interval samples) still cover over-cap video visually; the whole-video pass is skipped **explainably** via the `recognition:whole-video-skipped-too-large` marker, never silently dropped.
+- **What would be needed later.** Standing up the first GCS bucket, a DP-005 doctrine change authorizing `gs://` inputs, and a superseding ADR.
+- **Linked decision.** [ADR-0028](../05-decisions/decision-log.md#adr-0028) (Status APPROVED).
+- **UI behaviour.** Whole-video-only detections for over-cap video render **"unavailable"**; keyframe-derived detections for the same content are unaffected.
+
+<a id="def-009"></a>
+### DEF-009
+
+**Scene-change keyframe sampling — alternative `KeyframeSampler` mode.**
+
+- **What is deferred.** An alternative frame-selection strategy — scene-change detection — as opposed to v1's deterministic even-interval sampling (`N = clamp(ceil(duration/interval), min, max)`, midpoint of each span).
+- **Why it is deferred.** [ADR-0028](../05-decisions/decision-log.md#adr-0028) chose deterministic even-interval sampling specifically because identical input bytes and config always yield identical frames (the repo's determinism doctrine); scene-change selection is a documented future mode, not evaluated for v1.
+- **What v1 does instead.** `KeyframeSampler` always samples at fixed, deterministic intervals — every video gets the same sampling logic regardless of its visual content.
+- **What would be needed later.** A scene-change detection mode added as an alternate `KeyframeSampler` strategy, evaluated for reproducibility and recall lift before activation (it does not require a new provider or ADR-0001 amendment — an internal algorithm choice).
+- **Linked decision.** [ADR-0028](../05-decisions/decision-log.md#adr-0028) (Status APPROVED).
+- **UI behaviour.** Not user-facing — an internal sampling-strategy choice. No field renders differently; keyframe availability itself follows the standard unavailable-never-empty rule when no video was extractable.
+
+<a id="def-010"></a>
+### DEF-010
+
+**Keyframe lifecycle state — `extracted` / `pruned` / `unavailable`.**
+
+- **What is deferred.** A persisted lifecycle state on keyframe sets that lets a tier-C re-embedding job distinguish "pruned by retention" (frames existed, were deleted by `qds:prune-keyframes`, and could be re-extracted from the still-available source media) from "never extractable" (sampling failed or no usable media was ever collected).
+- **Why it is deferred.** [ADR-0028](../05-decisions/decision-log.md#adr-0028) ships the keyframe row set itself and its retention prune command, but not a state column recording *why* an owner currently has zero keyframe rows.
+- **What v1 does instead.** The run stages report the outcome of the CURRENT run only: `KeyframeExtractor` returns `skipped:already-extracted` when frames already exist, and `skipped:<marker>` (falling back to `skipped:no-media` when no acquisition marker is set) when none could be sampled. Nothing today lets a later job tell these two "no rows exist" cases apart after the fact.
+- **What would be needed later.** A lifecycle-state field on the keyframe set (or its owner) written by both the extractor and the pruner, so a future tier-C re-embedding job can skip "never extractable" owners without a wasted re-fetch and re-attempt only "pruned by retention" owners whose source media may still be available.
+- **Linked decision.** [ADR-0028](../05-decisions/decision-log.md#adr-0028) (Status APPROVED).
+- **UI behaviour.** Not user-facing. Internally, tier-C re-embedding logic must not yet assume it can distinguish the two cases; both currently look identical (zero keyframe rows for the owner).
+
+<a id="def-011"></a>
+### DEF-011
+
+**Transcript negative-cache expiry / force-refresh.**
+
+- **What is deferred.** Any mechanism to re-attempt a transcript fetch for a video whose `content_transcripts` row is `unavailable` — an expiry window on the negative cache, or an operator force-refresh command.
+- **Why it is deferred.** [ADR-0028](../05-decisions/decision-log.md#adr-0028)'s billing doctrine is "at most one successful actor run per video, ever"; a refresh path was deliberately excluded from v1.
+- **Evidence this matters (live probe, 2026-07-19).** A live call to `pintostudio~youtube-transcript-scraper` with an UNFETCHABLE video returned HTTP 201 with `[{"data": []}]` — byte-identical to the genuine no-captions response. The actor exposes no signal separating "video has no captions" from "the actor transiently failed to fetch the video", so a transient failure can be permanently negative-cached as `unavailable` for that video.
+- **What v1 does instead.** The `unavailable` row stands until an operator deletes it (the enricher then re-fetches on the next enrichment run). Transport-level errors (non-2xx) are NOT cached and retry normally — only a successful-but-empty response caches.
+- **What would be needed later.** Either a re-fetch-after-N-days rule keyed on `fetched_at` for `unavailable` rows, or a `qds:refresh-transcript {content_item}` operator command — both preserving the one-billed-run norm for the common case.
+- **Linked decision.** [ADR-0028](../05-decisions/decision-log.md#adr-0028) (Status APPROVED).
+- **UI behaviour.** Not user-facing; a YouTube item without a transcript simply shows no SPOKEN_BRAND detections (unavailable-never-empty rule).
+
 ## Dependency map
 
 ```mermaid
@@ -124,6 +190,11 @@ flowchart LR
   ADR0007["ADR-0007"] --> DEF004
   ADR0009["ADR-0009"] --> DEF005["DEF-005\nComment analysis"]
   ADR0011["ADR-0011"] --> DEF006["DEF-006\nOpen-web listening"]
+  ADR0028["ADR-0028"] --> DEF007["DEF-007\nYouTube video download"]
+  ADR0028 --> DEF008["DEF-008\nGCS whole-video VI"]
+  ADR0028 --> DEF009["DEF-009\nScene-change sampling"]
+  ADR0028 --> DEF010["DEF-010\nKeyframe lifecycle state"]
+  ADR0028 --> DEF011["DEF-011\nTranscript negative-cache expiry"]
 ```
 
 DEF-003 cannot be delivered before DEF-004, because `CONFIRMED` reach can only originate from authorized-creator analytics.

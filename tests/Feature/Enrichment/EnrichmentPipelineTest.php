@@ -28,6 +28,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
 use stdClass;
 use Tests\TestCase;
@@ -43,6 +44,13 @@ use Tests\TestCase;
 class EnrichmentPipelineTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['qds.ingestion.media_disk' => 'media']);
+        Storage::fake('media');
+    }
 
     /** Creator → platform account → active CREATOR subject → content. */
     private function wiredContent(string $caption): ContentItem
@@ -174,8 +182,10 @@ class EnrichmentPipelineTest extends TestCase
 
         // Stages recorded up to the failure point only.
         $this->assertArrayHasKey('hashtags', $run->stages);
+        $this->assertArrayHasKey('transcript', $run->stages);
         $this->assertArrayNotHasKey('recognition', $run->stages);
         $this->assertArrayNotHasKey('sentiment', $run->stages);
+        $this->assertArrayNotHasKey('keyframes', $run->stages);
 
         // Sanitized error: classified provider message, no key, no raw body.
         $this->assertNotNull($run->error);

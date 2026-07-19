@@ -138,13 +138,14 @@ class YouTubeContentAdapter implements ContentProvider
                     ? ContentType::Short
                     : ContentType::Video,
                 caption: Extract::string($snippet, 'title'),
-                mediaUrls: ["https://www.youtube.com/watch?v={$externalId}"],
+                mediaUrls: array_values(array_filter([$this->thumbnailUrl($snippet)])),
                 publishedAt: Extract::timestamp($snippet, 'publishedAt'),
                 publicMetrics: array_values(array_filter([
                     Extract::publicMetric('views', Extract::int($statistics, 'viewCount')),
                     Extract::publicMetric('likes', Extract::int($statistics, 'likeCount')),
                     Extract::publicMetric('comments', Extract::int($statistics, 'commentCount')),
                 ])),
+                permalink: "https://www.youtube.com/watch?v={$externalId}",
                 provenance: new Provenance($this->source(), CarbonImmutable::now(), $response->sourceVersion),
                 mentions: \App\Platform\Ingestion\Normalization\SignalExtract::mentions($item),
                 productTags: \App\Platform\Ingestion\Normalization\SignalExtract::productTags($item),
@@ -170,6 +171,28 @@ class YouTubeContentAdapter implements ContentProvider
         return (int) round(
             ((($interval->d * 24) + $interval->h) * 60 + $interval->i) * 60 + $interval->s
         );
+    }
+
+    /**
+     * Highest-resolution thumbnail the Data API exposes — the only visual
+     * the frozen YouTube provider legally hands us (sub-project B); the
+     * video file itself is deliberately NOT downloadable (ToS, ADR-0028).
+     *
+     * @param  array<array-key, mixed>  $snippet
+     */
+    private function thumbnailUrl(array $snippet): ?string
+    {
+        $thumbnails = is_array($snippet['thumbnails'] ?? null) ? $snippet['thumbnails'] : [];
+
+        foreach (['maxres', 'standard', 'high', 'medium', 'default'] as $size) {
+            $entry = is_array($thumbnails[$size] ?? null) ? $thumbnails[$size] : [];
+
+            if (($url = Extract::string($entry, 'url')) !== null) {
+                return $url;
+            }
+        }
+
+        return null;
     }
 
     private function emptyBatch(int $httpStatus, int $bytes, float $requestMs): NormalizedBatch

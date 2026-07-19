@@ -31,6 +31,13 @@ final class SourceRegistry
 
     public const YOUTUBE_DATA_API_V3 = 'SRC-youtube-data-api-v3';
 
+    /**
+     * YouTube captions/transcript TEXT only (ADR-0028 amendment to the
+     * ADR-0001 freeze): the pintostudio transcript actor. Never video or
+     * audio bytes — YouTube media files stay out of reach in v1 (ToS).
+     */
+    public const APIFY_YOUTUBE_TRANSCRIPT = 'SRC-apify-youtube-transcript';
+
     public const GOOGLE_CLOUD_VISION = 'SRC-google-cloud-vision';
 
     public const GOOGLE_SPEECH_TO_TEXT = 'SRC-google-speech-to-text';
@@ -59,6 +66,7 @@ final class SourceRegistry
             self::APIFY_INSTAGRAM_STORY_DETAILS,
             self::CLOCKWORKS_TIKTOK_SCRAPER,
             self::YOUTUBE_DATA_API_V3,
+            self::APIFY_YOUTUBE_TRANSCRIPT,
             self::GOOGLE_CLOUD_VISION,
             self::GOOGLE_SPEECH_TO_TEXT,
             self::GOOGLE_VIDEO_INTELLIGENCE,

@@ -3,6 +3,8 @@
 namespace App\Platform\Enrichment\Recognition;
 
 use App\Modules\Monitoring\Models\Story;
+use App\Platform\Enrichment\Media\StreamResult;
+use App\Platform\Enrichment\Media\StreamStatus;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -54,6 +56,142 @@ class MediaFetcher
         $body = $response->body();
 
         return $body !== '' && strlen($body) <= self::MAX_BYTES ? $body : null;
+    }
+
+    /**
+     * Stream a (possibly large) media file to $sinkPath under a hard byte
+     * cap, with the same SSRF doctrine as fromPublicUrl: resolve once,
+     * refuse non-public, pin the connection, re-validate every redirect.
+     * The caller owns $sinkPath's lifecycle (MediaWorkspace cleans up).
+     */
+    public function streamToFile(string $url, string $sinkPath, int $maxBytes): StreamResult
+    {
+        return $this->streamFollowingRedirects($url, $sinkPath, $maxBytes, self::MAX_REDIRECTS);
+    }
+
+    private function streamFollowingRedirects(string $url, string $sinkPath, int $maxBytes, int $redirectsLeft): StreamResult
+    {
+        $parts = parse_url($url);
+
+        if ($parts === false) {
+            return new StreamResult(StreamStatus::Failed);
+        }
+
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        $host = (string) ($parts['host'] ?? '');
+
+        if (! in_array($scheme, ['https', 'http'], true) || $host === '') {
+            return new StreamResult(StreamStatus::Failed);
+        }
+
+        $ip = $this->resolvePublicIp($host);
+
+        if ($ip === null) {
+            return new StreamResult(StreamStatus::Failed);
+        }
+
+        $port = (int) ($parts['port'] ?? ($scheme === 'https' ? 443 : 80));
+        $tooLarge = false;
+
+        try {
+            $response = $this->pinnedGetToFile($url, $host, $port, $ip, $sinkPath, $maxBytes, $tooLarge);
+        } catch (Throwable) {
+            // The mid-stream guard aborts by throwing; $tooLarge tells the
+            // cap-abort apart from a genuine transport failure.
+            return new StreamResult($tooLarge ? StreamStatus::TooLarge : StreamStatus::Failed);
+        }
+
+        if ($response->redirect()) {
+            if ($redirectsLeft <= 0) {
+                return new StreamResult(StreamStatus::Failed);
+            }
+
+            $next = $this->resolveRedirectTarget($url, (string) $response->header('Location'));
+
+            if ($next === null) {
+                return new StreamResult(StreamStatus::Failed);
+            }
+
+            // Belt-and-braces over Guzzle's per-request sink handling (seam
+            // audit #9): a redirect hop must never leave its bytes in front
+            // of the final hop's payload.
+            @file_put_contents($sinkPath, '');
+
+            return $this->streamFollowingRedirects($next, $sinkPath, $maxBytes, $redirectsLeft - 1);
+        }
+
+        if (in_array($response->status(), [403, 404, 410], true)) {
+            // Expired scraped CDN URL (the TikTok case) — media:too-old.
+            return new StreamResult(StreamStatus::Gone);
+        }
+
+        if (! $response->successful()) {
+            return new StreamResult(StreamStatus::Failed);
+        }
+
+        $contentType = strtolower((string) $response->header('Content-Type'));
+
+        if ($contentType !== ''
+            && ! str_starts_with($contentType, 'image/')
+            && ! str_starts_with($contentType, 'video/')
+            && ! str_starts_with($contentType, 'application/octet-stream')) {
+            return new StreamResult(StreamStatus::Failed);
+        }
+
+        $declared = $response->header('Content-Length');
+
+        if (is_numeric($declared) && (int) $declared > $maxBytes) {
+            return new StreamResult(StreamStatus::TooLarge);
+        }
+
+        // Http::fake() bypasses curl's sink — materialize the body so tests
+        // and production share one code path. Guarded by filesize so a REAL
+        // transfer (sink already written) never loads a large body into
+        // memory: body() is only reached when the sink is still empty.
+        clearstatcache(true, $sinkPath);
+
+        if ((int) @filesize($sinkPath) === 0) {
+            $body = $response->body();
+
+            if ($body !== '') {
+                file_put_contents($sinkPath, $body);
+            }
+        }
+
+        clearstatcache(true, $sinkPath);
+        $size = (int) @filesize($sinkPath);
+
+        if ($size > $maxBytes) {
+            return new StreamResult(StreamStatus::TooLarge);
+        }
+
+        if ($size === 0) {
+            return new StreamResult(StreamStatus::Failed);
+        }
+
+        return new StreamResult(StreamStatus::Ok, $contentType !== '' ? $contentType : null);
+    }
+
+    /**
+     * One pinned GET streamed to a file sink. The Guzzle progress hook
+     * aborts mid-stream once the cap is exceeded (defense-in-depth over the
+     * Content-Length and post-transfer checks) by throwing; the caller maps
+     * the $tooLarge flag to the right status.
+     */
+    protected function pinnedGetToFile(string $url, string $host, int $port, string $ip, string $sinkPath, int $maxBytes, bool &$tooLarge): Response
+    {
+        return Http::withOptions([
+            'allow_redirects' => false,
+            'sink' => $sinkPath,
+            'curl' => [CURLOPT_RESOLVE => ["{$host}:{$port}:{$ip}"]],
+            'progress' => function ($downloadTotal, $downloadedBytes) use (&$tooLarge, $maxBytes): void {
+                if ($downloadedBytes > $maxBytes || ($downloadTotal > 0 && $downloadTotal > $maxBytes)) {
+                    $tooLarge = true;
+
+                    throw new \RuntimeException('media byte cap exceeded');
+                }
+            },
+        ])->timeout(120)->connectTimeout(10)->get($url);
     }
 
     /**
@@ -216,7 +354,12 @@ class MediaFetcher
         return "{$baseParts['scheme']}://{$baseParts['host']}{$port}{$location}";
     }
 
-    private function ipIsPublic(string $ip): bool
+    /**
+     * Protected (not private) so the real-server integration test can
+     * subclass and allow the loopback address its php -S fixture binds —
+     * production behaviour is unchanged.
+     */
+    protected function ipIsPublic(string $ip): bool
     {
         return filter_var(
             $ip,

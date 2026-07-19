@@ -3,11 +3,14 @@
 namespace App\Platform\Enrichment\Recognition;
 
 use App\Modules\Monitoring\Models\ContentItem;
+use App\Modules\Monitoring\Models\ContentTranscript;
 use App\Modules\Monitoring\Models\RecognitionDetection;
 use App\Modules\Monitoring\Models\Story;
 use App\Platform\Enrichment\Http\GoogleSpeechClient;
 use App\Platform\Enrichment\Http\GoogleVideoIntelligenceClient;
 use App\Platform\Enrichment\Http\GoogleVisionClient;
+use App\Platform\Enrichment\Media\MediaWorkspace;
+use App\Platform\Enrichment\Media\MediaWorkspaceFactory;
 use App\Platform\Enrichment\Support\ConfidenceScore;
 use App\Platform\Enrichment\Support\HumanPrecedence;
 use App\Platform\Ingestion\DTO\NormalizedBatch;
@@ -19,7 +22,7 @@ use App\Platform\Ingestion\SourceRegistry;
 use App\Platform\Ingestion\Support\AlertType;
 use App\Platform\Ingestion\Support\ErrorCategory;
 use App\Shared\Enums\ConfidenceLevel;
-use App\Shared\Enums\ContentType;
+use App\Shared\Enums\Platform;
 use App\Shared\Enums\VerificationStatus;
 use App\Shared\ValueObjects\ConfidenceAssessment;
 use App\Shared\ValueObjects\Provenance;
@@ -47,15 +50,13 @@ use Illuminate\Database\UniqueConstraintViolationException;
  */
 class RecognitionService
 {
-    private const IMAGE_LIMIT_PER_TARGET = 3;
-
     public function __construct(
         private readonly GoogleVisionClient $vision,
         private readonly GoogleVideoIntelligenceClient $videoIntelligence,
         private readonly GoogleSpeechClient $speech,
         private readonly AudioExtractor $audio,
         private readonly RecognitionNormalizer $normalizer,
-        private readonly MediaFetcher $media,
+        private readonly MediaWorkspaceFactory $workspaces,
         private readonly ProviderCallRecorder $recorder,
         private readonly AlertService $alerts,
     ) {}
@@ -63,11 +64,30 @@ class RecognitionService
     /**
      * @return array{status: string, created: int, updated: int, skipped: list<string>}
      */
-    public function enrich(ContentItem|Story $target, string $correlationId, int $retryCount = 0): array
+    public function enrich(ContentItem|Story $target, string $correlationId, int $retryCount = 0, ?MediaWorkspace $workspace = null): array
     {
         $created = 0;
         $updated = 0;
         $skipped = [];
+
+        // YouTube SPOKEN_BRAND rides the transcript the pipeline's transcript
+        // stage persisted (ADR-0028) — consume-only: recognition never calls
+        // the actor, and no ProviderCall is recorded for this local mining.
+        if ($target instanceof ContentItem && $target->platform === Platform::YouTube) {
+            $transcript = ContentTranscript::query()
+                ->where('content_item_id', $target->id)
+                ->where('status', ContentTranscript::STATUS_AVAILABLE)
+                ->latest('id')
+                ->first();
+
+            if ($transcript === null) {
+                $skipped[] = 'youtube-transcript:unavailable';
+            } else {
+                [$c, $u] = $this->persist($target, SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT, $this->normalizer->transcriptBatch((string) $transcript->text));
+                $created += $c;
+                $updated += $u;
+            }
+        }
 
         // No configured provider → nothing to annotate; don't download
         // media for nobody (cost control).
@@ -76,85 +96,116 @@ class RecognitionService
             $skipped[] = 'video-intelligence:not-configured';
             $skipped[] = 'speech:not-configured';
 
-            return ['status' => 'completed-empty', 'created' => 0, 'updated' => 0, 'skipped' => $skipped];
+            return [
+                'status' => $created + $updated > 0 ? 'completed' : 'completed-empty',
+                'created' => $created,
+                'updated' => $updated,
+                'skipped' => $skipped,
+            ];
         }
 
-        [$imageBytes, $videoBytes] = $this->mediaFor($target, $skipped);
+        $ownWorkspace = $workspace === null;
+        $workspace ??= $this->workspaces->forTarget($target);
 
-        if ($imageBytes !== []) {
-            if (! $this->vision->isConfigured()) {
-                $skipped[] = 'vision:not-configured';
-            } else {
-                foreach ($imageBytes as $bytes) {
+        try {
+            $images = $workspace->images();
+            $video = $workspace->video();
+
+            foreach ($workspace->markers() as $marker) {
+                $skipped[] = $marker;
+            }
+
+            $inlineMax = (int) config('qds.enrichment.recognition.inline_max_bytes');
+
+            if ($images !== []) {
+                if (! $this->vision->isConfigured()) {
+                    $skipped[] = 'vision:not-configured';
+                } else {
+                    foreach ($images as $image) {
+                        if ($image->byteSize > $inlineMax) {
+                            // Only reachable for a video-branch-routed image
+                            // (acquired under the download cap): keyframes
+                            // keep it, the inline Vision send does not.
+                            $skipped[] = 'recognition:image-skipped-too-large';
+
+                            continue;
+                        }
+
+                        [$c, $u] = $this->annotate(
+                            $target,
+                            SourceRegistry::GOOGLE_CLOUD_VISION,
+                            'vision.annotate',
+                            $correlationId,
+                            $retryCount,
+                            fn (): NormalizedBatch => $this->normalizer->visionBatch($this->vision->annotateImage($image->bytes())),
+                        );
+
+                        $created += $c;
+                        $updated += $u;
+                    }
+                }
+            }
+
+            if ($video !== null) {
+                if (! $this->videoIntelligence->isConfigured()) {
+                    // OPTIONAL provider (data-source matrix) — absence is normal.
+                    $skipped[] = 'video-intelligence:not-configured';
+                } elseif ($video->byteSize > $inlineMax) {
+                    // The whole-video inline pass is skipped — NOT the media:
+                    // keyframes still cover this video (sub-project B split).
+                    $skipped[] = 'recognition:whole-video-skipped-too-large';
+                } else {
                     [$c, $u] = $this->annotate(
                         $target,
-                        SourceRegistry::GOOGLE_CLOUD_VISION,
-                        'vision.annotate',
+                        SourceRegistry::GOOGLE_VIDEO_INTELLIGENCE,
+                        'video.annotate',
                         $correlationId,
                         $retryCount,
-                        fn (): NormalizedBatch => $this->normalizer->visionBatch($this->vision->annotateImage($bytes)),
+                        fn (): NormalizedBatch => $this->normalizer->videoBatch($this->videoIntelligence->annotateVideo($video->bytes())),
                     );
 
                     $created += $c;
                     $updated += $u;
                 }
-            }
-        }
 
-        if ($videoBytes !== null) {
-            if (! $this->videoIntelligence->isConfigured()) {
-                // OPTIONAL provider (data-source matrix) — absence is normal.
-                $skipped[] = 'video-intelligence:not-configured';
-            } else {
-                [$c, $u] = $this->annotate(
-                    $target,
-                    SourceRegistry::GOOGLE_VIDEO_INTELLIGENCE,
-                    'video.annotate',
-                    $correlationId,
-                    $retryCount,
-                    fn (): NormalizedBatch => $this->normalizer->videoBatch($this->videoIntelligence->annotateVideo($videoBytes)),
-                );
-
-                $created += $c;
-                $updated += $u;
-            }
-
-            // SPOKEN_BRAND: derive a ≤60s audio track locally, then
-            // transcribe. Each gate records its own skip marker so a
-            // missing detection is always explainable.
-            if (! $this->speech->isConfigured()) {
-                $skipped[] = 'speech:not-configured';
-            } elseif (! $this->audio->isAvailable()) {
-                $skipped[] = 'speech:ffmpeg-unavailable';
-            } else {
-                $audioBytes = $this->audio->extract($videoBytes);
-
-                if ($audioBytes === null) {
-                    // Muted/undecodable media — unavailable, never fabricated.
-                    $skipped[] = 'speech:audio-extraction-failed';
+                // SPOKEN_BRAND: derive a ≤60s audio track locally, then
+                // transcribe. Each gate records its own skip marker so a
+                // missing detection is always explainable. Runs for ANY
+                // downloaded video size — the cap above is inline-only.
+                if (! $this->speech->isConfigured()) {
+                    $skipped[] = 'speech:not-configured';
+                } elseif (! $this->audio->isAvailable()) {
+                    $skipped[] = 'speech:ffmpeg-unavailable';
                 } else {
-                    try {
-                        [$c, $u] = $this->annotate(
-                            $target,
-                            SourceRegistry::GOOGLE_SPEECH_TO_TEXT,
-                            'speech.recognize',
-                            $correlationId,
-                            $retryCount,
-                            fn (): NormalizedBatch => $this->normalizer->speechBatch($this->speech->recognize($audioBytes)),
-                        );
+                    $audioBytes = $this->audio->extractFromFile($video->tempPath);
 
-                        $created += $c;
-                        $updated += $u;
-                    } catch (ProviderCallException $e) {
-                        // Speech is the newest, most rate-limit-prone stage and
-                        // it now bills per video. A transient speech failure
-                        // must NOT fail the whole run and re-bill the already-
-                        // succeeded Vision + Video-Intelligence stages on every
-                        // retry — the failure is recorded (annotate) and the
-                        // run completes with SPOKEN_BRAND simply unavailable.
-                        $skipped[] = 'speech:provider-error';
+                    if ($audioBytes === null) {
+                        // Muted/undecodable media — unavailable, never fabricated.
+                        $skipped[] = 'speech:audio-extraction-failed';
+                    } else {
+                        try {
+                            [$c, $u] = $this->annotate(
+                                $target,
+                                SourceRegistry::GOOGLE_SPEECH_TO_TEXT,
+                                'speech.recognize',
+                                $correlationId,
+                                $retryCount,
+                                fn (): NormalizedBatch => $this->normalizer->speechBatch($this->speech->recognize($audioBytes)),
+                            );
+
+                            $created += $c;
+                            $updated += $u;
+                        } catch (ProviderCallException $e) {
+                            // A transient speech failure must NOT fail the whole
+                            // run and re-bill the already-succeeded stages.
+                            $skipped[] = 'speech:provider-error';
+                        }
                     }
                 }
+            }
+        } finally {
+            if ($ownWorkspace) {
+                $workspace->close();
             }
         }
 
@@ -164,62 +215,6 @@ class RecognitionService
             'updated' => $updated,
             'skipped' => $skipped,
         ];
-    }
-
-    /**
-     * @param  list<string>  $skipped
-     * @return array{0: list<string>, 1: string|null} [image byte payloads, video byte payload]
-     */
-    private function mediaFor(ContentItem|Story $target, array &$skipped): array
-    {
-        if ($target instanceof Story) {
-            $bytes = $this->media->fromStory($target);
-
-            if ($bytes === null) {
-                $skipped[] = 'story-media:unavailable';
-
-                return [[], null];
-            }
-
-            return $this->looksLikeVideo($target->media_url ?? '') ? [[], $bytes] : [[$bytes], null];
-        }
-
-        $urls = array_values(array_filter((array) ($target->media_urls ?? []), 'is_string'));
-
-        if ($urls === []) {
-            $skipped[] = 'media:none';
-
-            return [[], null];
-        }
-
-        if (in_array($target->content_type, [ContentType::ImagePost, ContentType::Carousel], true)) {
-            $images = [];
-
-            foreach (array_slice($urls, 0, self::IMAGE_LIMIT_PER_TARGET) as $url) {
-                $bytes = $this->media->fromPublicUrl($url);
-
-                if ($bytes === null) {
-                    $skipped[] = 'media:fetch-failed';
-
-                    continue;
-                }
-
-                $images[] = $bytes;
-            }
-
-            return [$images, null];
-        }
-
-        // Video-typed content: single deep pass over the first media asset.
-        $bytes = $this->media->fromPublicUrl($urls[0]);
-
-        if ($bytes === null) {
-            $skipped[] = 'media:fetch-failed';
-
-            return [[], null];
-        }
-
-        return [[], $bytes];
     }
 
     /**
@@ -368,10 +363,5 @@ class RecognitionService
                 sourceVersion: $sourceVersion,
             ),
         ]);
-    }
-
-    private function looksLikeVideo(string $path): bool
-    {
-        return in_array(strtolower(pathinfo($path, PATHINFO_EXTENSION)), ['mp4', 'mov', 'webm', 'm4v'], true);
     }
 }

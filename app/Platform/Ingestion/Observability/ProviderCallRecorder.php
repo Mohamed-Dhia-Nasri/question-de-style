@@ -3,6 +3,7 @@
 namespace App\Platform\Ingestion\Observability;
 
 use App\Platform\Ingestion\DTO\NormalizedBatch;
+use App\Platform\Ingestion\DTO\ProviderResponse;
 use App\Platform\Ingestion\Exceptions\ProviderCallException;
 use App\Platform\Ingestion\Models\ProviderCall;
 use App\Platform\Ingestion\Models\ProviderHealthState;
@@ -143,6 +144,40 @@ class ProviderCallRecorder
 
         $this->markFailure($context, $category, $message);
         $this->raiseRetryAlertIfNeeded($context);
+
+        return $call;
+    }
+
+    /**
+     * Record a completed provider operation that yields no normalized items
+     * (e.g. a transcript fetch): same ProviderCall row and health tracking
+     * as recordCompletion, without pretending a normalization ran.
+     */
+    public function recordOperation(CallContext $context, ProviderResponse $response, int $resultCount): ProviderCall
+    {
+        $call = ProviderCall::query()->create([
+            'source' => $context->source,
+            'operation' => $context->operation,
+            'correlation_id' => $context->correlationId,
+            'job_id' => $context->jobId,
+            'platform_account_id' => $context->platformAccountId,
+            'started_at' => $context->startedAt,
+            'finished_at' => CarbonImmutable::now(),
+            'duration_ms' => round($context->elapsedMs(), 2),
+            'http_status' => $response->httpStatus,
+            'outcome' => CallOutcome::Success,
+            'retry_count' => $context->retryCount,
+            'response_bytes' => $response->responseBytes,
+            'result_count' => $resultCount,
+            'accepted_count' => $resultCount,
+            'rate_limit' => $response->rateLimit ?: null,
+            'timings' => ['request_ms' => round($response->requestMs, 2)],
+        ]);
+
+        $this->markSuccess($context, CallOutcome::Success);
+        $this->raiseDurationAlertIfNeeded($context);
+        // maybeSample's 4th parameter is typed ProviderResponse — no batch needed.
+        $this->sampler->maybeSample($context->source, $context->operation, $context->correlationId, $response);
 
         return $call;
     }

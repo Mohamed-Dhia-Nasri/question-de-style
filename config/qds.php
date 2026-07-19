@@ -162,6 +162,13 @@ return [
             'settle_days' => (int) env('QDS_CAMPAIGN_REFRESH_SETTLE_DAYS', 30),
         ],
 
+        // YouTube transcript fetch (ADR-0028, sub-project B): one actor run
+        // per YouTube video, from the dedicated transcript pipeline stage.
+        // Kill switch: off = no actor call, SPOKEN_BRAND stays unavailable.
+        'youtube_transcript' => [
+            'enabled' => (bool) env('QDS_INGESTION_YOUTUBE_TRANSCRIPT_ENABLED', true),
+        ],
+
         // Short-form classification threshold (seconds) for platforms whose
         // raw→domain mapping allows SHORT / VIDEO (TikTok, YouTube).
         'short_video_max_seconds' => (int) env('QDS_INGESTION_SHORT_VIDEO_MAX_SECONDS', 60),
@@ -274,6 +281,31 @@ return [
         'audio' => [
             'ffmpeg_path' => env('QDS_ENRICHMENT_FFMPEG_PATH', 'ffmpeg'),
             'max_seconds' => (int) env('QDS_ENRICHMENT_AUDIO_MAX_SECONDS', 60),
+        ],
+
+        // Inline-payload ceiling for the Google recognition providers
+        // (formerly MediaFetcher::MAX_BYTES). Video over this cap skips the
+        // whole-video Video Intelligence pass (distinct marker) — keyframes
+        // still cover it.
+        'recognition' => [
+            'inline_max_bytes' => (int) env('QDS_ENRICHMENT_INLINE_MAX_BYTES', 20_000_000),
+        ],
+
+        // Keyframe sampling (sub-project B): deterministic even-interval
+        // frames for ALL platforms — the artifact tiers C/D consume.
+        // N = clamp(ceil(duration/interval), min, max). Persisted on the
+        // private media disk with story-media-equivalent retention.
+        'keyframes' => [
+            'enabled' => (bool) env('QDS_ENRICHMENT_KEYFRAMES_ENABLED', true),
+            'interval_seconds' => (int) env('QDS_ENRICHMENT_KEYFRAME_INTERVAL_SECONDS', 6),
+            'min_frames' => (int) env('QDS_ENRICHMENT_KEYFRAME_MIN', 3),
+            'max_frames' => (int) env('QDS_ENRICHMENT_KEYFRAME_MAX', 12),
+            'max_width' => (int) env('QDS_ENRICHMENT_KEYFRAME_MAX_WIDTH', 1280),
+            'jpeg_quality' => (int) env('QDS_ENRICHMENT_KEYFRAME_JPEG_QUALITY', 3),
+            'download_max_bytes' => (int) env('QDS_ENRICHMENT_KEYFRAME_DOWNLOAD_MAX_BYTES', 200_000_000),
+            'retention_days' => (int) env('QDS_ENRICHMENT_KEYFRAME_RETENTION_DAYS', 180),
+            'ffmpeg_path' => env('QDS_ENRICHMENT_FFMPEG_PATH', 'ffmpeg'),
+            'ffprobe_path' => env('QDS_ENRICHMENT_FFPROBE_PATH', 'ffprobe'),
         ],
 
         // Numeric provider score → ENUM-ConfidenceLevel bucketing

@@ -683,3 +683,23 @@ The CRM UX redesign audit (`docs/superpowers/specs/2026-07-16-crm-ux-redesign-au
 - No new permission classes; new writes stay behind `crm.manage`, reads behind `crm.view`.
 - Two tests that asserted the old "blocklisted is flagged but still selectable" behaviour were rewritten to assert the skip; the campaign-brand-change guard added its own regression coverage.
 - The comms-log write path still records no audit event (a pre-existing gap, unchanged here) — flagged for a later hardening pass.
+
+<a id="adr-0028"></a>
+## ADR-0028 — Seeded-detection media resolution & keyframe sampling (sub-project B)
+
+**Context.**
+
+Recognition was inert on TikTok/YouTube (watch-page URLs in `media_urls`), silently dropped video over the 20 MB inline cap, and analyzed no representative frames — blocking the visual tiers (C embeddings, D Gemini) of the seeded-detection modernization. Spec: `docs/superpowers/specs/2026-07-18-seeded-detection-media-resolution-design.md`.
+
+**Decision.**
+
+1. **TikTok** media resolves from the download-URL field the frozen `SRC-clockworks-tiktok-scraper` payload already carries (`mediaUrls[0]`, fallback `videoMeta.downloadAddr`). No provider change — a matrix clarification of which fields we read (same class as ADR-0017's input-only changes).
+2. **The provider set is amended with exactly one source:** `SRC-apify-youtube-transcript` (the `pintostudio~youtube-transcript-scraper` actor) supplying YouTube **captions text only** — never video or audio bytes. Kill-switched (`qds.ingestion.youtube_transcript.enabled`), cost-metered through the standard `ApifyClient`/ProviderCall telemetry, fetched by a **dedicated enrichment pipeline stage** (before recognition; recognition only consumes persisted transcripts), with **negative-result caching**: a successful run that finds no captions persists an `unavailable` row and is never re-billed; transport failures persist nothing and may retry. This supersedes ADR-0001/DP-006 for this single addition; everything else stays frozen. YouTube's visual signal is the Data-API max-res thumbnail — the only in-freeze visual; downloading YouTube video files (yt-dlp or downloader actors) is REJECTED for v1 (ToS) and recorded as deferred.
+3. **Keyframes are a persisted derived-media class:** deterministic even-interval ffmpeg samples (`N = clamp(ceil(duration/interval), min, max)`), stored on the private media disk under `tenants/{id}/keyframes/…` as polymorphic `keyframes` rows (each carrying the sha256 of its SOURCE media) — the FK-able contract tiers C/D consume, written **transactionally** so a frame set is always complete or absent. Media is routed by its **downloaded content type**, not the row's content_type. They carry story-media-equivalent lifecycle: per-tenant retention (`keyframe_retention_days`, `qds:prune-keyframes`) and GDPR erasure (extends ADR-0013/ADR-0025).
+4. **No Google Cloud Storage in v1.** Video over the inline cap skips only the whole-video Video-Intelligence pass (`recognition:whole-video-skipped-too-large`) — keyframes still cover it; over the streaming download cap the media is skipped explainably (`media:too-large`). Moving Video Intelligence to a `gs://` input would reverse DP-005's inline-only doctrine and stand up a second storage backend — deferred.
+
+**Status.** APPROVED ([`ENUM-DocStatus`](../00-meta/03-glossary.md#enum-docstatus)), 2026-07-19.
+
+**Consequences.**
+
+TikTok gains full-video visual coverage at zero extra provider cost; YouTube gains a thumbnail frame + transcript-driven SPOKEN_BRAND; every platform yields a `KeyframeSet` for C/D; large video is explainable, never silently dropped. New deferred items: real YouTube video download, GCS whole-video Video Intelligence, scene-change sampling, keyframe lifecycle state for tier-C re-extraction.

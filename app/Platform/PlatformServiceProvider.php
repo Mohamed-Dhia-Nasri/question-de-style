@@ -9,6 +9,7 @@ use App\Platform\Analytics\Console\RefreshRollupsCommand;
 use App\Platform\Analytics\Contracts\AnalyticsService;
 use App\Platform\Analytics\NeonAnalyticsService;
 use App\Platform\Enrichment\Console\EvalDetectionCommand;
+use App\Platform\Enrichment\Console\PruneKeyframesCommand;
 use App\Platform\Enrichment\Console\RunEnrichmentCommand;
 use App\Platform\Enrichment\Contracts\EnrichmentService;
 use App\Platform\Enrichment\Contracts\ReachEstimator;
@@ -113,6 +114,7 @@ class PlatformServiceProvider extends ServiceProvider
                 LinkSeededContentCommand::class,
                 PruneExpiredExportsCommand::class,
                 EvalDetectionCommand::class,
+                PruneKeyframesCommand::class,
             ]);
         }
     }

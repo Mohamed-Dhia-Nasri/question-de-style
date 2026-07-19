@@ -18,6 +18,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property int $shipment_window_days
  * @property int $engagement_trend_window_days
  * @property int $story_retention_days
+ * @property int|null $keyframe_retention_days
  * @property int $communication_retention_days
  * @property int|null $updated_by
  */
@@ -29,6 +30,7 @@ class MonitoringSetting extends Model
         'shipment_window_days',
         'engagement_trend_window_days',
         'story_retention_days',
+        'keyframe_retention_days',
         'communication_retention_days',
         'updated_by',
     ];
@@ -40,6 +42,7 @@ class MonitoringSetting extends Model
             'shipment_window_days' => 'integer',
             'engagement_trend_window_days' => 'integer',
             'story_retention_days' => 'integer',
+            'keyframe_retention_days' => 'integer',
             'communication_retention_days' => 'integer',
         ];
     }

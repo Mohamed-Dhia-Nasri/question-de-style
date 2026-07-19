@@ -11,6 +11,7 @@ depends_on:
   - ADR-0002
   - ADR-0003
   - ADR-0017
+  - ADR-0028
   - DP-002
   - DEF-003
   - ../30-data-model/00-data-model.md
@@ -123,6 +124,7 @@ flowchart LR
 <a id="src-apify-instagram-story-details"></a>
 <a id="src-clockworks-tiktok-scraper"></a>
 <a id="src-youtube-data-api-v3"></a>
+<a id="src-apify-youtube-transcript"></a>
 <a id="src-google-cloud-vision"></a>
 <a id="src-google-speech-to-text"></a>
 <a id="src-google-video-intelligence"></a>
@@ -140,11 +142,12 @@ One short contract per provider: what it returns and its key limits. These are t
 
 ### TikTok — provider tier PUBLIC
 
-- **`SRC-clockworks-tiktok-scraper`** — The **only** TikTok provider. Returns views, likes, comments, shares, and saves; supports keyword search (videos + profiles); returns profiles and comments. **Limit: Apify-only; no official TikTok API is used** ([ADR-0002](../05-decisions/decision-log.md#adr-0002)). Subject to anti-bot fragility — see roadmap P4 data-quality monitoring. *Amended 2026-07-07 — as-built reconciliation ([ADR-0017](../05-decisions/decision-log.md#adr-0017)):* profile/channel metadata is read from the content run's embedded `authorMeta` (every video item carries the full profile stats), so **no separate TikTok profile run is dispatched** — the §2.1 profile row is unchanged (same source), it just costs no extra actor run.
+- **`SRC-clockworks-tiktok-scraper`** — The **only** TikTok provider. Returns views, likes, comments, shares, and saves; supports keyword search (videos + profiles); returns profiles and comments. **Limit: Apify-only; no official TikTok API is used** ([ADR-0002](../05-decisions/decision-log.md#adr-0002)). Subject to anti-bot fragility — see roadmap P4 data-quality monitoring. *Amended 2026-07-07 — as-built reconciliation ([ADR-0017](../05-decisions/decision-log.md#adr-0017)):* profile/channel metadata is read from the content run's embedded `authorMeta` (every video item carries the full profile stats), so **no separate TikTok profile run is dispatched** — the §2.1 profile row is unchanged (same source), it just costs no extra actor run. *Amended 2026-07-19 — sub-project B media resolution ([ADR-0028](../05-decisions/decision-log.md#adr-0028)):* `media_urls` is populated from the payload's own download-URL field — `mediaUrls[0]`, fallback `videoMeta.downloadAddr` — the actor's real CDN video file, never the TikTok watch-page URL. No provider or field-set change; this is a clarification of which already-returned field is read.
 
 ### YouTube — provider tier PUBLIC
 
 - **`SRC-youtube-data-api-v3`** — Official YouTube Data API v3. Supports video / channel / playlist search and returns public view, like, comment, and subscriber statistics. **Limit: public stats only**; authorized-creator analytics are deferred ([DEF-004](../20-cross-cutting/01-deferred-register.md#def-004)).
+- **`SRC-apify-youtube-transcript`** — *Added 2026-07-19 — sub-project B media resolution ([ADR-0028](../05-decisions/decision-log.md#adr-0028)), the single addition to the otherwise-closed provider set.* YouTube captions/transcript text (`SPOKEN_BRAND` input). Actor `pintostudio~youtube-transcript-scraper` (env-overridable via `APIFY_ACTOR_YOUTUBE_TRANSCRIPT`). Supplies **captions text only — never video or audio bytes**. **Limit: kill-switched** (`qds.ingestion.youtube_transcript.enabled`) and fetched by a dedicated enrichment pipeline stage ahead of recognition (recognition only consumes already-persisted transcripts), with negative-result caching — a run that finds no captions persists an `unavailable` row and is never re-billed.
 
 ### AI enrichment (Google Cloud) — provider tier AI
 
@@ -224,3 +227,5 @@ Consequently:
 ## 6. Extension rule
 
 The provider set on this page is closed. To change it, a new or amended [ADR](../05-decisions/decision-log.md) is required — do not add, swap, or invent providers in module or architecture docs. Modules and architecture reference this file for provider identity; they do not define their own providers.
+
+[ADR-0028](../05-decisions/decision-log.md#adr-0028) is the precedent for such an amendment: it added exactly one source (`SRC-apify-youtube-transcript`) to close a specific gap (YouTube captions text) without reopening the closed set — the freeze otherwise stands unchanged.

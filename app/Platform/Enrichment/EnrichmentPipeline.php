@@ -7,6 +7,7 @@ use App\Modules\Monitoring\Models\Story;
 use App\Platform\Enrichment\Attribution\AttributionService;
 use App\Platform\Enrichment\Emv\EmvCalculator;
 use App\Platform\Enrichment\Hashtags\HashtagEnricher;
+use App\Platform\Enrichment\Keyframes\KeyframeExtractor;
 use App\Platform\Enrichment\Media\MediaWorkspaceFactory;
 use App\Platform\Enrichment\Models\EnrichmentRun;
 use App\Platform\Enrichment\Reach\ReachCalculator;
@@ -21,7 +22,7 @@ use Throwable;
 /**
  * The SVC-EnrichmentAI pipeline over one ContentItem or Story:
  *
- *   hashtags → recognition → text signals → sentiment → seeded attribution → EMV → reach
+ *   hashtags → recognition → keyframes → text signals → sentiment → seeded attribution → EMV → reach
  *
  * Stage outcomes are recorded on an EnrichmentRun row (operational
  * telemetry, sanitized values only). Unavailable boundaries (sentiment
@@ -41,6 +42,7 @@ class EnrichmentPipeline
         private readonly EmvCalculator $emv,
         private readonly ReachCalculator $reach,
         private readonly MediaWorkspaceFactory $workspaces,
+        private readonly KeyframeExtractor $keyframes,
     ) {}
 
     public function run(ContentItem|Story $target, string $correlationId, int $retryCount = 0): EnrichmentRun
@@ -73,6 +75,14 @@ class EnrichmentPipeline
                 $recognition['updated'],
                 $recognition['skipped'] !== [] ? ' skipped='.implode('|', $recognition['skipped']) : '',
             );
+
+            if ((bool) config('qds.enrichment.keyframes.enabled')) {
+                // Runs even with no Google provider configured — frames are
+                // for tiers C/D, independent of the recognition providers.
+                $stages['keyframes'] = $this->keyframes->enrich($target, $workspace);
+            } else {
+                $stages['keyframes'] = 'skipped:disabled';
+            }
 
             if (config('qds.enrichment.text_signals.enabled')) {
                 $stages['text_signals'] = $this->textSignals->enrich($target);

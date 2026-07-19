@@ -22,6 +22,7 @@ use App\Platform\Enrichment\DefaultEnrichmentService;
 use App\Platform\Enrichment\Matching\Console\LinkSeededContentCommand;
 use App\Platform\Enrichment\Reach\DefaultReachEstimator;
 use App\Platform\Enrichment\Sentiment\UnavailableSentimentClassifier;
+use App\Platform\Enrichment\VisualMatch\Console\EmbedProductPhotosCommand;
 use App\Platform\Enrichment\VisualMatch\Contracts\EmbeddingProvider;
 use App\Platform\Enrichment\VisualMatch\Http\GeminiMultimodalEmbeddingProvider;
 use App\Platform\Export\Console\PruneExpiredExportsCommand;
@@ -125,6 +126,7 @@ class PlatformServiceProvider extends ServiceProvider
                 PruneExpiredExportsCommand::class,
                 EvalDetectionCommand::class,
                 PruneKeyframesCommand::class,
+                EmbedProductPhotosCommand::class,
                 AiReadOnlyCommand::class,
                 AiQuotaCommand::class,
             ]);

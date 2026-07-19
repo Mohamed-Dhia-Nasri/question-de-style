@@ -124,6 +124,12 @@ class CreatorEraser
             $counts['enrichment_runs'] = ($contentIds === [] && $storyIds === []) ? 0 : DB::table('enrichment_runs')
                 ->where(fn ($q) => $q->whereIn('content_item_id', $contentIds)->orWhereIn('story_id', $storyIds))
                 ->delete();
+            // Visual-match audit trail (sub-project C): runs are anchored to
+            // the creator's content; candidates cascade from runs at the DB
+            // (keyframe embeddings likewise cascade with the keyframes above).
+            $counts['visual_match_runs'] = ($contentIds === [] && $storyIds === []) ? 0 : DB::table('visual_match_runs')
+                ->where(fn ($q) => $q->whereIn('content_item_id', $contentIds)->orWhereIn('story_id', $storyIds))
+                ->delete();
             $counts['mentions'] = $this->deleteByIds('mentions', $mentionIds);
 
             // Append-only history — passes only because the gate is on.

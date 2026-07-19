@@ -5,6 +5,8 @@ namespace App\Platform;
 use App\Modules\CRM\Services\IngestedProfileSync;
 use App\Modules\CRM\Services\ShipmentContentWriter;
 use App\Modules\CRM\Services\ShipmentEvidenceSource;
+use App\Platform\AiBudget\Console\AiQuotaCommand;
+use App\Platform\AiBudget\Console\AiReadOnlyCommand;
 use App\Platform\Analytics\Console\RefreshRollupsCommand;
 use App\Platform\Analytics\Contracts\AnalyticsService;
 use App\Platform\Analytics\NeonAnalyticsService;
@@ -123,6 +125,8 @@ class PlatformServiceProvider extends ServiceProvider
                 PruneExpiredExportsCommand::class,
                 EvalDetectionCommand::class,
                 PruneKeyframesCommand::class,
+                AiReadOnlyCommand::class,
+                AiQuotaCommand::class,
             ]);
         }
     }

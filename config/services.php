@@ -79,6 +79,9 @@ return [
             // specialized actors: verified price-identical or cheaper, and
             // the general actor returns one content type per run.
             'instagram_direct' => env('APIFY_ACTOR_INSTAGRAM_DIRECT', 'apify~instagram-scraper'),
+            // SRC-apify-youtube-transcript (ADR-0028): YouTube captions text
+            // for SPOKEN_BRAND — the only in-freeze YouTube spoken signal.
+            'youtube_transcript' => env('APIFY_ACTOR_YOUTUBE_TRANSCRIPT', 'pintostudio~youtube-transcript-scraper'),
         ],
     ],
 

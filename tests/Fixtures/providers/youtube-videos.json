@@ -3,13 +3,13 @@
   "items": [
     {
       "id": "vid00000001",
-      "snippet": {"title": "Lookbook Sommer 2026", "publishedAt": "2026-06-28T14:00:00Z"},
+      "snippet": {"title": "Lookbook Sommer 2026", "publishedAt": "2026-06-28T14:00:00Z", "thumbnails": {"maxres": {"url": "https://i.ytimg.example/vi/vid00000001/maxresdefault.jpg"}, "high": {"url": "https://i.ytimg.example/vi/vid00000001/hqdefault.jpg"}}},
       "statistics": {"viewCount": "52000", "likeCount": "2100", "commentCount": "260"},
       "contentDetails": {"duration": "PT12M31S"}
     },
     {
       "id": "vid00000002",
-      "snippet": {"title": "Quick Tipp #shorts", "publishedAt": "2026-07-01T08:00:00Z"},
+      "snippet": {"title": "Quick Tipp #shorts", "publishedAt": "2026-07-01T08:00:00Z", "thumbnails": {"high": {"url": "https://i.ytimg.example/vi/vid00000002/hqdefault.jpg"}}},
       "statistics": {"viewCount": "180000", "likeCount": "9000", "commentCount": "700"},
       "contentDetails": {"duration": "PT45S"}
     }

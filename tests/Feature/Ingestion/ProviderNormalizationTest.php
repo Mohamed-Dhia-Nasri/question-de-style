@@ -288,4 +288,21 @@ class ProviderNormalizationTest extends TestCase
         $this->assertSame(ContentType::Short, $short->contentType); // 45s
         $this->assertSame(SourceRegistry::YOUTUBE_DATA_API_V3, $short->provenance->source);
     }
+
+    public function test_youtube_media_urls_carry_the_best_thumbnail_and_permalink_the_watch_url(): void
+    {
+        $this->fakeProviderCredentials();
+        $this->fakeYouTubeApi();
+
+        $batch = app(\App\Platform\Ingestion\Providers\YouTube\YouTubeContentAdapter::class)->fetchContent('stylechannel');
+        // Key by externalId — never by array position.
+        $items = collect($batch->items)
+            ->filter(fn ($i) => $i instanceof \App\Platform\Ingestion\DTO\ContentData)
+            ->keyBy(fn (\App\Platform\Ingestion\DTO\ContentData $i) => $i->externalId);
+
+        $this->assertSame(['https://i.ytimg.example/vi/vid00000001/maxresdefault.jpg'], $items['vid00000001']->mediaUrls);
+        $this->assertSame('https://www.youtube.com/watch?v=vid00000001', $items['vid00000001']->permalink);
+        // vid00000002 has no maxres → the ladder falls back to high.
+        $this->assertSame(['https://i.ytimg.example/vi/vid00000002/hqdefault.jpg'], $items['vid00000002']->mediaUrls);
+    }
 }

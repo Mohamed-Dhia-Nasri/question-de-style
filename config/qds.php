@@ -340,6 +340,33 @@ return [
             ],
         ],
 
+        // VLM grounding verification (sub-project D, ADR-0030). Kill
+        // switch default OFF = true no-op (stage records skipped:disabled,
+        // zero dispatches, zero provider calls). model_version is stamped
+        // on every vlm_verification_runs row — changing it is a NEW
+        // model_version that re-opens consumed anchors (append-only
+        // re-verification), never a mutation. Do not reference preview
+        // models: gemini-3.5-flash is the only GA + EU-resident +
+        // structured-output pin (gemini-3.1-flash-lite is the documented
+        // cheap-tier swap). Thresholds are explicit placeholders —
+        // sub-project E calibrates them (the 0.85/0.60 alignment with
+        // ADR-0026 cut-points is deliberate).
+        'vlm' => [
+            'enabled' => (bool) env('QDS_ENRICHMENT_VLM_ENABLED', false), // kill switch — true no-op
+            'model_version' => env('QDS_ENRICHMENT_VLM_MODEL', 'gemini-3.5-flash'),
+            'queue' => env('QDS_ENRICHMENT_VLM_QUEUE', 'enrichment'),
+            'frame_budget' => (int) env('QDS_ENRICHMENT_VLM_FRAME_BUDGET', 12),
+            'media_resolution' => env('QDS_ENRICHMENT_VLM_MEDIA_RESOLUTION', 'MEDIA_RESOLUTION_MEDIUM'),
+            'thinking_level' => env('QDS_ENRICHMENT_VLM_THINKING_LEVEL', 'LOW'),
+            'max_output_tokens' => (int) env('QDS_ENRICHMENT_VLM_MAX_OUTPUT_TOKENS', 2048),
+            'caption_max_chars' => (int) env('QDS_ENRICHMENT_VLM_CAPTION_MAX_CHARS', 2000),
+            'transcript_max_chars' => (int) env('QDS_ENRICHMENT_VLM_TRANSCRIPT_MAX_CHARS', 4000),
+            'thresholds' => [ // placeholders — sub-project E calibrates
+                'auto' => 0.85, 'review' => 0.60, 'margin' => 0.10,
+            ],
+            'pending_stale_hours' => (int) env('QDS_ENRICHMENT_VLM_PENDING_STALE_HOURS', 6), // §10 crash backstop
+        ],
+
         // Numeric provider score → ENUM-ConfidenceLevel bucketing
         // (ADR-0026): score >= high → HIGH; >= medium → MEDIUM; else LOW
         // (LOW routes to review per DP-004). Env-tunable calibration.

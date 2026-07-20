@@ -378,6 +378,8 @@ return [
             'language_codes' => ['auto'], // override with an explicit restricted list via config only
             'boost' => (float) env('QDS_ENRICHMENT_SPEECH_BOOST', 10.0),   // 0–20
             'phrase_cap' => (int) env('QDS_ENRICHMENT_SPEECH_PHRASE_CAP', 500), // model hard limit 1,000
+            'chunk_seconds' => (int) env('QDS_ENRICHMENT_SPEECH_CHUNK_SECONDS', 55), // safety margin under the 60 s sync limit
+            'max_minutes' => (int) env('QDS_ENRICHMENT_SPEECH_MAX_MINUTES', 10),     // extension transcription budget
         ],
 
         // Numeric provider score → ENUM-ConfidenceLevel bucketing

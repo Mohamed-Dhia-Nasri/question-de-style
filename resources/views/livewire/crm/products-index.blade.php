@@ -79,6 +79,13 @@
                             </td>
                             <td class="px-5 py-4">
                                 <div class="flex items-center justify-end gap-3">
+                                    @can('view', $product)
+                                        <button type="button"
+                                            wire:click="$dispatch('open-product-photos', { productId: {{ $product->id }} })"
+                                            class="text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">
+                                            Photos ({{ $product->reference_photos_count }})
+                                        </button>
+                                    @endcan
                                     @can('update', $product)
                                         <button type="button" wire:click="edit({{ $product->id }})"
                                             class="text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400">Edit</button>

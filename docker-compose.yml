@@ -1,7 +1,7 @@
 # Local development services for QDS.
 #
 # Per ADR-0013 the production database is Neon (serverless Postgres, EU) and is
-# NOT containerized; this compose file provides a plain PostgreSQL 17 that is
+# NOT containerized; this compose file provides a PostgreSQL 17 + pgvector that is
 # feature-compatible with Neon (no TimescaleDB, no pg_cron — rollups are
 # refreshed by the Laravel scheduler, see ADR-0010/ADR-0013).
 #
@@ -13,7 +13,12 @@
 
 services:
   postgres:
-    image: postgres:17
+    # pgvector/pgvector:pg17-bookworm is built FROM postgres:17-bookworm —
+    # identical entrypoint/PGDATA/env, so the existing qds-pgdata volume keeps
+    # working. Adds the pgvector extension for visual product matching
+    # (ADR-0029). Neon ships pgvector 0.8.0 on PG17: all vector code pins
+    # itself to 0.8.0 semantics (exact scan, `<=>` cosine distance).
+    image: pgvector/pgvector:pg17-bookworm
     container_name: qds-postgres
     restart: unless-stopped
     environment:

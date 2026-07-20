@@ -12,4 +12,10 @@ class SourceRegistryTest extends TestCase
         $this->assertSame('SRC-apify-youtube-transcript', SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT);
         $this->assertTrue(SourceRegistry::isRegistered(SourceRegistry::APIFY_YOUTUBE_TRANSCRIPT));
     }
+
+    public function test_gemini_embeddings_source_is_registered(): void
+    {
+        $this->assertSame('SRC-google-gemini-embeddings', SourceRegistry::GOOGLE_GEMINI_EMBEDDINGS);
+        $this->assertTrue(SourceRegistry::isRegistered(SourceRegistry::GOOGLE_GEMINI_EMBEDDINGS));
+    }
 }

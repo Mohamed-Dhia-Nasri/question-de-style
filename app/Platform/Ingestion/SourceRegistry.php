@@ -46,6 +46,14 @@ final class SourceRegistry
     public const GOOGLE_VIDEO_INTELLIGENCE = 'SRC-google-video-intelligence';
 
     /**
+     * Gemini multimodal embeddings for visual product matching (ADR-0029
+     * amendment to the ADR-0001 freeze — sub-project C). Image bytes travel
+     * INLINE (base64), never as URLs (DP-005); Bearer-token auth ONLY —
+     * API keys cannot call :embedContent (verified 2026-07-19).
+     */
+    public const GOOGLE_GEMINI_EMBEDDINGS = 'SRC-google-gemini-embeddings';
+
+    /**
      * Internal marker, NOT an external provider (ADR-0015): the record's
      * values were entered by hand by agency staff in the CRM (operator-
      * curated platform accounts under ADR-0014). Performs no collection;
@@ -70,6 +78,7 @@ final class SourceRegistry
             self::GOOGLE_CLOUD_VISION,
             self::GOOGLE_SPEECH_TO_TEXT,
             self::GOOGLE_VIDEO_INTELLIGENCE,
+            self::GOOGLE_GEMINI_EMBEDDINGS,
             self::AGENCY_MANUAL_ENTRY,
         ];
     }

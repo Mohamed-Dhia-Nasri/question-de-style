@@ -308,6 +308,38 @@ return [
             'ffprobe_path' => env('QDS_ENRICHMENT_FFPROBE_PATH', 'ffprobe'),
         ],
 
+        // Visual product matching (sub-project C, ADR-0029). Kill switch
+        // default OFF = true no-op (skipped:disabled, zero provider calls).
+        // model_version is stamped on every embedding row — changing it is
+        // a re-embed backfill, never a mutation; dimensions keeps the
+        // request width and the vector(3072) DDL visibly in agreement.
+        // Later C tasks extend this block (quality filter, dedup, frame
+        // budget, photo cap, thresholds).
+        'visual_match' => [
+            'enabled' => (bool) env('QDS_ENRICHMENT_VISUAL_MATCH_ENABLED', false), // kill switch, true no-op
+            'model_version' => env('QDS_ENRICHMENT_VISUAL_MATCH_MODEL', 'gemini-embedding-2'), // pin exact versioned id at implementation
+            'dimensions' => (int) env('QDS_ENRICHMENT_VISUAL_MATCH_DIMENSIONS', 3072),
+            'frame_budget' => (int) env('QDS_ENRICHMENT_VISUAL_MATCH_FRAME_BUDGET', 12),
+            'photo_cap' => (int) env('QDS_ENRICHMENT_VISUAL_MATCH_PHOTO_CAP', 8),
+            'photo_link_ttl_minutes' => (int) env('QDS_ENRICHMENT_VISUAL_MATCH_PHOTO_LINK_TTL', 10),
+            'thresholds' => [
+                'default' => ['auto' => 0.65, 'review' => 0.55, 'margin' => 0.05],
+                // per-category overrides, keys = SectorLabel values; packaging-prone stricter:
+                'BEAUTY' => ['auto' => 0.70], 'FOOD_BEVERAGE' => ['auto' => 0.70],
+                // NOTE: placeholders — calibration is sub-project E's mandate (eval golden set).
+            ],
+            'quality_filter' => [
+                'enabled' => (bool) env('QDS_ENRICHMENT_VISUAL_MATCH_QUALITY_FILTER', true),
+                'min_mean_luminance' => (int) env('QDS_ENRICHMENT_VISUAL_MATCH_MIN_LUMINANCE', 10),   // 0–255
+                'max_mean_luminance' => (int) env('QDS_ENRICHMENT_VISUAL_MATCH_MAX_LUMINANCE', 245),
+                'min_luminance_stddev' => (float) env('QDS_ENRICHMENT_VISUAL_MATCH_MIN_STDDEV', 4.0), // flat/blank proxy
+            ],
+            'dedup' => [
+                'enabled' => (bool) env('QDS_ENRICHMENT_VISUAL_MATCH_DEDUP', true),
+                'hamming_threshold' => (int) env('QDS_ENRICHMENT_VISUAL_MATCH_DEDUP_HAMMING', 6),     // of 64 dHash bits
+            ],
+        ],
+
         // Numeric provider score → ENUM-ConfidenceLevel bucketing
         // (ADR-0026): score >= high → HIGH; >= medium → MEDIUM; else LOW
         // (LOW routes to review per DP-004). Env-tunable calibration.
@@ -358,6 +390,34 @@ return [
             // the transparent, configured model and is disclosed with
             // every DERIVED rate.
             'engagement_base' => env('QDS_ENRICHMENT_ENGAGEMENT_BASE', 'followers'),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | AI budget governance (visual matching sub-project C, spec §10 — D reuses)
+    |--------------------------------------------------------------------------
+    | Capability-keyed spend budgets enforced by AiBudgetGuard: per-post,
+    | tenant daily/monthly (per-tenant overrides in tenant_ai_quotas, NULL
+    | column → these defaults), global daily/monthly with HARD variants.
+    | read_only is the emergency-stop default; the cached qds:ai-read-only
+    | flag wins over it either way.
+    */
+    'ai_budget' => [
+        'read_only' => (bool) env('QDS_AI_READ_ONLY', false),
+        'alert_thresholds' => [50, 80, 95, 100],
+        'capabilities' => [
+            'embedding' => [
+                'price_micro_usd_per_unit' => (int) env('QDS_AI_EMBEDDING_PRICE_MICRO_USD', 120), // $0.00012/image (verified 2026-07-19)
+                'per_post_units' => (int) env('QDS_AI_EMBEDDING_PER_POST', 12),
+                'tenant_daily_units' => (int) env('QDS_AI_EMBEDDING_TENANT_DAILY', 2000),
+                'tenant_monthly_units' => (int) env('QDS_AI_EMBEDDING_TENANT_MONTHLY', 40000),
+                'global_daily_units' => (int) env('QDS_AI_EMBEDDING_GLOBAL_DAILY', 50000),
+                'global_daily_hard_units' => (int) env('QDS_AI_EMBEDDING_GLOBAL_DAILY_HARD', 100000),
+                'global_monthly_units' => (int) env('QDS_AI_EMBEDDING_GLOBAL_MONTHLY', 1000000),
+                'global_monthly_hard_units' => (int) env('QDS_AI_EMBEDDING_GLOBAL_MONTHLY_HARD', 2000000),
+            ],
+            // 'vlm_verification' => reserved for sub-project D
         ],
     ],
 

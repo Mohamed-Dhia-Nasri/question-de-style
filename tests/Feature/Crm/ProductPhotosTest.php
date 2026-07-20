@@ -1,0 +1,402 @@
+<?php
+
+namespace Tests\Feature\Crm;
+
+use App\Models\User;
+use App\Modules\CRM\Livewire\Products\ProductPhotos;
+use App\Modules\CRM\Livewire\Products\ProductsIndex;
+use App\Modules\CRM\Models\Product;
+use App\Modules\CRM\Models\ProductReferencePhoto;
+use App\Modules\Monitoring\Models\ProductPhotoEmbedding;
+use App\Platform\Enrichment\VisualMatch\Contracts\EmbeddingProvider;
+use App\Platform\Enrichment\VisualMatch\Jobs\EmbedProductPhotoJob;
+use App\Shared\Authorization\PermissionsCatalog;
+use App\Shared\Enums\RoleName;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
+use Livewire\Livewire;
+use RuntimeException;
+use Tests\Support\FakeEmbeddingProvider;
+use Tests\TestCase;
+
+/**
+ * Reference-photo management (spec §6): private-disk blobs behind
+ * short-TTL signed thumbnails (the documents precedent), server-side cap,
+ * audited mutations gated on ProductPolicy::update, and the embed job
+ * dispatched only when the capability can actually spend.
+ */
+class ProductPhotosTest extends TestCase
+{
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Storage::fake((string) config('qds.ingestion.media_disk', 'media'));
+    }
+
+    private function actingAsCrmStaff(): User
+    {
+        $this->seedRoles();
+
+        $staff = $this->makeUser(RoleName::InfluencerRelationsManager);
+        $this->actingAs($staff);
+
+        return $staff;
+    }
+
+    /** Puts a real blob on the (faked) media disk and anchors a row to it. */
+    private function makeStoredPhoto(Product $product): ProductReferencePhoto
+    {
+        $disk = (string) config('qds.ingestion.media_disk', 'media');
+        $path = "tenants/{$product->tenant_id}/product-photos/{$product->id}/".fake()->uuid().'.jpg';
+        Storage::disk($disk)->put($path, 'jpeg-bytes');
+
+        return ProductReferencePhoto::factory()->create([
+            'product_id' => $product->id,
+            'storage_disk' => $disk,
+            'storage_path' => $path,
+        ]);
+    }
+
+    public function test_thumbnails_stream_via_signed_urls_only(): void
+    {
+        $this->actingAsCrmStaff();
+        $photo = $this->makeStoredPhoto(Product::factory()->create());
+
+        // Unsigned URL → rejected even for authorized staff.
+        $this->get(route('crm.products.photo', ['productReferencePhoto' => $photo->id]))
+            ->assertForbidden();
+
+        $signed = URL::temporarySignedRoute(
+            'crm.products.photo',
+            now()->addMinutes(5),
+            ['productReferencePhoto' => $photo->id],
+        );
+
+        $this->get($signed)->assertOk();
+    }
+
+    public function test_cross_tenant_photos_are_invisible_even_with_a_valid_signature(): void
+    {
+        [$tenantA] = $this->makeTenantPair();
+
+        $foreign = $this->withTenant(
+            $tenantA,
+            fn (): ProductReferencePhoto => $this->makeStoredPhoto(Product::factory()->create()),
+        );
+
+        $this->actingAs($this->makeUser(RoleName::InfluencerRelationsManager));
+
+        $signed = URL::temporarySignedRoute(
+            'crm.products.photo',
+            now()->addMinutes(5),
+            ['productReferencePhoto' => $foreign->id],
+        );
+
+        // SetTenantContext scopes the route binding: the foreign row does
+        // not exist for this tenant — 404, never 403 (no existence oracle).
+        $this->get($signed)->assertNotFound();
+    }
+
+    public function test_client_viewers_cannot_view_thumbnails(): void
+    {
+        $this->seedRoles();
+        $this->actingAs($this->makeUser(RoleName::ClientViewer));
+
+        $photo = $this->makeStoredPhoto(Product::factory()->create());
+
+        $signed = URL::temporarySignedRoute(
+            'crm.products.photo',
+            now()->addMinutes(5),
+            ['productReferencePhoto' => $photo->id],
+        );
+
+        $this->get($signed)->assertForbidden();
+    }
+
+    public function test_upload_stores_the_blob_row_and_audit_event(): void
+    {
+        $staff = $this->actingAsCrmStaff();
+        $product = Product::factory()->create();
+
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('upload', UploadedFile::fake()->image('front.jpg', 40, 40))
+            ->set('view_label', 'front')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $photo = ProductReferencePhoto::query()->where('product_id', $product->id)->firstOrFail();
+
+        // Spec §4.1: tenant-pathed private blob, sha256 checksum,
+        // best-effort dimensions, uploader identity on the row.
+        $this->assertStringStartsWith("tenants/{$photo->tenant_id}/product-photos/{$product->id}/", $photo->storage_path);
+        Storage::disk((string) $photo->storage_disk)->assertExists($photo->storage_path);
+        $this->assertSame('front', $photo->view_label?->value);
+        $this->assertSame(
+            hash('sha256', (string) Storage::disk((string) $photo->storage_disk)->get($photo->storage_path)),
+            $photo->checksum,
+        );
+        $this->assertSame(40, $photo->width);
+        $this->assertSame(40, $photo->height);
+        $this->assertSame($staff->id, $photo->uploaded_by);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'product.photo_added', 'subject_id' => $photo->id]);
+    }
+
+    public function test_upload_stores_with_content_sniffed_extension_not_client_filename(): void
+    {
+        $this->actingAsCrmStaff();
+        $product = Product::factory()->create();
+
+        // The client names the file "photo.html" but its real (sniffed)
+        // mime type is image/jpeg — ->mimeType() stands in for finfo-based
+        // content sniffing the same way Laravel's fake-upload helpers let
+        // you separate "what the browser/filename claims" from "what the
+        // bytes actually are" (Illuminate\Http\Testing\File::getMimeType()
+        // otherwise reports a mime guessed from the NAME, which would make
+        // this scenario untestable). The stored extension must come from
+        // the sniffed type, never the client-supplied name.
+        $upload = UploadedFile::fake()->image('photo.html', 40, 40)->mimeType('image/jpeg');
+
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('upload', $upload)
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $photo = ProductReferencePhoto::query()->where('product_id', $product->id)->firstOrFail();
+
+        $this->assertStringEndsWith('.jpg', $photo->storage_path);
+        Storage::disk((string) $photo->storage_disk)->assertExists($photo->storage_path);
+    }
+
+    public function test_wrong_type_and_oversized_uploads_are_refused(): void
+    {
+        $this->actingAsCrmStaff();
+        $product = Product::factory()->create();
+
+        // Not an accepted image type (jpg/png/webp only in v1, spec §4.1).
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('upload', UploadedFile::fake()->create('brief.pdf', 12))
+            ->call('save')
+            ->assertHasErrors(['upload']);
+
+        // Above the 10 MB cap (max:10240 is kilobytes).
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('upload', UploadedFile::fake()->create('huge.jpg', 10_241))
+            ->call('save')
+            ->assertHasErrors(['upload']);
+
+        $this->assertDatabaseCount('product_reference_photos', 0);
+    }
+
+    public function test_the_photo_cap_is_enforced_server_side(): void
+    {
+        $this->actingAsCrmStaff();
+        $product = Product::factory()->create();
+        config()->set('qds.enrichment.visual_match.photo_cap', 2);
+
+        $this->makeStoredPhoto($product);
+        $this->makeStoredPhoto($product);
+
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('upload', UploadedFile::fake()->image('side.jpg', 40, 40))
+            ->call('save')
+            ->assertHasErrors(['upload']);
+
+        $this->assertSame(2, ProductReferencePhoto::query()->where('product_id', $product->id)->count());
+    }
+
+    public function test_over_cap_abort_leaves_no_orphan_blob_or_row(): void
+    {
+        $this->actingAsCrmStaff();
+        $product = Product::factory()->create();
+        config()->set('qds.enrichment.visual_match.photo_cap', 2);
+
+        // Exactly 1 photo, so the cheap pre-check (1 < 2) PASSES and save()
+        // proceeds to store a blob and enter the locked transaction — the
+        // authoritative recount inside it is what must catch the race.
+        $this->makeStoredPhoto($product);
+
+        $disk = (string) config('qds.ingestion.media_disk', 'media');
+        $directory = "tenants/{$product->tenant_id}/product-photos/{$product->id}";
+        $racedCount = 0;
+
+        // Simulates a concurrent save landing its photo between our
+        // pre-check and our authoritative recount. Product::retrieved fires
+        // for every Product retrieval, but RefreshDatabase already wraps
+        // the whole test in an outer transaction, so DB::transactionLevel()
+        // is 1 even during open()/render() — gating on "> 0" (tried first)
+        // fires too early, on open()'s own Product::findOrFail, landing the
+        // racing insert before save()'s cheap pre-check ever runs. save()'s
+        // own DB::transaction() nests INSIDE that outer wrapper and runs at
+        // level 2, so gating on ">= 2" targets exactly (and only) the
+        // lockForUpdate()->first() read inside it.
+        Product::retrieved(function () use (&$racedCount, $product): void {
+            if ($racedCount > 0 || DB::transactionLevel() < 2) {
+                return;
+            }
+
+            $racedCount++;
+            $this->makeStoredPhoto($product);
+        });
+
+        try {
+            // The row-count check happens inside a locked transaction (the
+            // TOCTOU fix): a losing save must delete the blob it already put
+            // on disk before the check aborted it, not leave it dangling.
+            Livewire::test(ProductPhotos::class)
+                ->call('open', $product->id)
+                ->set('upload', UploadedFile::fake()->image('side.jpg', 40, 40))
+                ->call('save')
+                ->assertHasErrors(['upload']);
+        } finally {
+            Product::flushEventListeners();
+        }
+
+        // With the ">= 2" gate this can ONLY have fired inside save()'s own
+        // transaction — proof the authoritative recount (not the cheap
+        // pre-check) is what caught the race.
+        $this->assertSame(1, $racedCount, 'the simulated race never fired — test setup is broken');
+        // 2 rows: the original + the racing insert — NOT the aborted save's.
+        $this->assertSame(2, ProductReferencePhoto::query()->where('product_id', $product->id)->count());
+        // 2 blobs on disk: same two — the aborted save's blob was deleted.
+        $this->assertCount(2, Storage::disk($disk)->allFiles($directory));
+    }
+
+    public function test_a_failure_inside_the_transaction_cleans_up_the_stored_blob_and_rethrows(): void
+    {
+        $this->actingAsCrmStaff();
+        $product = Product::factory()->create();
+
+        $disk = (string) config('qds.ingestion.media_disk', 'media');
+        $directory = "tenants/{$product->tenant_id}/product-photos/{$product->id}";
+
+        // Simulates a DB failure inside the transaction (constraint
+        // violation, deadlock, lock timeout) that happens AFTER the blob is
+        // already stored — DB::transaction's default attempts=1 rethrows
+        // immediately rather than retrying.
+        ProductReferencePhoto::creating(function (): void {
+            throw new RuntimeException('simulated insert failure');
+        });
+
+        try {
+            try {
+                Livewire::test(ProductPhotos::class)
+                    ->call('open', $product->id)
+                    ->set('upload', UploadedFile::fake()->image('front.jpg', 40, 40))
+                    ->call('save');
+
+                $this->fail('Expected the simulated RuntimeException to propagate from save().');
+            } catch (RuntimeException $e) {
+                $this->assertSame('simulated insert failure', $e->getMessage());
+            }
+        } finally {
+            ProductReferencePhoto::flushEventListeners();
+        }
+
+        $this->assertDatabaseCount('product_reference_photos', 0);
+        $this->assertSame([], Storage::disk($disk)->allFiles($directory));
+    }
+
+    public function test_upload_queues_the_embed_job_only_when_the_capability_can_spend(): void
+    {
+        Queue::fake();
+        $this->actingAsCrmStaff();
+        $product = Product::factory()->create();
+
+        // Switch off (default): stored for later — qds:embed-product-photos
+        // picks it up; no job, no spend.
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('upload', UploadedFile::fake()->image('front.jpg', 40, 40))
+            ->call('save')
+            ->assertHasNoErrors();
+        Queue::assertNothingPushed();
+
+        // Switch on + configured provider: embed via the queue.
+        config()->set('qds.enrichment.visual_match.enabled', true);
+        $this->app->instance(EmbeddingProvider::class, new FakeEmbeddingProvider);
+
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('upload', UploadedFile::fake()->image('back.jpg', 40, 40))
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $expected = ProductReferencePhoto::query()
+            ->where('product_id', $product->id)->orderByDesc('id')->firstOrFail();
+
+        Queue::assertPushed(
+            EmbedProductPhotoJob::class,
+            fn (EmbedProductPhotoJob $job): bool => $job->photoId === $expected->id && $job->queue === 'enrichment',
+        );
+    }
+
+    public function test_delete_removes_row_cascades_embeddings_and_blob_after_commit(): void
+    {
+        $this->actingAsCrmStaff();
+        $product = Product::factory()->create();
+        $photo = $this->makeStoredPhoto($product);
+
+        ProductPhotoEmbedding::factory()->create(['product_reference_photo_id' => $photo->id]);
+
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->call('confirmDelete', $photo->id)
+            ->call('deletePhoto');
+
+        $this->assertDatabaseMissing('product_reference_photos', ['id' => $photo->id]);
+        // Embedding rows cascade at the DB (spec §4.2).
+        $this->assertDatabaseMissing('product_photo_embeddings', ['product_reference_photo_id' => $photo->id]);
+        Storage::disk((string) $photo->storage_disk)->assertMissing($photo->storage_path);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'product.photo_removed', 'subject_id' => $photo->id]);
+    }
+
+    public function test_mutations_require_crm_manage_not_just_crm_view(): void
+    {
+        $this->seedRoles();
+
+        $viewer = User::factory()->create();
+        $viewer->givePermissionTo(PermissionsCatalog::CRM_VIEW);
+        $this->actingAs($viewer);
+
+        $product = Product::factory()->create();
+        $photo = $this->makeStoredPhoto($product);
+
+        // Opening the grid is crm.view; both mutators re-authorize update —
+        // including the direct-property bypass of confirmDelete.
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('upload', UploadedFile::fake()->image('front.jpg', 40, 40))
+            ->call('save')->assertForbidden();
+
+        Livewire::test(ProductPhotos::class)
+            ->call('open', $product->id)
+            ->set('confirmingDeleteId', $photo->id)
+            ->call('deletePhoto')->assertForbidden();
+
+        $this->assertDatabaseCount('product_reference_photos', 1);
+        Storage::disk((string) $photo->storage_disk)->assertExists($photo->storage_path);
+    }
+
+    public function test_products_index_row_shows_a_photos_action_with_count(): void
+    {
+        $this->actingAsCrmStaff();
+        $product = Product::factory()->create();
+        $this->makeStoredPhoto($product);
+        $this->makeStoredPhoto($product);
+
+        Livewire::test(ProductsIndex::class)
+            ->assertSee('Photos (2)');
+    }
+}

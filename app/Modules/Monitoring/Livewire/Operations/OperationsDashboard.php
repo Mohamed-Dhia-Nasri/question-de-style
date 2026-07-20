@@ -4,6 +4,8 @@ namespace App\Modules\Monitoring\Livewire\Operations;
 
 use App\Modules\Monitoring\Models\MetricSnapshot;
 use App\Modules\Monitoring\Models\Story;
+use App\Modules\Monitoring\Models\VisualMatchRun;
+use App\Platform\AiBudget\Models\AiUsageCounter;
 use App\Platform\Export\Models\ExportJob;
 use App\Platform\Export\Support\ExportJobStatus;
 use App\Platform\Ingestion\Models\IngestionAlert;
@@ -11,7 +13,9 @@ use App\Platform\Ingestion\Models\IngestionCycle;
 use App\Platform\Ingestion\Observability\ProviderHealthService;
 use App\Platform\Ingestion\SourceRegistry;
 use App\Shared\Authorization\PermissionsCatalog;
+use App\Shared\Enums\VisualMatchOutcome;
 use App\Shared\Tenancy\TenantContext;
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\DB;
 use Livewire\Component;
@@ -87,6 +91,8 @@ class OperationsDashboard extends Component
                 ->latest('created_at')
                 ->limit(8)
                 ->get(),
+            // Spec §10 AI-spend panel: own-tenant usage + anonymous platform totals.
+            'aiSpend' => $this->aiSpendPanel($tenantId),
         ]);
     }
 
@@ -103,6 +109,8 @@ class OperationsDashboard extends Component
         $vision = (bool) config('services.google_vision.api_key');
         $speech = (bool) config('services.google_speech.api_key');
         $video = (bool) config('services.google_video_intelligence.api_key');
+        $embeddings = (string) config('services.google_embeddings.credentials_path') !== ''
+            && (string) config('services.google_embeddings.project_id') !== '';
 
         $configured = [];
 
@@ -113,10 +121,97 @@ class OperationsDashboard extends Component
                 $source === SourceRegistry::GOOGLE_CLOUD_VISION => $vision,
                 $source === SourceRegistry::GOOGLE_SPEECH_TO_TEXT => $speech,
                 $source === SourceRegistry::GOOGLE_VIDEO_INTELLIGENCE => $video,
+                $source === SourceRegistry::GOOGLE_GEMINI_EMBEDDINGS => $embeddings,
                 default => false,
             };
         }
 
         return $configured;
+    }
+
+    /**
+     * AI-spend + visual-match quality panel (spec §10). ADR-0019: this
+     * dashboard is viewed by TENANT staff, so only the viewer's own usage
+     * is itemized; platform figures are anonymous aggregates (same
+     * posture as queue depth) — the spec's per-tenant "top spenders"
+     * table is deliberately narrowed to own-tenant + platform totals,
+     * because naming another tenant here would break the isolation
+     * contract the cross-tenant alert tests pin down.
+     *
+     * @return array{capabilities: list<array<string, mixed>>, visual: array<string, mixed>|null}
+     */
+    private function aiSpendPanel(?int $tenantId): array
+    {
+        $today = CarbonImmutable::now()->toDateString();
+        $monthStart = CarbonImmutable::now()->startOfMonth()->toDateString();
+
+        $capabilities = [];
+
+        foreach (array_keys((array) config('qds.ai_budget.capabilities')) as $capability) {
+            // tenant_id 0 matches nothing: platform context itemizes nobody.
+            $own = fn () => AiUsageCounter::query()
+                ->where('capability', $capability)
+                ->where('usage_date', '>=', $monthStart)
+                ->where('tenant_id', $tenantId ?? 0);
+
+            $global = fn () => AiUsageCounter::query()
+                ->where('capability', $capability)
+                ->where('usage_date', '>=', $monthStart);
+
+            $ownMonthCostMicro = (int) $own()->sum('estimated_cost_micro_usd');
+            $ownPostsProcessed = (int) $own()->sum('posts_processed');
+
+            $capabilities[] = [
+                'capability' => $capability,
+                'own_today_units' => (int) $own()->where('usage_date', $today)->sum('units'),
+                'own_month_units' => (int) $own()->sum('units'),
+                'own_month_cost_usd' => $ownMonthCostMicro / 1_000_000,
+                'own_skipped_budget' => (int) $own()->sum('posts_skipped_budget'),
+                'own_skipped_no_candidates' => (int) $own()->sum('posts_skipped_no_candidates'),
+                'avg_cost_per_post_usd' => $ownPostsProcessed > 0 ? $ownMonthCostMicro / $ownPostsProcessed / 1_000_000 : null,
+                'global_today_units' => (int) $global()->where('usage_date', $today)->sum('units'),
+                'global_month_units' => (int) $global()->sum('units'),
+            ];
+        }
+
+        return ['capabilities' => $capabilities, 'visual' => $this->visualRunAggregates($tenantId)];
+    }
+
+    /**
+     * Quality/efficiency aggregates over the last 7 days of visual-match
+     * runs. VisualMatchRun is TenantScoped, but TenantScope is a NO-OP with
+     * no active context — so a null $tenantId is filtered explicitly here
+     * too (same defensive pattern as aiSpendPanel()'s `own()`), rather than
+     * trusting the scope alone to keep a null-context render from silently
+     * becoming an all-tenant aggregate. Null when there are no recent runs.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function visualRunAggregates(?int $tenantId): ?array
+    {
+        $recent = fn () => VisualMatchRun::query()
+            ->where('tenant_id', $tenantId ?? 0)
+            ->where('created_at', '>=', CarbonImmutable::now()->subDays(7));
+
+        $runs = (int) $recent()->count();
+
+        if ($runs === 0) {
+            return null;
+        }
+
+        $billed = (int) $recent()->sum('embedding_calls');
+        $cacheHits = (int) $recent()->sum('cache_hits');
+
+        return [
+            'runs' => $runs,
+            'embeddings_created' => $billed,
+            'cache_hit_rate' => ($billed + $cacheHits) > 0 ? $cacheHits / ($billed + $cacheHits) : null,
+            'skipped_format' => (int) $recent()->sum('frames_skipped_format'),
+            'skipped_quality' => (int) $recent()->sum('frames_skipped_quality'),
+            'deduped' => (int) $recent()->sum('frames_deduped'),
+            'budget_denials' => (int) $recent()->where('outcome', VisualMatchOutcome::SkippedBudget->value)->count(),
+            'avg_candidates' => round((float) $recent()->avg('candidates_checked'), 1),
+            'avg_processing_ms' => (int) round((float) $recent()->avg('processing_ms')),
+        ];
     }
 }

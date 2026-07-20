@@ -5,6 +5,8 @@ namespace App\Platform;
 use App\Modules\CRM\Services\IngestedProfileSync;
 use App\Modules\CRM\Services\ShipmentContentWriter;
 use App\Modules\CRM\Services\ShipmentEvidenceSource;
+use App\Platform\AiBudget\Console\AiQuotaCommand;
+use App\Platform\AiBudget\Console\AiReadOnlyCommand;
 use App\Platform\Analytics\Console\RefreshRollupsCommand;
 use App\Platform\Analytics\Contracts\AnalyticsService;
 use App\Platform\Analytics\NeonAnalyticsService;
@@ -20,6 +22,10 @@ use App\Platform\Enrichment\DefaultEnrichmentService;
 use App\Platform\Enrichment\Matching\Console\LinkSeededContentCommand;
 use App\Platform\Enrichment\Reach\DefaultReachEstimator;
 use App\Platform\Enrichment\Sentiment\UnavailableSentimentClassifier;
+use App\Platform\Enrichment\VisualMatch\Console\EmbedProductPhotosCommand;
+use App\Platform\Enrichment\VisualMatch\Console\VisualMatchBackfillCommand;
+use App\Platform\Enrichment\VisualMatch\Contracts\EmbeddingProvider;
+use App\Platform\Enrichment\VisualMatch\Http\GeminiMultimodalEmbeddingProvider;
 use App\Platform\Export\Console\PruneExpiredExportsCommand;
 use App\Platform\Export\Contracts\ExportService;
 use App\Platform\Export\DefaultExportService;
@@ -73,6 +79,12 @@ class PlatformServiceProvider extends ServiceProvider
         $this->app->bind(SentimentClassifier::class, UnavailableSentimentClassifier::class);
         $this->app->bind(ReachEstimator::class, DefaultReachEstimator::class);
 
+        // Sub-project C (ADR-0029): the embedding seam for visual product
+        // matching. Gemini Embedding 2 is the only v1 implementation; a
+        // second provider is a new binding + model_version — never a
+        // call-site change (no selection knob until one exists, YAGNI).
+        $this->app->bind(EmbeddingProvider::class, GeminiMultimodalEmbeddingProvider::class);
+
         // Cross-module contracts with Module 3 (P3, live since M3 Step 3):
         // seeding evidence is read from — and resulting-content links are
         // written by — the CRM-owned implementations (ownership matrix;
@@ -115,6 +127,10 @@ class PlatformServiceProvider extends ServiceProvider
                 PruneExpiredExportsCommand::class,
                 EvalDetectionCommand::class,
                 PruneKeyframesCommand::class,
+                EmbedProductPhotosCommand::class,
+                AiReadOnlyCommand::class,
+                AiQuotaCommand::class,
+                VisualMatchBackfillCommand::class,
             ]);
         }
     }

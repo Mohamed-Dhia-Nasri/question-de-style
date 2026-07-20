@@ -6,6 +6,7 @@ use App\Modules\CRM\Livewire\Concerns\WithInlineCreate;
 use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Client;
 use App\Modules\CRM\Models\Product;
+use App\Modules\CRM\Models\ProductReferencePhoto;
 use App\Shared\Audit\AuditLogger;
 use App\Shared\Enums\MetricTier;
 use App\Shared\Enums\SectorLabel;
@@ -16,7 +17,9 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Livewire\Attributes\On;
 use Livewire\Component;
 
 /**
@@ -75,6 +78,7 @@ class ProductsIndex extends Component
         return $this->applySort(
             Product::query()
                 ->with('brand')
+                ->withCount('referencePhotos')
                 ->when($this->search !== '', function (Builder $query) {
                     $query->where(function (Builder $query) {
                         $query->where('name', 'ilike', '%'.$this->search.'%')
@@ -207,14 +211,40 @@ class ProductsIndex extends Component
 
         $this->authorize('delete', $product);
 
+        /** @var list<array{disk: string, path: string}> $blobs */
+        $blobs = [];
+
         try {
-            // Savepoint so a restrict-FK refusal leaves the connection usable.
-            DB::transaction(fn () => $product->delete());
+            // Savepoint so a restrict-FK refusal leaves the connection
+            // usable. Blob paths are collected INSIDE the transaction —
+            // the photo rows are gone once the product cascade fires —
+            // and the files are deleted only AFTER commit (spec §6, the
+            // GDPR house order): a rolled-back delete must leave every
+            // blob in place.
+            DB::transaction(function () use ($product, &$blobs): void {
+                $blobs = ProductReferencePhoto::query()
+                    ->where('product_id', $product->id)
+                    ->get(['storage_disk', 'storage_path'])
+                    ->map(fn (ProductReferencePhoto $photo): array => [
+                        'disk' => (string) $photo->storage_disk,
+                        'path' => (string) $photo->storage_path,
+                    ])
+                    ->all();
+
+                $product->delete();
+            });
         } catch (QueryException) {
             $this->confirmingDeleteId = null;
             $this->dispatch('notify', type: 'error', message: 'Cannot delete: this product is referenced by seeding runs or shipments.');
 
             return;
+        }
+
+        // After commit: photo + embedding ROWS are already gone via the DB
+        // cascade; the blobs go last, best-effort — an orphan file is
+        // recoverable, a dangling row is not (the M31 ordering).
+        foreach ($blobs as $blob) {
+            Storage::disk($blob['disk'])->delete($blob['path']);
         }
 
         $audit->record('product.deleted', $product, ['name' => $product->name]);
@@ -228,6 +258,14 @@ class ProductsIndex extends Component
     public function cancelDelete(): void
     {
         $this->confirmingDeleteId = null;
+    }
+
+    /** Photos-modal mutations re-render the list so the badge stays fresh. */
+    #[On('product-photos-changed')]
+    public function refreshPhotoCounts(): void
+    {
+        // Intentionally empty: receiving the event triggers a re-render,
+        // which re-reads reference_photos_count.
     }
 
     /** After deletes/filter-affecting mutations, leave no out-of-range page. */

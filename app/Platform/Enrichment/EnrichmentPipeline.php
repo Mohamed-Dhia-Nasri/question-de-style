@@ -16,6 +16,7 @@ use App\Platform\Enrichment\Sentiment\SentimentEnricher;
 use App\Platform\Enrichment\Support\EnrichmentRunStatus;
 use App\Platform\Enrichment\TextSignals\TextSignalRecognizer;
 use App\Platform\Enrichment\Transcripts\YouTubeTranscriptEnricher;
+use App\Platform\Enrichment\VisualMatch\VisualProductMatcher;
 use App\Platform\Ingestion\Exceptions\ProviderCallException;
 use Carbon\CarbonImmutable;
 use Throwable;
@@ -23,7 +24,7 @@ use Throwable;
 /**
  * The SVC-EnrichmentAI pipeline over one ContentItem or Story:
  *
- *   hashtags → transcript → recognition → keyframes → text signals → sentiment → seeded attribution → EMV → reach
+ *   hashtags → transcript → recognition → keyframes → visual match → text signals → sentiment → seeded attribution → EMV → reach
  *
  * Stage outcomes are recorded on an EnrichmentRun row (operational
  * telemetry, sanitized values only). Unavailable boundaries (sentiment
@@ -45,6 +46,7 @@ class EnrichmentPipeline
         private readonly MediaWorkspaceFactory $workspaces,
         private readonly KeyframeExtractor $keyframes,
         private readonly YouTubeTranscriptEnricher $transcripts,
+        private readonly VisualProductMatcher $visualMatch,
     ) {}
 
     public function run(ContentItem|Story $target, string $correlationId, int $retryCount = 0): EnrichmentRun
@@ -86,6 +88,17 @@ class EnrichmentPipeline
                 $stages['keyframes'] = $this->keyframes->enrich($target, $workspace);
             } else {
                 $stages['keyframes'] = 'skipped:disabled';
+            }
+
+            // Sub-project C: visual product matching over the persisted
+            // keyframes. After `keyframes` (frames must exist), before
+            // `attribution` in the same run so VISUAL_PRODUCT detections
+            // classify immediately. Kill switch OFF = marker only — the
+            // matcher (and its provider chain) is never invoked.
+            if ((bool) config('qds.enrichment.visual_match.enabled')) {
+                $stages['visual_match'] = $this->visualMatch->enrich($target, $correlationId);
+            } else {
+                $stages['visual_match'] = 'skipped:disabled';
             }
 
             if (config('qds.enrichment.text_signals.enabled')) {

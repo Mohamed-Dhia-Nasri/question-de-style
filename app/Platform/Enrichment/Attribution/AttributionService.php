@@ -201,12 +201,14 @@ class AttributionService
 
     private function buildEvidence(ContentItem|Story $target): EvidenceBundle
     {
-        // Kill switch (Tier 0 free-signal detection, sub-project A): OFF
-        // reproduces the legacy brand-level doctrine exactly (precision
-        // gate skipped, no paid label, no contextual cues, no product-id
-        // evidence, no product doctrine); ON enables the full product-aware
-        // behaviour.
-        $enabled = (bool) config('qds.enrichment.text_signals.enabled');
+        // Two kill switches. A (text_signals, sub-project A) gates the
+        // text-family product evidence, the LOGO precision gate, the paid
+        // label and the contextual cues exactly as before. C (visual_match,
+        // sub-project C) gates VISUAL_PRODUCT evidence. EITHER switch alone
+        // enables the product-aware SEEDED doctrine; both off reproduces
+        // the legacy brand-level behaviour byte-identically.
+        $textEnabled = (bool) config('qds.enrichment.text_signals.enabled');
+        $visualEnabled = (bool) config('qds.enrichment.visual_match.enabled');
 
         $recognitions = [];
 
@@ -217,6 +219,13 @@ class AttributionService
 
         foreach ($detectionQuery->get() as $detection) {
             $assessment = $detection->assessment;
+            $isVisual = $detection->recognition_type === RecognitionType::VisualProduct;
+
+            // Rollback no-op (sub-project C): with the switch off,
+            // VISUAL_PRODUCT rows are excluded from evidence ENTIRELY.
+            if ($isVisual && ! $visualEnabled) {
+                continue;
+            }
 
             // Human-rejected detections carry no evidential weight.
             if ($assessment->value === null || in_array('human-rejected', $assessment->signals, true)) {
@@ -229,9 +238,9 @@ class AttributionService
 
             // Precision gate: an UNMATCHED logo (brand not in the lexicon) or a
             // low-confidence logo carries no attribution relevance. Gated
-            // behind the kill switch — OFF reproduces the legacy behaviour
+            // behind the A kill switch — OFF reproduces the legacy behaviour
             // where such detections still carried evidential weight.
-            if ($enabled
+            if ($textEnabled
                 && $detection->recognition_type === RecognitionType::Logo
                 && (in_array('brand-lexicon:unmatched', $assessment->signals, true)
                     || $assessment->confidenceLevel === ConfidenceLevel::Low
@@ -239,19 +248,27 @@ class AttributionService
                 continue;
             }
 
+            // Visual precision gate (closes the §2.4 trap): a REVIEW-band
+            // VISUAL_PRODUCT row (LOW/UNKNOWN, still AI-assessed) flows its
+            // BRAND but withholds the product id — the classifier then caps
+            // the mention at SEEDED/MEDIUM + product-unconfirmed (held for
+            // review, never auto-linked) instead of silently auto-linking on
+            // one isolated visual hit. A human approving the detection
+            // (HUMAN_REVIEWED/…) re-opens the gate on the next run.
+            // Text-family rows flow product evidence only under A's switch
+            // (unchanged: a stale/rolled-back productId must never align a
+            // shipment on its own when A is off).
+            $productFlows = $isVisual
+                ? ! ($assessment->verificationStatus === VerificationStatus::AiAssessed
+                    && in_array($assessment->confidenceLevel, [ConfidenceLevel::Low, ConfidenceLevel::Unknown], true))
+                : $textEnabled;
+
             $recognitions[] = [
                 'type' => $detection->recognition_type->value,
                 'brand' => $detection->detected_brand,
                 'level' => $assessment->confidenceLevel,
-                // Gated behind the kill switch: with it off, no recognition
-                // carries a productId, so MentionClassifier::shipmentAligns's
-                // productId shortcut can never fire — alignment falls back
-                // to brand-name only, the true legacy behaviour. Without
-                // this gate a shipment could still align (and SEEDED at
-                // HIGH) purely on a stale/rolled-back productId even after
-                // the brand itself no longer matches.
-                'productId' => $enabled ? $detection->product_id : null,
-                'product' => $enabled ? $detection->detected_product : null,
+                'productId' => $productFlows ? $detection->product_id : null,
+                'product' => $productFlows ? $detection->detected_product : null,
             ];
         }
 
@@ -264,12 +281,12 @@ class AttributionService
             hashtagMatches: $hashtagMatches,
             ambiguousHashtags: $ambiguous,
             shipments: $this->seedingEvidence->forTarget($target),
-            paidPartnershipLabel: $enabled ? ($target instanceof ContentItem ? $target->branded_content_label : null) : false,
-            contextualCues: $enabled && $target instanceof ContentItem
+            paidPartnershipLabel: $textEnabled ? ($target instanceof ContentItem ? $target->branded_content_label : null) : false,
+            contextualCues: $textEnabled && $target instanceof ContentItem
                 ? app(ContextualCueDetector::class)->detect($target->caption)
                 : [],
             publishedAt: $this->publicationDate($target),
-            productDoctrine: $enabled,
+            productDoctrine: $textEnabled || $visualEnabled,
         );
     }
 

@@ -12,6 +12,7 @@ depends_on:
   - ADR-0003
   - ADR-0017
   - ADR-0028
+  - ADR-0029
   - DP-002
   - DEF-003
   - ../30-data-model/00-data-model.md
@@ -154,6 +155,7 @@ One short contract per provider: what it returns and its key limits. These are t
 - **`SRC-google-cloud-vision`** — Image OCR via `TEXT_DETECTION` and brand logo detection via `LOGO_DETECTION`.
 - **`SRC-google-speech-to-text`** — Audio transcript / spoken-brand detection. **German models enabled** (DACH focus).
 - **`SRC-google-video-intelligence`** — Video-wide on-screen text + logo detection. **Optional** deep-analysis pass over full video content.
+- **`SRC-google-gemini-embeddings`** — *Added 2026-07-19 — sub-project C visual product matching ([ADR-0029](../05-decisions/decision-log.md#adr-0029)), one further addition to the otherwise-closed provider set (after ADR-0028's `SRC-apify-youtube-transcript`).* Gemini Embedding 2 (`gemini-embedding-2`) multimodal image embeddings for visual product matching — one `embedContent` call per image (product reference photos and sub-project B's persisted keyframes), fused into a single 3072-dim vector compared exact-scan in pgvector. **EU multi-region endpoint** (`aiplatform.eu.rep.googleapis.com`, `locations/eu` — the residency choice locked by ADR-0029; `global` carries no residency guarantee and is rejected); **service-account (RS256 JWT-bearer) auth only — `embedContent` accepts no API keys**. **Limit: kill-switched** (`qds.enrichment.visual_match.enabled`) and governed by the AI budget subsystem (`app/Platform/AiBudget/`; per-post/tenant-daily/tenant-monthly/global caps). $0.00012/image.
 
 ### Internal (non-provider) source — manual entry
 

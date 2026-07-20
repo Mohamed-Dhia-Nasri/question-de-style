@@ -54,6 +54,15 @@ final class SourceRegistry
     public const GOOGLE_GEMINI_EMBEDDINGS = 'SRC-google-gemini-embeddings';
 
     /**
+     * Gemini VLM verification/grounding of sub-project C's candidates
+     * (ADR-0030 amendment to the ADR-0001 freeze — sub-project D).
+     * Keyframe bytes travel INLINE (base64) to the EU jurisdictional rep
+     * endpoint (aiplatform.eu.rep.googleapis.com), never as URLs
+     * (DP-005); Bearer-token (service-account JWT) auth only.
+     */
+    public const GOOGLE_GEMINI_VLM = 'SRC-google-gemini-vlm';
+
+    /**
      * Internal marker, NOT an external provider (ADR-0015): the record's
      * values were entered by hand by agency staff in the CRM (operator-
      * curated platform accounts under ADR-0014). Performs no collection;
@@ -79,6 +88,7 @@ final class SourceRegistry
             self::GOOGLE_SPEECH_TO_TEXT,
             self::GOOGLE_VIDEO_INTELLIGENCE,
             self::GOOGLE_GEMINI_EMBEDDINGS,
+            self::GOOGLE_GEMINI_VLM,
             self::AGENCY_MANUAL_ENTRY,
         ];
     }

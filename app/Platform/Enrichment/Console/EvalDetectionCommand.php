@@ -14,8 +14,14 @@ use App\Platform\Enrichment\VisualMatch\Frames\PreparedFrame;
 use App\Platform\Enrichment\VisualMatch\Matching\BandMapper;
 use App\Platform\Enrichment\VisualMatch\Matching\CandidateScores;
 use App\Platform\Enrichment\VisualMatch\Matching\FrameScore;
+use App\Platform\Enrichment\VlmVerification\Banding\VlmBandMapper;
+use App\Platform\Enrichment\VlmVerification\Requests\VlmCandidate;
+use App\Platform\Enrichment\VlmVerification\Requests\VlmFrame;
+use App\Platform\Enrichment\VlmVerification\Requests\VlmRequest;
+use App\Platform\Enrichment\VlmVerification\Verdicts\VerdictValidator;
 use App\Shared\Enums\SectorLabel;
 use App\Shared\Enums\VisualMatchBand;
+use App\Shared\Enums\VlmBand;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
 
@@ -30,6 +36,15 @@ use Illuminate\Support\Facades\File;
  * distribution, missed brief appearances, average margin, frame-skip
  * rate, and estimated embedding cost per case. The measurement baseline
  * for sub-projects D–E.
+ *
+ * Sub-project D (spec §15) adds two more fixture blocks: `vlm` (candidate
+ * catalog + fixture verdicts scored through the REAL VerdictValidator +
+ * VlmBandMapper — product precision/recall on the escalated subset,
+ * look-alike disambiguation, band distribution, validator rejects, token +
+ * cost estimates) and `speech` (multilingual transcript chunks mined
+ * through the REAL BrandLexicon, with a dominant-language check mirroring
+ * SpeechTranscriptWriter's billed-milliseconds rule). Still pure: no DB
+ * writes, no network.
  */
 class EvalDetectionCommand extends Command
 {
@@ -37,7 +52,10 @@ class EvalDetectionCommand extends Command
 
     protected $description = 'Score seeded-product detection against a labelled golden set.';
 
-    public function handle(BrandLexicon $lexicon, MentionExtractor $mentions, ContextualCueDetector $cues, BandMapper $bandMapper): int
+    /** Gemini media_resolution MEDIUM — tokens billed per frame (spec §2b.4). */
+    private const MEDIUM_TOKENS_PER_FRAME = 560;
+
+    public function handle(BrandLexicon $lexicon, MentionExtractor $mentions, ContextualCueDetector $cues, BandMapper $bandMapper, VerdictValidator $verdictValidator, VlmBandMapper $vlmBandMapper): int
     {
         $path = (string) ($this->option('fixture') ?: base_path('tests/Fixtures/eval/golden-set.json'));
 
@@ -83,6 +101,8 @@ class EvalDetectionCommand extends Command
         ]);
 
         $this->scoreVisualCases($cases, $bandMapper);
+        $this->scoreVlmCases($cases, $verdictValidator, $vlmBandMapper);
+        $this->scoreSpeechCases($cases, $lexicon);
 
         return self::SUCCESS;
     }
@@ -198,6 +218,236 @@ class EvalDetectionCommand extends Command
             ['frame skip rate', $availableFrames > 0 ? number_format($skippedFrames / $availableFrames, 3) : 'n/a'],
             ['est. embedding cost / case', '$'.number_format($costPerCaseUsd, 6)],
         ]);
+    }
+
+    /** @param list<array<string, mixed>> $cases */
+    private function scoreVlmCases(array $cases, VerdictValidator $validator, VlmBandMapper $mapper): void
+    {
+        $vlmCases = array_values(array_filter($cases, static fn (array $case): bool => isset($case['vlm'])));
+
+        if ($vlmCases === []) {
+            return;
+        }
+
+        $tp = $fp = $fn = 0;
+        $bandsAsExpected = $validatorRejects = 0;
+        $lookAlikeCases = $lookAlikeCorrect = 0;
+        $tokenEstimate = 0;
+        /** @var array<string, int> $bandDistribution */
+        $bandDistribution = [];
+
+        foreach ($vlmCases as $case) {
+            /** @var array<string, mixed> $vlm */
+            $vlm = $case['vlm'];
+            $request = $this->requestFromFixture($case);
+            $tokenEstimate += count($request->frames) * self::MEDIUM_TOKENS_PER_FRAME
+                + intdiv(mb_strlen($request->caption.$request->transcript), 4);
+
+            $validated = $validator->validate((array) ($vlm['verdict_fixture'] ?? []), $request);
+
+            $predictedProduct = null;
+            $predictedBand = 'none';
+
+            if ($validated->malformedReason !== null) {
+                $validatorRejects++;
+            } elseif ($validated->verdicts->outcome === 'INCONCLUSIVE') {
+                // Incl. the §6 confirmed-but-empty normalization — never "absent".
+                $predictedBand = 'inconclusive';
+            } else {
+                foreach ($mapper->map($validated->verdicts, $request) as $result) {
+                    if ($result->band !== VlmBand::Reject) {
+                        // ranked best-first: the first non-reject wins
+                        $predictedProduct = $request->candidateByKey($result->verdict->productKey)?->label;
+                        $predictedBand = $result->band->value;
+
+                        break;
+                    }
+                }
+            }
+
+            $expected = (array) ($vlm['expected'] ?? []);
+            $expectedProduct = $expected['product'] ?? null;
+            $expectedBand = (string) ($expected['band'] ?? 'none');
+
+            if ($predictedProduct !== null && $predictedProduct === $expectedProduct) {
+                $tp++;
+            } elseif ($predictedProduct !== null) {
+                $fp++;
+
+                if ($expectedProduct !== null) {
+                    $fn++; // the WRONG product: both a false positive and a miss
+                }
+            } elseif ($expectedProduct !== null) {
+                $fn++;
+            }
+
+            if ((bool) ($vlm['look_alike'] ?? false)) {
+                $lookAlikeCases++;
+
+                if ($predictedProduct === $expectedProduct) {
+                    $lookAlikeCorrect++;
+                }
+            }
+
+            $bandDistribution[$predictedBand] = ($bandDistribution[$predictedBand] ?? 0) + 1;
+
+            if ($predictedBand === $expectedBand) {
+                $bandsAsExpected++;
+            }
+        }
+
+        $recall = ($tp + $fn) > 0 ? $tp / ($tp + $fn) : 0.0;
+        $precision = ($tp + $fp) > 0 ? $tp / ($tp + $fp) : 0.0;
+        ksort($bandDistribution);
+
+        // One billed generateContent request per case; the §11 governance
+        // constant ($0.030) already folds frames × MEDIUM tokens + text into
+        // its derivation — an estimate for governance, not billing truth.
+        $priceMicroUsd = (int) config('qds.ai_budget.capabilities.vlm_verification.price_micro_usd_per_unit');
+        $costPerCaseUsd = $priceMicroUsd / 1_000_000;
+
+        $this->newLine();
+        $this->info('VLM grounding (real VerdictValidator + VlmBandMapper over fixture verdicts):');
+        $this->table(['vlm metric', 'value'], [
+            ['vlm cases', count($vlmCases)],
+            ['vlm product true positives', $tp],
+            ['vlm product false positives', $fp],
+            ['vlm product false negatives', $fn],
+            ['vlm product recall', number_format($recall, 3)],
+            ['vlm product precision', number_format($precision, 3)],
+            ['look-alike disambiguation', $lookAlikeCases === 0 ? 'n/a' : $lookAlikeCorrect.'/'.$lookAlikeCases],
+            ['band distribution', $this->formatCounts($bandDistribution)],
+            ['bands as expected', $bandsAsExpected.'/'.count($vlmCases)],
+            ['validator rejects', $validatorRejects],
+            ['est. input tokens / case', (int) round($tokenEstimate / count($vlmCases))],
+            ['est. VLM cost / case', '$'.number_format($costPerCaseUsd, 6)],
+        ]);
+    }
+
+    /** @param list<array<string, mixed>> $cases */
+    private function scoreSpeechCases(array $cases, BrandLexicon $lexicon): void
+    {
+        $speechCases = array_values(array_filter($cases, static fn (array $case): bool => isset($case['speech'])));
+
+        if ($speechCases === []) {
+            return;
+        }
+
+        $expectedBrands = $foundBrands = $dominantAsExpected = $chunkCount = 0;
+        /** @var list<string> $missed */
+        $missed = [];
+
+        foreach ($speechCases as $case) {
+            /** @var array<string, mixed> $speech */
+            $speech = $case['speech'];
+            $chunks = array_values((array) ($speech['chunks'] ?? []));
+            $chunkCount += count($chunks);
+
+            /** @var array<string, true> $mined */
+            $mined = [];
+            /** @var array<string, int> $msByLanguage */
+            $msByLanguage = [];
+
+            foreach ($chunks as $chunk) {
+                foreach ($lexicon->matchAllInText((string) ($chunk['text'] ?? '')) as $brand) {
+                    $mined[$brand] = true;
+                }
+
+                $language = (string) ($chunk['language'] ?? 'und');
+                $msByLanguage[$language] = ($msByLanguage[$language] ?? 0) + (int) ($chunk['duration_ms'] ?? 0);
+            }
+
+            // Dominant language by billed milliseconds — the same rule
+            // SpeechTranscriptWriter applies to the persisted transcript row
+            // (ties resolve to the earliest chunk's language; strict > keeps
+            // the first-seen winner).
+            $dominant = 'und';
+            $dominantMs = -1;
+
+            foreach ($chunks as $chunk) {
+                $language = (string) ($chunk['language'] ?? 'und');
+
+                if (($msByLanguage[$language] ?? 0) > $dominantMs) {
+                    $dominant = $language;
+                    $dominantMs = $msByLanguage[$language] ?? 0;
+                }
+            }
+
+            $expected = (array) ($speech['expected'] ?? []);
+
+            foreach ((array) ($expected['brands'] ?? []) as $brand) {
+                $expectedBrands++;
+
+                if (isset($mined[(string) $brand])) {
+                    $foundBrands++;
+                } else {
+                    $missed[] = (string) $brand;
+                }
+            }
+
+            if ($dominant === (string) ($expected['dominant_language'] ?? 'und')) {
+                $dominantAsExpected++;
+            }
+        }
+
+        $priceMicroUsd = (int) config('qds.ai_budget.capabilities.speech_transcription.price_micro_usd_per_unit');
+        $costPerCaseUsd = $chunkCount * $priceMicroUsd / count($speechCases) / 1_000_000;
+
+        $this->newLine();
+        $this->info('Multilingual speech (lexicon mining over transcript-chunk fixtures):');
+        $this->table(['speech metric', 'value'], [
+            ['speech cases', count($speechCases)],
+            ['spoken brands found', $foundBrands.'/'.$expectedBrands],
+            ['missed spoken brands', $missed === [] ? 'none' : implode(' ', array_unique($missed))],
+            ['dominant language as expected', $dominantAsExpected.'/'.count($speechCases)],
+            ['est. speech cost / case', '$'.number_format($costPerCaseUsd, 6)],
+        ]);
+    }
+
+    /**
+     * Build a VlmRequest from a fixture case — no bytes, no DB, no network.
+     * Candidate keys are assigned P1..Pn in fixture array order; the
+     * verdict_fixture references them by those keys.
+     *
+     * @param  array<string, mixed>  $case
+     */
+    private function requestFromFixture(array $case): VlmRequest
+    {
+        /** @var array<string, mixed> $vlm */
+        $vlm = $case['vlm'];
+        $frames = [];
+
+        foreach (array_values((array) ($vlm['frames'] ?? [])) as $index => $frame) {
+            $frames[] = new VlmFrame(
+                name: (string) ($frame['name'] ?? 'FRAME_'.($index + 1)),
+                timestampMs: $frame['t_ms'] ?? null,
+                bytes: '',
+                mimeType: 'image/jpeg',
+            );
+        }
+
+        $candidates = [];
+
+        foreach (array_values((array) ($vlm['candidates'] ?? [])) as $index => $spec) {
+            $candidates[] = new VlmCandidate(
+                key: 'P'.($index + 1),
+                productId: $index + 1, // synthetic, stable within the case
+                label: (string) $spec['product'],
+                brand: (string) ($spec['brand'] ?? $spec['product']),
+                category: isset($spec['category']) ? SectorLabel::from((string) $spec['category'])->value : null,
+                aliases: array_map(strval(...), (array) ($spec['aliases'] ?? [])),
+                cBand: isset($spec['c_band']) ? (string) $spec['c_band'] : null,
+                cScore: isset($spec['c_score']) ? (float) $spec['c_score'] : null,
+            );
+        }
+
+        return new VlmRequest(
+            frames: $frames,
+            candidates: $candidates,
+            caption: (string) ($case['caption'] ?? ''),
+            transcript: (string) ($vlm['transcript'] ?? ''),
+            prompt: '',
+        );
     }
 
     /**

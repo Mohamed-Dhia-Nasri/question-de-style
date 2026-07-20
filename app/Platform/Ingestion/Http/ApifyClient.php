@@ -8,6 +8,7 @@ use App\Platform\Ingestion\Support\ErrorCategory;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Thin HTTP client for Apify actors (the Instagram SRC-apify-* actors and
@@ -72,7 +73,7 @@ class ApifyClient
             );
         }
 
-        $this->assertNotAccessError($sourceId, $actorId, $items, $response->status());
+        $items = $this->resolveControlEnvelope($sourceId, $actorId, $items, $response->status());
 
         /** @var list<mixed> $items */
         return new ProviderResponse(
@@ -192,7 +193,7 @@ class ApifyClient
             );
         }
 
-        $this->assertNotAccessError($sourceId, $actorId, $items, $itemsResponse->status());
+        $items = $this->resolveControlEnvelope($sourceId, $actorId, $items, $itemsResponse->status());
 
         /** @var list<mixed> $items */
         return new ProviderResponse(
@@ -268,28 +269,45 @@ class ApifyClient
     }
 
     /**
-     * Some Apify actors (paid/rental ones on a free account) return HTTP 201
-     * with a SINGLE dataset item that is an access/paywall error object
-     * rather than real data — e.g. `{ "error": "…only available for paying
-     * users…", "trial_actor_id": "…" }`. Left alone this would be silently
-     * quarantined as a vague "missing id" record; surface it as a clear,
-     * call-level AUTHENTICATION failure so the health view and alerts flag
-     * that the actor is not accessible. Sanitized: no user identifiers.
+     * Apify actors signal a CONTROL condition — not real data — as a SINGLE
+     * dataset item carrying a top-level string `error` (a genuine content
+     * record keys on id/shortCode, never on a bare `error`). Three cases,
+     * each classified for the health view and alerts instead of being
+     * silently quarantined as a vague "missing id" record. Returns the item
+     * list to normalize (unchanged, or [] when the run had no content).
+     *
+     *  - Paid/rental access error — e.g. `{ "error": "…only available for
+     *    paying users…", "trial_actor_id": "…" }`. A free account cannot use
+     *    the actor; surface a call-level AUTHENTICATION failure so operators
+     *    rent it or override the configured actor id.
+     *  - No content — `{ "error": "no_items", "errorDescription": "Empty or
+     *    private data …" }`. The account has no posts in the refresh window
+     *    (or is private): a LEGITIMATE zero-result run, not a failure. Resolve
+     *    to an empty list so the batch is a clean success — nothing to
+     *    quarantine, and no false SCHEMA_DRIFT ("probable schema change")
+     *    alert. Verified live: creator fouuu_x, zero reels in 14 days.
+     *  - Any other actor-reported error — an UPSTREAM_ERROR (retryable), not
+     *    malformed content masquerading as a missing-id record.
+     *
+     * Sanitized: raw provider identifiers never leave this method.
      *
      * @param  list<mixed>  $items
+     * @return list<mixed>
      */
-    private function assertNotAccessError(string $sourceId, string $actorId, array $items, int $httpStatus): void
+    private function resolveControlEnvelope(string $sourceId, string $actorId, array $items, int $httpStatus): array
     {
         if (count($items) !== 1 || ! is_array($items[0])) {
-            return;
+            return $items;
         }
 
         $item = $items[0];
         $error = $item['error'] ?? null;
 
         if (! is_string($error)) {
-            return;
+            return $items;
         }
+
+        $description = is_string($item['errorDescription'] ?? null) ? $item['errorDescription'] : '';
 
         $isAccessError = isset($item['trial_actor_id'])
             || (bool) preg_match('/paying users|upgrade your plan|rent(al)?|free (users?|plan)|only available for/i', $error);
@@ -303,6 +321,26 @@ class ApifyClient
                 $httpStatus,
             );
         }
+
+        $isNoContent = $error === 'no_items'
+            || (bool) preg_match('/empty or private|no (posts|reels|results|items|stories)|zero (public )?(posts|reels)/i', $error.' '.$description);
+
+        if ($isNoContent) {
+            Log::info('Apify actor returned no content — treating as an empty result.', [
+                'source' => $sourceId,
+                'actor' => $actorId,
+                'error' => $error,
+            ]);
+
+            return [];
+        }
+
+        throw new ProviderCallException(
+            $sourceId,
+            ErrorCategory::UpstreamError,
+            "Apify actor [{$actorId}] reported a run error (not content).",
+            $httpStatus,
+        );
     }
 
     private function retryAfterSeconds(Response $response): ?int

@@ -39,11 +39,12 @@ that each **augment** the existing enrichment pipeline (they feed the same
 | A | **Free-signal detection** (captions, @mentions, product tags, gifting cues, product-aware doctrine, eval scorecard) | ✅ DONE — merged to `main` (merge `55e96db`) | — |
 | B | **Media resolution & keyframe sampling** (real media for TikTok/YouTube/long video; ffmpeg keyframes for all platforms) | ✅ DONE — merged to `main` (merge `9c9ef89`, ADR-0028) | — (independent of A) |
 | C | **Visual product matching** (reference photos + Google multimodal embeddings in pgvector; match keyframes → seeded-SKU catalog) | ✅ DONE — built on `feat/seeded-detection-visual-match` (spec `docs/superpowers/specs/2026-07-19-visual-product-matching-design.md`, ADR-0029) | **B** |
-| D | **VLM grounding & multilingual speech** (Gemini over keyframes+caption+transcript+tags → grounded product; ASR language-ID + >60s) | ⬜ Not started | **B, C** |
+| D | **VLM grounding & multilingual speech** (Gemini over keyframes+caption+transcript+tags → grounded product; ASR language-ID + >60s) | ✅ DONE — built on `feat/seeded-detection-vlm-grounding` (spec `docs/superpowers/specs/2026-07-20-vlm-grounding-design.md`, ADR-0030) | **B, C** |
 | E | **Confidence calibration & eval expansion** (calibrate scores vs a labelled golden set; per-surface thresholds; multi-signal fusion; drift) | ⬜ Not started (eval-expansion part can begin any time on top of A) | A (feeds on B–D) |
 
-**Critical path to "see the product on screen":** B ✅ → C ✅ → D. D can start now (B and C have landed);
-E's calibration feeds on C's `visual_match_runs` history and the eval visual metrics.
+**Critical path to "see the product on screen":** B ✅ → C ✅ → D ✅ — complete. Only E remains: its
+calibration feeds on C's `visual_match_runs` history, D's `vlm_candidate_verdicts` (the "Gemini
+agreement" fusion input), and the eval visual/vlm/speech metrics.
 
 ---
 
@@ -194,8 +195,11 @@ calibration). Same priorities as above.
 
 ## Context
 Read docs/50-modules/seeded-product-detection.md and the roadmap FIRST. A is on main and already ships
-qds:eval-detection (a golden-set scorecard, baseline recall ~0.71 / precision ~0.83). B/C/D add visual +
-VLM signals over time.
+qds:eval-detection (a golden-set scorecard, baseline recall ~0.71 / precision ~0.83). B/C/D have landed:
+visual + VLM signals exist. D persists per-candidate VLM verdicts in `vlm_candidate_verdicts` — that
+table IS the "Gemini agreement" fusion input — and D's band thresholds
+(`qds.enrichment.vlm.thresholds`, auto 0.85 / review 0.60 / margin 0.10) plus C's
+(`qds.enrichment.visual_match.thresholds`) are explicitly-placeholder values E calibrates.
 
 ## Your task (this session): sub-project E — Confidence calibration & eval expansion. brainstorming →
 spec → writing-plans → TDD plan. No product code until approved.

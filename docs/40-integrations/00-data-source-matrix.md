@@ -80,8 +80,9 @@ These `AI`-tier providers run on media already collected by the PUBLIC providers
 | --- | --- | --- | --- | --- |
 | Image text OCR | `IMAGE_TEXT_OCR` | `SRC-google-cloud-vision` (TEXT_DETECTION) | AI | IG/TikTok/YouTube images & thumbnails |
 | Logo detection in images | `LOGO` | `SRC-google-cloud-vision` (LOGO_DETECTION) | AI | IG/TikTok/YouTube images & thumbnails |
-| Spoken-brand detection / audio transcript | `SPOKEN_BRAND` | `SRC-google-speech-to-text` (German models enabled) | AI | Any collected video/audio |
+| Spoken-brand detection / audio transcript | `SPOKEN_BRAND` | `SRC-google-speech-to-text` (v2 `chirp_3`, EU multi-region, language auto-detect — [ADR-0030](../05-decisions/decision-log.md#adr-0030); legacy v1 de-DE path while the v2 switch is off) | AI | Any collected video/audio |
 | Video-wide on-screen text + logo | `ON_SCREEN_TEXT` | `SRC-google-video-intelligence` (**optional**) | AI | Full video content (optional deep pass) |
+| Catalog-grounded VLM product verification | `VLM_PRODUCT` | `SRC-google-gemini-vlm` (`generateContent`) | AI | Stored keyframes + caption/transcript excerpts of posts sub-project C escalates |
 
 ### 2.3 Capability flow
 
@@ -129,6 +130,7 @@ flowchart LR
 <a id="src-google-cloud-vision"></a>
 <a id="src-google-speech-to-text"></a>
 <a id="src-google-video-intelligence"></a>
+<a id="src-google-gemini-vlm"></a>
 
 One short contract per provider: what it returns and its key limits. These are the **only** external providers permitted in v1.
 
@@ -153,9 +155,10 @@ One short contract per provider: what it returns and its key limits. These are t
 ### AI enrichment (Google Cloud) — provider tier AI
 
 - **`SRC-google-cloud-vision`** — Image OCR via `TEXT_DETECTION` and brand logo detection via `LOGO_DETECTION`.
-- **`SRC-google-speech-to-text`** — Audio transcript / spoken-brand detection. **German models enabled** (DACH focus).
+- **`SRC-google-speech-to-text`** — Audio transcript / spoken-brand detection. **German models enabled** (DACH focus). *Amended 2026-07-20 — sub-project D multilingual speech ([ADR-0030](../05-decisions/decision-log.md#adr-0030)):* behind `qds.enrichment.speech.v2_enabled` (default off) the same source id is served by **Speech-to-Text v2 `chirp_3` on the EU multi-region** (`eu-speech.googleapis.com`, `locations/eu`, implicit recognizer `_`) with **language auto-detect** (`languageCodes: ["auto"]`, dominant-language only), inline brand/product **phrase hints** (boost 10, cap 500), and **chunked ≤ 55 s inline long audio** to 10 min for candidate-bearing posts (async job); service-account JWT-bearer auth (v2 documents no API keys); $0.016/min with **no free tier**; transcripts persist to `content_transcripts` under this source id. With the switch off, the legacy v1 path (de-DE, ≤ 60 s, API key, global endpoint, no transcript rows) runs byte-identically.
 - **`SRC-google-video-intelligence`** — Video-wide on-screen text + logo detection. **Optional** deep-analysis pass over full video content.
 - **`SRC-google-gemini-embeddings`** — *Added 2026-07-19 — sub-project C visual product matching ([ADR-0029](../05-decisions/decision-log.md#adr-0029)), one further addition to the otherwise-closed provider set (after ADR-0028's `SRC-apify-youtube-transcript`).* Gemini Embedding 2 (`gemini-embedding-2`) multimodal image embeddings for visual product matching — one `embedContent` call per image (product reference photos and sub-project B's persisted keyframes), fused into a single 3072-dim vector compared exact-scan in pgvector. **EU multi-region endpoint** (`aiplatform.eu.rep.googleapis.com`, `locations/eu` — the residency choice locked by ADR-0029; `global` carries no residency guarantee and is rejected); **service-account (RS256 JWT-bearer) auth only — `embedContent` accepts no API keys**. **Limit: kill-switched** (`qds.enrichment.visual_match.enabled`) and governed by the AI budget subsystem (`app/Platform/AiBudget/`; per-post/tenant-daily/tenant-monthly/global caps). $0.00012/image.
+- **`SRC-google-gemini-vlm`** — *Added 2026-07-20 — sub-project D VLM grounding ([ADR-0030](../05-decisions/decision-log.md#adr-0030)), one further addition to the otherwise-closed provider set.* Gemini **`gemini-3.5-flash`** `generateContent` for **closed-set product verification**: for posts sub-project C escalated (`visual_match_runs.needs_verification`), it ingests stored keyframes (inline bytes, `media_resolution` MEDIUM) + caption/transcript excerpts + C's persisted candidate shortlist and returns **enum-grounded structured JSON** (per-request `responseSchema` whose product keys are baked into string enums — the model cannot name an out-of-catalog product). **EU jurisdictional multi-region endpoint** (`aiplatform.eu.rep.googleapis.com`, `locations/eu`; `global` carries no residency guarantee and is rejected); **service-account (RS256 JWT-bearer) auth**. **Limit: kill-switched** (`qds.enrichment.vlm.enabled`, requires visual matching ON) and governed by the AI budget subsystem (capability `vlm_verification`, ≤ 3 billed calls/post via a crash-safe attempts ledger). ~$0.030/request (governance estimate).
 
 ### Internal (non-provider) source — manual entry
 
@@ -202,8 +205,9 @@ Rules that apply to every row:
 | `SRC-youtube-data-api-v3` | Videos + view/like/comment counts | [`ENT-ContentItem`](../30-data-model/00-data-model.md) (`ContentType` VIDEO / SHORT) |
 | `SRC-youtube-data-api-v3` | Video comments | [`ENT-Comment`](../30-data-model/00-data-model.md) |
 | `SRC-google-cloud-vision` | OCR text (`TEXT_DETECTION`), logos (`LOGO_DETECTION`) | [`ENT-RecognitionDetection`](../30-data-model/00-data-model.md) (`IMAGE_TEXT_OCR`, `LOGO`) |
-| `SRC-google-speech-to-text` | Transcript / spoken brand mentions | [`ENT-RecognitionDetection`](../30-data-model/00-data-model.md) (`SPOKEN_BRAND`) |
+| `SRC-google-speech-to-text` | Transcript / spoken brand mentions (v2 path additionally persists the stitched transcript) | [`ENT-RecognitionDetection`](../30-data-model/00-data-model.md) (`SPOKEN_BRAND`); `content_transcripts` rows (v2, [ADR-0030](../05-decisions/decision-log.md#adr-0030)) |
 | `SRC-google-video-intelligence` | Video-wide on-screen text + logos | [`ENT-RecognitionDetection`](../30-data-model/00-data-model.md) (`ON_SCREEN_TEXT`, `LOGO`) |
+| `SRC-google-gemini-vlm` | Per-candidate grounded verdicts (visible / spoken / gifting-cue / confidence / frame references) | [`ENT-RecognitionDetection`](../30-data-model/00-data-model.md) (`VLM_PRODUCT`); `vlm_verification_runs` / `vlm_candidate_verdicts` audit trail |
 | `SRC-agency-manual-entry` (internal, [ADR-0015](../05-decisions/decision-log.md#adr-0015)) | Operator-typed account identity (platform, handle, bio, links) | [`ENT-PlatformAccount`](../30-data-model/00-data-model.md) |
 
 > [!NOTE]

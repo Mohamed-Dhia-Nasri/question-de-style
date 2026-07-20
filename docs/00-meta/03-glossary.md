@@ -379,6 +379,7 @@ Kind of brand signal produced by the recognition pipeline (see [`GL-RecognitionD
 | `MENTION` | An `@handle` in the caption resolved to a CRM brand (sub-project A). |
 | `PRODUCT_TAG` | A structured platform product tag resolved to a CRM brand and product (sub-project A). |
 | `VISUAL_PRODUCT` | A product visually matched against the tenant's reference photos via multimodal embeddings ([ADR-0029](../05-decisions/decision-log.md#adr-0029)); carries `product_id`. |
+| `VLM_PRODUCT` | A shortlisted catalog product confirmed — or review-held — by the Gemini vision-language-model verifier over stored keyframes + caption/transcript ([ADR-0030](../05-decisions/decision-log.md#adr-0030)); carries `product_id`. Closed-set: only sub-project C's candidate shortlist can ever be named. |
 
 <a id="enum-sentimentlabel"></a>
 ### ENUM-SentimentLabel

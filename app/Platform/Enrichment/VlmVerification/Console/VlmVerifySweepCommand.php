@@ -16,7 +16,9 @@ use App\Shared\Enums\VlmTriggerReason;
 use App\Shared\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * qds:vlm-verify — sub-project D's scheduled sweep AND day-one backfill
@@ -106,9 +108,24 @@ class VlmVerifySweepCommand extends Command
         $totals = ['finalized' => 0, 'deleted' => 0, 'dispatched' => 0, 'unverifiable' => 0];
 
         foreach ($tenantIds as $tenantId) {
-            [$finalized, $deleted] = $this->finalizeStalePending($tenantId);
-            $dispatched = $this->dispatchCatchup($tenantId, $since);
-            $unverifiable = $this->discoverUnverifiable($tenantId, $since);
+            try {
+                [$finalized, $deleted] = $this->finalizeStalePending($tenantId);
+                $dispatched = $this->dispatchCatchup($tenantId, $since);
+                $unverifiable = $this->discoverUnverifiable($tenantId, $since);
+            } catch (Throwable $e) {
+                // One tenant's failure must never starve the rest of the
+                // fleet of their stale finalization, catch-up and
+                // discovery: log, surface, continue — the next scheduled
+                // sweep retries this tenant (every pass is idempotent).
+                Log::warning('qds:vlm-verify tenant pass failed — continuing with the next tenant', [
+                    'tenant_id' => $tenantId,
+                    'exception' => $e::class,
+                    'message' => $e->getMessage(),
+                ]);
+                $this->warn(sprintf('Tenant %d: sweep pass failed (%s) — continuing.', $tenantId, $e::class));
+
+                continue;
+            }
 
             $totals['finalized'] += $finalized;
             $totals['deleted'] += $deleted;
@@ -293,8 +310,15 @@ class VlmVerifySweepCommand extends Command
 
             foreach ($ids as $id) {
                 $recorded += (int) $this->context->runAs($tenantId, function () use ($model, $id, $ownerColumn): int {
-                    /** @var ContentItem|Story $target */
-                    $target = $model::query()->findOrFail($id);
+                    /** @var ContentItem|Story|null $target */
+                    $target = $model::query()->find($id);
+
+                    if ($target === null) {
+                        // GDPR-erased or pruned between the id pluck and
+                        // this load — nothing left to record; a vanished
+                        // post must never abort the sweep.
+                        return 0;
+                    }
 
                     $latest = VisualMatchRun::query()
                         ->where($ownerColumn, $target->id)

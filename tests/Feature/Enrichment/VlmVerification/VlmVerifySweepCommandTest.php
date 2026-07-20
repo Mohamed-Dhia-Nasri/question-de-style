@@ -341,6 +341,77 @@ class VlmVerifySweepCommandTest extends TestCase
         Queue::assertPushed(VlmVerificationJob::class, fn (VlmVerificationJob $job): bool => $job->targetId === $otherItem->id);
     }
 
+    public function test_a_post_vanishing_mid_sweep_is_skipped_without_aborting_the_rest(): void
+    {
+        // GDPR erase / retention prune between the discovery id pluck and
+        // the per-row load: the vanished post is skipped, the SAME
+        // tenant's remaining posts still get their rows, and later
+        // tenants are still swept.
+        $first = $this->shippedPost();
+        $vanishing = $this->shippedPost();
+        $last = $this->shippedPost();
+
+        $other = Tenant::factory()->create(['name' => 'Other Tenant']);
+        $otherItem = $this->withTenant($other, fn (): ContentItem => $this->shippedPost());
+
+        // The first discovery write fires AFTER the id pluck — raw-delete
+        // the second post right there to land inside the pluck→load gap.
+        VlmVerificationRun::creating(function () use ($vanishing): void {
+            DB::table('content_items')->where('id', $vanishing->id)->delete();
+        });
+
+        try {
+            $this->artisan('qds:vlm-verify')->assertSuccessful();
+        } finally {
+            VlmVerificationRun::flushEventListeners();
+        }
+
+        $this->assertDatabaseHas('vlm_verification_runs', ['content_item_id' => $first->id, 'outcome' => 'unverifiable']);
+        $this->assertDatabaseMissing('vlm_verification_runs', ['content_item_id' => $vanishing->id]);
+        // Same tenant continues past the vanished post…
+        $this->assertDatabaseHas('vlm_verification_runs', ['content_item_id' => $last->id, 'outcome' => 'unverifiable']);
+        // …and the later tenant's pass still happens.
+        $this->assertDatabaseHas('vlm_verification_runs', [
+            'content_item_id' => $otherItem->id,
+            'tenant_id' => $other->id,
+            'outcome' => 'unverifiable',
+        ]);
+    }
+
+    public function test_one_tenants_failure_does_not_prevent_the_next_tenants_pass(): void
+    {
+        // Any unexpected per-tenant explosion (here: the first discovery
+        // write) is logged and contained — the sweep moves on to the next
+        // tenant instead of dying fleet-wide.
+        $this->shippedPost(); // default tenant — its pass will explode
+
+        $other = Tenant::factory()->create(['name' => 'Other Tenant']);
+        $otherItem = $this->withTenant($other, fn (): ContentItem => $this->shippedPost());
+
+        $thrown = false;
+        VlmVerificationRun::creating(function () use (&$thrown): void {
+            if (! $thrown) {
+                $thrown = true;
+
+                throw new \RuntimeException('simulated tenant-pass explosion');
+            }
+        });
+
+        try {
+            $this->artisan('qds:vlm-verify')->assertSuccessful();
+        } finally {
+            VlmVerificationRun::flushEventListeners();
+        }
+
+        $this->assertTrue($thrown, 'the first tenant pass must have hit the simulated explosion');
+        $this->assertDatabaseMissing('vlm_verification_runs', ['tenant_id' => $this->defaultTenant->id]);
+        $this->assertDatabaseHas('vlm_verification_runs', [
+            'content_item_id' => $otherItem->id,
+            'tenant_id' => $other->id,
+            'outcome' => 'unverifiable',
+        ]);
+    }
+
     public function test_discovery_rows_are_stamped_with_the_owning_tenant(): void
     {
         $other = Tenant::factory()->create(['name' => 'Other Tenant']);

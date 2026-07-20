@@ -38,15 +38,27 @@ final readonly class VlmRequest
     {
         $parts = [['text' => $this->prompt]];
 
+        // media_resolution is OMITTED when the config is empty. The go-live smoke
+        // (2026-07-21) confirmed the live API rejects the value MEDIA_RESOLUTION_MEDIUM
+        // per Part with HTTP 400 (Part.MediaResolution). Default is now empty so the
+        // model uses its own resolution; re-enable with a value verified against
+        // current official docs (spec §18 watch item — a cost optimization only).
+        $resolution = (string) config('qds.enrichment.vlm.media_resolution');
+
         foreach ($this->frames as $frame) {
-            $parts[] = [
-                'inlineData' => ['mimeType' => $frame->mimeType, 'data' => base64_encode($frame->bytes)],
-                'media_resolution' => (string) config('qds.enrichment.vlm.media_resolution'),
-            ];
+            $part = ['inlineData' => ['mimeType' => $frame->mimeType, 'data' => base64_encode($frame->bytes)]];
+
+            if ($resolution !== '') {
+                $part['media_resolution'] = $resolution;
+            }
+
+            $parts[] = $part;
         }
 
         return [
-            'contents' => [['parts' => $parts]],
+            // role is REQUIRED by generateContent ("Please use a valid role:
+            // user, model." — go-live smoke, 2026-07-21).
+            'contents' => [['role' => 'user', 'parts' => $parts]],
             'generationConfig' => $this->generationConfig(),
         ];
     }
@@ -55,7 +67,7 @@ final readonly class VlmRequest
     public function textualPayload(): array
     {
         return [
-            'contents' => [['parts' => [['text' => $this->prompt]]]],
+            'contents' => [['role' => 'user', 'parts' => [['text' => $this->prompt]]]],
             'generationConfig' => $this->generationConfig(),
         ];
     }
@@ -135,12 +147,24 @@ final readonly class VlmRequest
     /** @return array<string, mixed> */
     private function generationConfig(): array
     {
-        return [
+        $config = [
             'responseMimeType' => 'application/json',
             'responseSchema' => $this->schema(),
             'temperature' => 0,
             'maxOutputTokens' => (int) config('qds.enrichment.vlm.max_output_tokens'),
-            'thinking_level' => (string) config('qds.enrichment.vlm.thinking_level'),
         ];
+
+        // thinking_level is OMITTED when the config is empty. The go-live smoke
+        // (2026-07-21) confirmed the live API rejects `thinking_level` in
+        // generation_config with HTTP 400 ("Unknown name … Cannot find field").
+        // Default is now empty so the model's own thinking applies; re-enable with
+        // the field name/shape verified against current official docs (spec §18).
+        $thinking = (string) config('qds.enrichment.vlm.thinking_level');
+
+        if ($thinking !== '') {
+            $config['thinking_level'] = $thinking;
+        }
+
+        return $config;
     }
 }

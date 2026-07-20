@@ -73,6 +73,10 @@ class GoogleSpeechV2ClientTest extends TestCase
     public function test_recognize_posts_the_verified_v2_body_and_parses_results(): void
     {
         $this->configureClient();
+        // Adaptation is gated off by default (chirp_3 404'd on the inline_phrase_set
+        // shape — go-live smoke 2026-07-21); enable it here to pin the shape it sends
+        // when re-enabled.
+        config(['qds.enrichment.speech.adaptation_enabled' => true]);
         Http::fake([
             'eu-speech.googleapis.com/*' => Http::response([
                 'results' => [
@@ -151,9 +155,28 @@ class GoogleSpeechV2ClientTest extends TestCase
         });
     }
 
+    public function test_adaptation_is_omitted_when_disabled_even_with_phrases(): void
+    {
+        $this->configureClient();
+        // Default posture (adaptation_enabled=false): the live chirp_3 API rejects
+        // the inline_phrase_set adaptation shape with HTTP 404 "Requested entity was
+        // not found" (go-live smoke, 2026-07-21), so no adaptation block is sent even
+        // when brand/product phrases are supplied.
+        Http::fake(['eu-speech.googleapis.com/*' => Http::response(['results' => []])]);
+
+        app(GoogleSpeechV2Client::class)->recognize('fake-flac-bytes', ['Nexon Labs', 'Nexon Labs Headset']);
+
+        Http::assertSent(function (Request $request): bool {
+            $this->assertArrayNotHasKey('adaptation', $request->data()['config']);
+
+            return true;
+        });
+    }
+
     public function test_phrases_are_trimmed_deduped_and_capped(): void
     {
         $this->configureClient();
+        config(['qds.enrichment.speech.adaptation_enabled' => true]);
         config(['qds.enrichment.speech.phrase_cap' => 2]);
         Http::fake(['eu-speech.googleapis.com/*' => Http::response(['results' => []])]);
 
@@ -174,6 +197,7 @@ class GoogleSpeechV2ClientTest extends TestCase
     public function test_boost_is_clamped_to_the_documented_range(): void
     {
         $this->configureClient();
+        config(['qds.enrichment.speech.adaptation_enabled' => true]);
         config(['qds.enrichment.speech.boost' => 99.0]); // documented range is 0–20
         Http::fake(['eu-speech.googleapis.com/*' => Http::response(['results' => []])]);
 

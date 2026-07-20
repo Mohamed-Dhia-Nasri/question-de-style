@@ -113,8 +113,12 @@ class GeminiVlmClientTest extends TestCase
         $this->assertSame('gemini-3.5-flash', config('qds.enrichment.vlm.model_version'));
         $this->assertSame('enrichment', config('qds.enrichment.vlm.queue'));
         $this->assertSame(12, config('qds.enrichment.vlm.frame_budget'));
-        $this->assertSame('MEDIA_RESOLUTION_MEDIUM', config('qds.enrichment.vlm.media_resolution'));
-        $this->assertSame('LOW', config('qds.enrichment.vlm.thinking_level'));
+        // Both default EMPTY (omitted from the request): the live generateContent
+        // API rejected media_resolution=MEDIA_RESOLUTION_MEDIUM and the thinking_level
+        // field with HTTP 400 (go-live smoke, 2026-07-21). Re-enable only with a
+        // value/shape verified against current official docs (spec §18).
+        $this->assertSame('', config('qds.enrichment.vlm.media_resolution'));
+        $this->assertSame('', config('qds.enrichment.vlm.thinking_level'));
         $this->assertSame(2048, config('qds.enrichment.vlm.max_output_tokens'));
         $this->assertSame(2000, config('qds.enrichment.vlm.caption_max_chars'));
         $this->assertSame(4000, config('qds.enrichment.vlm.transcript_max_chars'));

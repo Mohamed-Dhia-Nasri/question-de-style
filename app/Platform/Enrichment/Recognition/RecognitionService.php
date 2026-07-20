@@ -16,6 +16,7 @@ use App\Platform\Enrichment\Media\LocalMediaAsset;
 use App\Platform\Enrichment\Media\MediaWorkspace;
 use App\Platform\Enrichment\Media\MediaWorkspaceFactory;
 use App\Platform\Enrichment\Speech\ChunkTranscript;
+use App\Platform\Enrichment\Speech\Jobs\TranscribeExtendedAudioJob;
 use App\Platform\Enrichment\Speech\SpeechAudioChunkWriter;
 use App\Platform\Enrichment\Speech\SpeechPhraseHints;
 use App\Platform\Enrichment\Speech\SpeechTranscriptWriter;
@@ -304,8 +305,15 @@ class RecognitionService
         return [$created, $updated];
     }
 
-    /** @return array{0: int, 1: int} */
-    private function persist(ContentItem|Story $target, string $source, NormalizedBatch $batch): array
+    /**
+     * Public since sub-project D: TranscribeExtendedAudioJob persists its
+     * per-chunk SPOKEN_BRAND batches through this exact upsert (identity,
+     * DP-004 precedence, unique-violation recovery) instead of duplicating
+     * it — the same augment-not-replace shape as the backfill precedent.
+     *
+     * @return array{0: int, 1: int}
+     */
+    public function persist(ContentItem|Story $target, string $source, NormalizedBatch $batch): array
     {
         $created = 0;
         $updated = 0;
@@ -508,8 +516,11 @@ class RecognitionService
 
             if ($queued > 0) {
                 $markers[] = 'speech:chunks-queued='.$queued;
-                // Task 22 dispatches TranscribeExtendedAudioJob HERE (the
-                // job class lands in that task — dependency order).
+                TranscribeExtendedAudioJob::dispatch(
+                    $target instanceof ContentItem ? 'content' : 'story',
+                    $target->id,
+                    $correlationId,
+                );
             }
         }
 

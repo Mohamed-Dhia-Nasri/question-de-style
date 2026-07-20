@@ -29,6 +29,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -262,6 +263,11 @@ class SpeechV2RecognitionTest extends TestCase
 
     public function test_candidate_bearing_posts_persist_extension_chunks_and_mark_the_queue(): void
     {
+        // Task 22 wired the real dispatch into speechV2Pass; on the sync test
+        // queue that would run TranscribeExtendedAudioJob inline and drain the
+        // very chunks this test asserts on. Fake so the marker/row assertions
+        // stay about the SYNC pass only (they are queue-agnostic).
+        Queue::fake();
         $this->requireFfmpeg();
         $this->brand();
         [$creator, $item] = $this->creatorReel();
@@ -291,6 +297,9 @@ class SpeechV2RecognitionTest extends TestCase
 
     public function test_non_candidate_posts_never_persist_extension_chunks(): void
     {
+        // No chunks queued here, so nothing dispatches — but fake anyway to
+        // keep the extension tests uniformly insulated from the queue.
+        Queue::fake();
         $this->requireFfmpeg();
         $this->brand();
         [, $item] = $this->creatorReel(); // no shipment, no roster

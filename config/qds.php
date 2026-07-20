@@ -367,6 +367,19 @@ return [
             'pending_stale_hours' => (int) env('QDS_ENRICHMENT_VLM_PENDING_STALE_HOURS', 6), // §10 crash backstop
         ],
 
+        // Multilingual speech upgrade (sub-project D, ADR-0030):
+        // Speech-to-Text v2 + chirp_3 on the EU multi-region with language
+        // auto-detect (["auto"] = dominant language) and brand/product
+        // phrase hints (adaptation boost 0–20; chirp_3 dictionary hard
+        // limit 1,000 phrases). Later D tasks extend this block (chunking,
+        // chunk lifecycle, kill switch + queue).
+        'speech' => [
+            'model' => env('QDS_ENRICHMENT_SPEECH_MODEL', 'chirp_3'),
+            'language_codes' => ['auto'], // override with an explicit restricted list via config only
+            'boost' => (float) env('QDS_ENRICHMENT_SPEECH_BOOST', 10.0),   // 0–20
+            'phrase_cap' => (int) env('QDS_ENRICHMENT_SPEECH_PHRASE_CAP', 500), // model hard limit 1,000
+        ],
+
         // Numeric provider score → ENUM-ConfidenceLevel bucketing
         // (ADR-0026): score >= high → HIGH; >= medium → MEDIUM; else LOW
         // (LOW routes to review per DP-004). Env-tunable calibration.

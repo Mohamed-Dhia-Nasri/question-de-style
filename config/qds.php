@@ -291,6 +291,23 @@ return [
             'inline_max_bytes' => (int) env('QDS_ENRICHMENT_INLINE_MAX_BYTES', 20_000_000),
         ],
 
+        // Multilingual speech v2 (sub-project D, spec §9/§13). Kill switch
+        // default OFF = the v1 path (de-DE, ≤60 s, API key, no transcript
+        // rows, no chunks, no budget gate) runs byte-identically. NOTE:
+        // v2 has NO free tier — chunk 0 bills for EVERY audio-bearing
+        // post the moment the switch turns on (a new always-on floor).
+        'speech' => [
+            'v2_enabled' => (bool) env('QDS_ENRICHMENT_SPEECH_V2_ENABLED', false),
+            'model' => env('QDS_ENRICHMENT_SPEECH_MODEL', 'chirp_3'),
+            'language_codes' => ['auto'], // override with an explicit list via config only
+            'queue' => env('QDS_ENRICHMENT_SPEECH_QUEUE', 'enrichment'),
+            'chunk_seconds' => (int) env('QDS_ENRICHMENT_SPEECH_CHUNK_SECONDS', 55),
+            'max_minutes' => (int) env('QDS_ENRICHMENT_SPEECH_MAX_MINUTES', 10),
+            'boost' => (float) env('QDS_ENRICHMENT_SPEECH_BOOST', 10.0),   // 0–20
+            'phrase_cap' => (int) env('QDS_ENRICHMENT_SPEECH_PHRASE_CAP', 500), // model hard limit 1000
+            'chunk_orphan_days' => (int) env('QDS_ENRICHMENT_SPEECH_CHUNK_ORPHAN_DAYS', 7),
+        ],
+
         // Keyframe sampling (sub-project B): deterministic even-interval
         // frames for ALL platforms — the artifact tiers C/D consume.
         // N = clamp(ceil(duration/interval), min, max). Persisted on the
@@ -365,22 +382,6 @@ return [
                 'auto' => 0.85, 'review' => 0.60, 'margin' => 0.10,
             ],
             'pending_stale_hours' => (int) env('QDS_ENRICHMENT_VLM_PENDING_STALE_HOURS', 6), // §10 crash backstop
-        ],
-
-        // Multilingual speech upgrade (sub-project D, ADR-0030):
-        // Speech-to-Text v2 + chirp_3 on the EU multi-region with language
-        // auto-detect (["auto"] = dominant language) and brand/product
-        // phrase hints (adaptation boost 0–20; chirp_3 dictionary hard
-        // limit 1,000 phrases). Later D tasks extend this block (chunking,
-        // chunk lifecycle, kill switch + queue).
-        'speech' => [
-            'model' => env('QDS_ENRICHMENT_SPEECH_MODEL', 'chirp_3'),
-            'language_codes' => ['auto'], // override with an explicit restricted list via config only
-            'boost' => (float) env('QDS_ENRICHMENT_SPEECH_BOOST', 10.0),   // 0–20
-            'phrase_cap' => (int) env('QDS_ENRICHMENT_SPEECH_PHRASE_CAP', 500), // model hard limit 1,000
-            'chunk_seconds' => (int) env('QDS_ENRICHMENT_SPEECH_CHUNK_SECONDS', 55), // safety margin under the 60 s sync limit
-            'max_minutes' => (int) env('QDS_ENRICHMENT_SPEECH_MAX_MINUTES', 10),     // extension transcription budget
-            'chunk_orphan_days' => (int) env('QDS_ENRICHMENT_SPEECH_CHUNK_ORPHAN_DAYS', 7), // failure-orphan backstop window
         ],
 
         // Numeric provider score → ENUM-ConfidenceLevel bucketing

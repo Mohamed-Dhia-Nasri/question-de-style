@@ -417,7 +417,39 @@ return [
                 'global_monthly_units' => (int) env('QDS_AI_EMBEDDING_GLOBAL_MONTHLY', 1000000),
                 'global_monthly_hard_units' => (int) env('QDS_AI_EMBEDDING_GLOBAL_MONTHLY_HARD', 2000000),
             ],
-            // 'vlm_verification' => reserved for sub-project D
+            // Sub-project D (ADR-0030, spec §11). Prices are ESTIMATES for
+            // governance, not billing truth (same caveat as embedding).
+            // Daily = burst, monthly = sustained: tenant 150/day x 30 >
+            // 3,000/month BY DESIGN (campaign-launch bursts; ~100/day
+            // sustained). Cross-tenant fairness is the global hard cap,
+            // accepted for v1 (per-tenant HIGH ceiling is deferred).
+            'vlm_verification' => [
+                // ~$0.030/Gemini request: ~9.5-10k input tokens (12 frames
+                // x 560 MEDIUM dominate, plus caption/transcript/catalog/
+                // schema) @ $1.65/M + up to ~2k output incl. LOW thinking
+                // @ $9.90/M — rounded UP so caps aren't loose.
+                'price_micro_usd_per_unit' => (int) env('QDS_AI_VLM_PRICE_MICRO_USD', 30000),
+                'per_post_units' => (int) env('QDS_AI_VLM_PER_POST', 3), // 1 call + <=2 validator retries
+                'tenant_daily_units' => (int) env('QDS_AI_VLM_TENANT_DAILY', 150),
+                'tenant_monthly_units' => (int) env('QDS_AI_VLM_TENANT_MONTHLY', 3000),
+                'global_daily_units' => (int) env('QDS_AI_VLM_GLOBAL_DAILY', 1500),
+                'global_daily_hard_units' => (int) env('QDS_AI_VLM_GLOBAL_DAILY_HARD', 3000),
+                'global_monthly_units' => (int) env('QDS_AI_VLM_GLOBAL_MONTHLY', 30000),
+                'global_monthly_hard_units' => (int) env('QDS_AI_VLM_GLOBAL_MONTHLY_HARD', 60000),
+            ],
+            'speech_transcription' => [
+                // $0.016/min, Speech-to-Text v2 (verified 2026-07-20; v2
+                // has NO free tier). One unit = one audio chunk (~1 min,
+                // chunk_seconds 55).
+                'price_micro_usd_per_unit' => (int) env('QDS_AI_SPEECH_PRICE_MICRO_USD', 16000),
+                'per_post_units' => (int) env('QDS_AI_SPEECH_PER_POST', 10), // = speech max_minutes
+                'tenant_daily_units' => (int) env('QDS_AI_SPEECH_TENANT_DAILY', 300),
+                'tenant_monthly_units' => (int) env('QDS_AI_SPEECH_TENANT_MONTHLY', 6000),
+                'global_daily_units' => (int) env('QDS_AI_SPEECH_GLOBAL_DAILY', 3000),
+                'global_daily_hard_units' => (int) env('QDS_AI_SPEECH_GLOBAL_DAILY_HARD', 6000),
+                'global_monthly_units' => (int) env('QDS_AI_SPEECH_GLOBAL_MONTHLY', 60000),
+                'global_monthly_hard_units' => (int) env('QDS_AI_SPEECH_GLOBAL_MONTHLY_HARD', 120000),
+            ],
         ],
     ],
 

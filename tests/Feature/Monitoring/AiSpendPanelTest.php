@@ -67,6 +67,43 @@ class AiSpendPanelTest extends TestCase
             ->assertDontSee('Tenant B');  // and no tenant is ever named
     }
 
+    public function test_new_d_capabilities_appear_as_panel_rows_automatically(): void
+    {
+        // The panel iterates config('qds.ai_budget.capabilities') — the
+        // two sub-project D blocks must surface WITHOUT any dashboard
+        // change, under the same own-vs-anonymous-platform posture that
+        // the 'embedding' row is pinned to.
+        $today = CarbonImmutable::now()->toDateString();
+
+        AiUsageCounter::query()->create([
+            'capability' => 'vlm_verification',
+            'tenant_id' => $this->defaultTenant->id,
+            'usage_date' => $today,
+            'units' => 2345,
+            'estimated_cost_micro_usd' => 2345 * 30000, // $70.35 at the §11 estimate
+            'posts_processed' => 5,
+        ]);
+
+        $foreign = $this->makeTenant('Tenant B');
+        AiUsageCounter::query()->create([
+            'capability' => 'vlm_verification',
+            'tenant_id' => $foreign->id,
+            'usage_date' => $today,
+            'units' => 111111,
+            'estimated_cost_micro_usd' => 111111 * 30000,
+        ]);
+
+        Livewire::test(OperationsDashboard::class)
+            ->assertSee('vlm_verification')
+            ->assertSee('speech_transcription') // zero-usage row renders too — purely config-driven
+            ->assertSee('2,345')                // own vlm units today
+            ->assertSee('$70.35')               // own month spend at 30_000 micro-USD/unit
+            ->assertSee('$14.0700')             // avg cost per processed post (70.35 / 5)
+            ->assertSee('113,456')              // platform total INCLUDES the foreign tenant...
+            ->assertDontSee('111,111')          // ...but its individual figure never renders
+            ->assertDontSee('Tenant B');        // and no tenant is ever named
+    }
+
     public function test_panel_aggregates_recent_visual_match_runs(): void
     {
         VisualMatchRun::factory()->create([

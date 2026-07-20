@@ -4,6 +4,7 @@ namespace App\Platform\Enrichment;
 
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\Story;
+use App\Modules\Monitoring\Models\VisualMatchRun;
 use App\Platform\Enrichment\Attribution\AttributionService;
 use App\Platform\Enrichment\Emv\EmvCalculator;
 use App\Platform\Enrichment\Hashtags\HashtagEnricher;
@@ -17,6 +18,8 @@ use App\Platform\Enrichment\Support\EnrichmentRunStatus;
 use App\Platform\Enrichment\TextSignals\TextSignalRecognizer;
 use App\Platform\Enrichment\Transcripts\YouTubeTranscriptEnricher;
 use App\Platform\Enrichment\VisualMatch\VisualProductMatcher;
+use App\Platform\Enrichment\VlmVerification\Jobs\VlmVerificationJob;
+use App\Platform\Enrichment\VlmVerification\VlmRunRecorder;
 use App\Platform\Ingestion\Exceptions\ProviderCallException;
 use Carbon\CarbonImmutable;
 use Throwable;
@@ -24,7 +27,7 @@ use Throwable;
 /**
  * The SVC-EnrichmentAI pipeline over one ContentItem or Story:
  *
- *   hashtags → transcript → recognition → keyframes → visual match → text signals → sentiment → seeded attribution → EMV → reach
+ *   hashtags → transcript → recognition → keyframes → visual match → vlm verification (dispatch-only) → text signals → sentiment → seeded attribution → EMV → reach
  *
  * Stage outcomes are recorded on an EnrichmentRun row (operational
  * telemetry, sanitized values only). Unavailable boundaries (sentiment
@@ -47,6 +50,7 @@ class EnrichmentPipeline
         private readonly KeyframeExtractor $keyframes,
         private readonly YouTubeTranscriptEnricher $transcripts,
         private readonly VisualProductMatcher $visualMatch,
+        private readonly VlmRunRecorder $vlmRuns,
     ) {}
 
     public function run(ContentItem|Story $target, string $correlationId, int $retryCount = 0): EnrichmentRun
@@ -100,6 +104,15 @@ class EnrichmentPipeline
             } else {
                 $stages['visual_match'] = 'skipped:disabled';
             }
+
+            // Sub-project D: VLM verification is DISPATCH-ONLY — the
+            // pipeline never blocks on Gemini. The async job re-checks
+            // every gate itself (flags go stale between dispatch and
+            // execution), so this stage only answers "is there anything
+            // to verify right now?" and gives the common case a same-run
+            // head start over the daily qds:vlm-verify sweep. Kill switch
+            // OFF = marker only; nothing is ever queued.
+            $stages['vlm_verification'] = $this->dispatchVlmVerification($target, $correlationId);
 
             if (config('qds.enrichment.text_signals.enabled')) {
                 $stages['text_signals'] = $this->textSignals->enrich($target);
@@ -170,5 +183,56 @@ class EnrichmentPipeline
         }
 
         return $run;
+    }
+
+    /**
+     * The vlm_verification trigger stage (sub-project D, spec §4/§10).
+     * Frozen marker set: skipped:disabled | skipped:no-visual-run |
+     * skipped:not-flagged | skipped:already-verified | queued.
+     *
+     * Consumption bookkeeping lives in vlm_verification_runs (the partial
+     * unique on (visual_match_run_id, model_version)) — a TERMINAL row at
+     * the current model version means "already verified"; PENDING rows do
+     * NOT block, because a crashed job needs its dispatch back to resume
+     * the billing ledger.
+     */
+    private function dispatchVlmVerification(ContentItem|Story $target, string $correlationId): string
+    {
+        if (! (bool) config('qds.enrichment.vlm.enabled')) {
+            return 'skipped:disabled';
+        }
+
+        // "Latest run per post = max id" — C's index contract.
+        $anchor = VisualMatchRun::query()
+            ->when(
+                $target instanceof ContentItem,
+                fn ($query) => $query->where('content_item_id', $target->id),
+                fn ($query) => $query->where('story_id', $target->id),
+            )
+            ->orderByDesc('id')
+            ->first();
+
+        if ($anchor === null) {
+            return 'skipped:no-visual-run';
+        }
+
+        if (! $anchor->needs_verification) {
+            return 'skipped:not-flagged';
+        }
+
+        if ($this->vlmRuns->terminalRunExists($anchor, (string) config('qds.enrichment.vlm.model_version'))) {
+            return 'skipped:already-verified';
+        }
+
+        // The enrichment correlation id rides along: the job derives
+        // review-band / no-band-shipment from the anchor's candidates
+        // (a NULL correlation id is reserved for sweep dispatches).
+        VlmVerificationJob::dispatch(
+            $target instanceof ContentItem ? 'content' : 'story',
+            (int) $target->id,
+            $correlationId,
+        );
+
+        return 'queued';
     }
 }

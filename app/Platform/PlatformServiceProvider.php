@@ -19,6 +19,7 @@ use App\Platform\Enrichment\Contracts\SeedingEvidenceSource;
 use App\Platform\Enrichment\Contracts\SentimentClassifier;
 use App\Platform\Enrichment\Contracts\ShipmentContentLinker;
 use App\Platform\Enrichment\DefaultEnrichmentService;
+use App\Platform\Enrichment\Http\GoogleSpeechV2Client;
 use App\Platform\Enrichment\Matching\Console\LinkSeededContentCommand;
 use App\Platform\Enrichment\Reach\DefaultReachEstimator;
 use App\Platform\Enrichment\Sentiment\UnavailableSentimentClassifier;
@@ -26,6 +27,8 @@ use App\Platform\Enrichment\VisualMatch\Console\EmbedProductPhotosCommand;
 use App\Platform\Enrichment\VisualMatch\Console\VisualMatchBackfillCommand;
 use App\Platform\Enrichment\VisualMatch\Contracts\EmbeddingProvider;
 use App\Platform\Enrichment\VisualMatch\Http\GeminiMultimodalEmbeddingProvider;
+use App\Platform\Enrichment\VisualMatch\Http\GoogleServiceAccountTokenProvider;
+use App\Platform\Enrichment\VlmVerification\Http\GeminiVlmClient;
 use App\Platform\Export\Console\PruneExpiredExportsCommand;
 use App\Platform\Export\Contracts\ExportService;
 use App\Platform\Export\DefaultExportService;
@@ -43,6 +46,7 @@ use App\Platform\Ingestion\Contracts\PlatformAccountProfileSync;
 use App\Platform\Ingestion\DefaultIngestionService;
 use App\Platform\Ingestion\Models\ProviderResponseSample;
 use App\Platform\Ingestion\Observability\Policies\ProviderResponseSamplePolicy;
+use App\Platform\Ingestion\SourceRegistry;
 use App\Platform\Snapshots\Console\CaptureSnapshotsCommand;
 use App\Platform\Snapshots\Contracts\SnapshotScheduler;
 use App\Platform\Snapshots\DatabaseSnapshotScheduler;
@@ -84,6 +88,26 @@ class PlatformServiceProvider extends ServiceProvider
         // second provider is a new binding + model_version — never a
         // call-site change (no selection knob until one exists, YAGNI).
         $this->app->bind(EmbeddingProvider::class, GeminiMultimodalEmbeddingProvider::class);
+
+        // Sub-project D (ADR-0030): ONE token-provider class serves three
+        // Google service-account flows. Default construction stays C's
+        // embeddings behaviour (binding above unchanged); the D clients
+        // get instances parameterized on their own config block, cache
+        // key, and SRC-* source id via contextual bindings (spec §5).
+        // GeminiVlmClient lands in Task 7 and GoogleSpeechV2Client in
+        // Task 17 — ::class on a not-yet-created class is a compile-time
+        // string, never autoloaded, so registering now is safe.
+        $this->app->when(GeminiVlmClient::class)
+            ->needs(GoogleServiceAccountTokenProvider::class)
+            ->give(fn () => new GoogleServiceAccountTokenProvider(
+                'google_vlm', 'qds:google-vlm-token', SourceRegistry::GOOGLE_GEMINI_VLM,
+            ));
+
+        $this->app->when(GoogleSpeechV2Client::class)
+            ->needs(GoogleServiceAccountTokenProvider::class)
+            ->give(fn () => new GoogleServiceAccountTokenProvider(
+                'google_speech_v2', 'qds:google-speech-v2-token', SourceRegistry::GOOGLE_SPEECH_TO_TEXT,
+            ));
 
         // Cross-module contracts with Module 3 (P3, live since M3 Step 3):
         // seeding evidence is read from — and resulting-content links are

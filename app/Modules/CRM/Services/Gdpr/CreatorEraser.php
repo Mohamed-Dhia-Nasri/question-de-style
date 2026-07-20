@@ -19,7 +19,8 @@ use Illuminate\Support\Facades\Storage;
  * platform holds about one creator — CRM profile, contacts, correspondence,
  * shipments, documents, tasks, monitored accounts, the monitoring history
  * collected from their public profiles (content, stories + archived media,
- * comments, mentions, enrichment artifacts incl. keyframes + transcripts,
+ * comments, mentions, enrichment artifacts incl. keyframes + transcripts +
+ * visual/VLM run evidence + speech audio chunks,
  * metric snapshots), and the creator's rows in the analytics star schema.
  *
  * This is deliberately STRONGER than CreatorWriter::deleteCreator (the
@@ -53,8 +54,10 @@ class CreatorEraser
         $documentPaths = [];
         /** @var array<string, list<string>> $keyframePathsByDisk paths grouped by their own storage_disk (keyframes carry a per-row disk; media_files/document_files do not) */
         $keyframePathsByDisk = [];
+        /** @var array<string, list<string>> $speechChunkPathsByDisk paths grouped by their own storage_disk (speech chunks follow the keyframe pattern — sub-project D) */
+        $speechChunkPathsByDisk = [];
 
-        DB::transaction(function () use ($creator, $creatorId, &$counts, &$mediaPaths, &$documentPaths, &$keyframePathsByDisk): void {
+        DB::transaction(function () use ($creator, $creatorId, &$counts, &$mediaPaths, &$documentPaths, &$keyframePathsByDisk, &$speechChunkPathsByDisk): void {
             // Transaction-local gate for the append-only triggers
             // (metric_snapshots, fact_*). set_config(..., true) is scoped to
             // THIS transaction and is explicitly turned off before commit
@@ -104,6 +107,22 @@ class CreatorEraser
                 $keyframePathsByDisk[$row->storage_disk][] = $row->storage_path;
             }
 
+            // Speech audio chunks (sub-project D) are polymorphically owned
+            // like keyframes and carry a per-row storage_disk. Paths are
+            // collected BEFORE the rows go; blobs are deleted after commit.
+            $speechChunkRows = ($contentIds === [] && $storyIds === []) ? [] : DB::table('speech_audio_chunks')
+                ->where(function ($q) use ($contentIds, $storyIds): void {
+                    $q->where(function ($qq) use ($contentIds): void {
+                        $qq->where('owner_type', (new ContentItem)->getMorphClass())->whereIn('owner_id', $contentIds);
+                    })->orWhere(function ($qq) use ($storyIds): void {
+                        $qq->where('owner_type', (new Story)->getMorphClass())->whereIn('owner_id', $storyIds);
+                    });
+                })
+                ->get(['id', 'storage_disk', 'storage_path'])->all();
+            foreach ($speechChunkRows as $row) {
+                $speechChunkPathsByDisk[$row->storage_disk][] = $row->storage_path;
+            }
+
             // Review corrections hold 'original' payloads of the rows being
             // erased (captions, detected labels) — personal data too.
             $counts['review_actions'] =
@@ -124,6 +143,14 @@ class CreatorEraser
             $counts['enrichment_runs'] = ($contentIds === [] && $storyIds === []) ? 0 : DB::table('enrichment_runs')
                 ->where(fn ($q) => $q->whereIn('content_item_id', $contentIds)->orWhereIn('story_id', $storyIds))
                 ->delete();
+            // VLM verification audit trail (sub-project D): runs are anchored
+            // to the creator's content; per-candidate verdicts cascade from
+            // runs at the DB. Deleted before visual_match_runs only for
+            // tidiness — the anchor FK is nullOnDelete either way.
+            $counts['vlm_verification_runs'] = ($contentIds === [] && $storyIds === []) ? 0 : DB::table('vlm_verification_runs')
+                ->where(fn ($q) => $q->whereIn('content_item_id', $contentIds)->orWhereIn('story_id', $storyIds))
+                ->delete();
+            $counts['speech_audio_chunks'] = $this->deleteByIds('speech_audio_chunks', array_map('intval', array_column($speechChunkRows, 'id')));
             // Visual-match audit trail (sub-project C): runs are anchored to
             // the creator's content; candidates cascade from runs at the DB
             // (keyframe embeddings likewise cascade with the keyframes above).
@@ -193,6 +220,10 @@ class CreatorEraser
         $counts['keyframe_files'] = 0;
         foreach ($keyframePathsByDisk as $disk => $paths) {
             $counts['keyframe_files'] += $this->deleteFiles($disk, $paths);
+        }
+        $counts['speech_chunk_files'] = 0;
+        foreach ($speechChunkPathsByDisk as $disk => $paths) {
+            $counts['speech_chunk_files'] += $this->deleteFiles($disk, $paths);
         }
 
         // A GDPR access export generated earlier is the single richest PII

@@ -620,6 +620,40 @@ class VlmVerificationJobTest extends TestCase
         ]);
     }
 
+    public function test_pure_transient_exhaustion_at_the_ceiling_labels_skipped_provider(): void
+    {
+        // Three transient throws (one billed attempt each), ZERO malformed
+        // responses: when the resumed fourth execution hits the attempt
+        // ceiling it must finalize skipped_provider (money spent, nothing
+        // learned — provider failure), not failed_malformed. The labels
+        // drive ops triage and eval buckets; mislabeling a pure outage as
+        // malformed output points debugging at the schema, not the provider.
+        [$item] = $this->escalatedContentItem();
+        Http::fake(['aiplatform.eu.rep.googleapis.com/*' => Http::response(['error' => 'boom'], 500)]);
+        $this->bindAttributionSpy();
+
+        foreach ([1, 2, 3] as $attempt) {
+            try {
+                $this->runJob($item->id);
+                $this->fail('Expected the transient ProviderCallException to propagate for queue backoff.');
+            } catch (ProviderCallException) {
+                // queue retry: the pending ledger row RESUMES on the next execution
+            }
+        }
+
+        // Fourth execution: the ceiling fires before any provider call.
+        $this->runJob($item->id);
+
+        Http::assertSentCount(3); // per_post_units = 3 billed calls, never a fourth
+        $this->assertDatabaseHas('vlm_verification_runs', [
+            'content_item_id' => $item->id,
+            'outcome' => 'skipped_provider',
+            'attempts' => 3,
+            'rejection_reason' => 'attempt-ceiling-transient',
+        ]);
+        $this->assertDatabaseMissing('vlm_verification_runs', ['outcome' => 'failed_malformed']);
+    }
+
     public function test_failed_hook_finalizes_a_billed_pending_row_and_alerts(): void
     {
         [$item, $anchor] = $this->escalatedContentItem();

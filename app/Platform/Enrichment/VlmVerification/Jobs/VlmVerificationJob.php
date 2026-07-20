@@ -214,7 +214,16 @@ final class VlmVerificationJob implements ShouldBeUnique, ShouldQueue
                     // The job enforces the ceiling itself: HIGH priority
                     // bypasses the guard's per-post check by design, and the
                     // ledger makes the ceiling hold across ALL executions.
-                    $recorder->finalize($run, VlmRunOutcome::FailedMalformed, null, [], null, null, null, $this->elapsedMs($startedAt), $lastMalformed ?? 'attempt-ceiling');
+                    // Outcome labeling is truthful: with NO malformed
+                    // response ever seen ($lastMalformed === null — every
+                    // billed attempt threw transiently) this is a PROVIDER
+                    // failure, finalized skipped_provider (money spent,
+                    // nothing learned — the model-bump/new-C-run re-open
+                    // semantics apply); failed_malformed stays reserved for
+                    // actual malformed output.
+                    $lastMalformed === null
+                        ? $recorder->finalize($run, VlmRunOutcome::SkippedProvider, null, [], null, null, null, $this->elapsedMs($startedAt), 'attempt-ceiling-transient')
+                        : $recorder->finalize($run, VlmRunOutcome::FailedMalformed, null, [], null, null, null, $this->elapsedMs($startedAt), $lastMalformed);
 
                     return;
                 }
@@ -342,8 +351,11 @@ final class VlmVerificationJob implements ShouldBeUnique, ShouldQueue
             }
         } catch (ProviderCallException $e) {
             if ($e->category->isTransient() && (int) $run->attempts === 0) {
-                // Nothing billed: unconsume — the queue retry is free by
-                // construction. With attempts > 0 the pending row survives
+                // Defensive only: attempts is incremented BEFORE every
+                // provider call, so a throwing client always leaves
+                // attempts ≥ 1 and this branch cannot fire here — the live
+                // unconsume path for a pre-increment crash is failed().
+                // Kept as a backstop; the pending row otherwise survives
                 // and the retried execution RESUMES it (ledger authority).
                 $recorder->deleteUnbilled($run);
             }

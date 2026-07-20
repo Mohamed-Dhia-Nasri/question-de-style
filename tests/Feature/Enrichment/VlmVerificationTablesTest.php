@@ -141,6 +141,46 @@ class VlmVerificationTablesTest extends TestCase
         $this->assertSame(2, VlmVerificationRun::query()->count());
     }
 
+    public function test_set_null_orphaned_anchored_rows_never_collide_in_discovery_dedup(): void
+    {
+        // Two verifications of the SAME content item at the SAME
+        // non-unverifiable trigger_reason ('review-band'), each anchored to a
+        // DIFFERENT C run. Deleting both anchors SET-NULLs visual_match_run_id
+        // on both audit rows (column-scoped ON DELETE SET NULL). The discovery
+        // dedup index must NOT then treat these orphans as duplicate discovery
+        // rows: its predicate is scoped to the two 'unverifiable:*' reasons,
+        // which anchored rows never carry. With the old
+        // `WHERE visual_match_run_id IS NULL` predicate the second anchor
+        // delete threw vlm_runs_discovery_content_unique, blocking retention
+        // prunes / GDPR erase of visual_match_runs.
+        $item = ContentItem::factory()->create();
+        $anchorA = VisualMatchRun::factory()->create(['content_item_id' => $item->id, 'needs_verification' => true]);
+        $anchorB = VisualMatchRun::factory()->create(['content_item_id' => $item->id, 'needs_verification' => true]);
+
+        $runA = VlmVerificationRun::factory()->forAnchor($anchorA)->create([
+            'trigger_reason' => VlmTriggerReason::ReviewBand,
+        ]);
+        $runB = VlmVerificationRun::factory()->forAnchor($anchorB)->create([
+            'trigger_reason' => VlmTriggerReason::ReviewBand,
+        ]);
+
+        // Both anchor deletes must succeed. The second delete's SET NULL used
+        // to collide with the first orphan in the discovery unique index.
+        DB::table('visual_match_runs')->where('id', $anchorA->id)->delete();
+        DB::table('visual_match_runs')->where('id', $anchorB->id)->delete();
+
+        $runA->refresh();
+        $runB->refresh();
+
+        // Both orphaned audit rows survive with a null anchor and their
+        // original non-unverifiable trigger_reason intact.
+        $this->assertNull($runA->visual_match_run_id);
+        $this->assertNull($runB->visual_match_run_id);
+        $this->assertSame(VlmTriggerReason::ReviewBand, $runA->trigger_reason);
+        $this->assertSame(VlmTriggerReason::ReviewBand, $runB->trigger_reason);
+        $this->assertSame(2, VlmVerificationRun::query()->count());
+    }
+
     public function test_anchor_delete_nulls_the_link_but_keeps_the_audit_row(): void
     {
         $run = VlmVerificationRun::factory()->create();

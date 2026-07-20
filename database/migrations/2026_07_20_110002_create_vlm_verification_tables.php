@@ -93,9 +93,16 @@ return new class extends Migration
         // anchor per VLM model — a model_version bump re-opens old anchors.
         DB::statement('CREATE UNIQUE INDEX vlm_runs_anchor_model_unique ON vlm_verification_runs (visual_match_run_id, model_version) WHERE visual_match_run_id IS NOT NULL');
         // DEF-021 discovery dedup: at most one anchorless row per owner per
-        // trigger_reason — the daily sweep can never duplicate them.
-        DB::statement('CREATE UNIQUE INDEX vlm_runs_discovery_content_unique ON vlm_verification_runs (content_item_id, trigger_reason) WHERE visual_match_run_id IS NULL AND content_item_id IS NOT NULL');
-        DB::statement('CREATE UNIQUE INDEX vlm_runs_discovery_story_unique ON vlm_verification_runs (story_id, trigger_reason) WHERE visual_match_run_id IS NULL AND story_id IS NOT NULL');
+        // trigger_reason — the daily sweep can never duplicate them. The
+        // predicate is scoped to the two 'unverifiable:*' reasons that
+        // discovery rows always carry: an anchored row whose
+        // visual_match_run_id is later SET-NULLed by the column-scoped
+        // ON DELETE SET NULL FK keeps its non-unverifiable trigger_reason and
+        // so stays out of this index — otherwise two such orphans sharing an
+        // (owner, trigger_reason) would collide and block a visual_match_runs
+        // delete (retention prune / GDPR erase).
+        DB::statement("CREATE UNIQUE INDEX vlm_runs_discovery_content_unique ON vlm_verification_runs (content_item_id, trigger_reason) WHERE visual_match_run_id IS NULL AND content_item_id IS NOT NULL AND trigger_reason IN ('unverifiable:no-run', 'unverifiable:skipped-run')");
+        DB::statement("CREATE UNIQUE INDEX vlm_runs_discovery_story_unique ON vlm_verification_runs (story_id, trigger_reason) WHERE visual_match_run_id IS NULL AND story_id IS NOT NULL AND trigger_reason IN ('unverifiable:no-run', 'unverifiable:skipped-run')");
 
         Schema::create('vlm_candidate_verdicts', function (Blueprint $table): void {
             $table->id();

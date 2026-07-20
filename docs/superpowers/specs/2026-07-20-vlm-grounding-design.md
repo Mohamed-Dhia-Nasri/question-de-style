@@ -239,8 +239,10 @@ switch-gated extension (§7). Everything else augments.
   shipment), **and**
 - stored keyframes still exist (re-checked in the job; frames can be retention-pruned between
   flag and job), **and**
-- no `vlm_verification_runs` row exists yet for that anchor run (**consumption bookkeeping** =
-  the partial-unique index on `visual_match_run_id`, §8).
+- no terminal `vlm_verification_runs` row exists yet for that anchor run at the current VLM
+  `model_version` (**consumption bookkeeping** = the partial-unique index on
+  `(visual_match_run_id, model_version)`, §8; deferrable skips write no row, so they stay
+  eligible — §10).
 
 Two paths feed it: the **inline stage** (right after `visual_match` in the same pipeline run —
 the fresh path, covers the common case immediately) and the **scheduled sweep** (`qds:vlm-verify`,
@@ -291,8 +293,11 @@ implementation against the INF reference — the §18 smoke task). `generationCo
 `responseMimeType: "application/json"`, `responseSchema` (§6), `temperature: 0`,
 `maxOutputTokens` (config, default 2048), `thinking_level: LOW`. `safetySettings`: none sent
 (defaults already OFF for this model family; CSAM/SPII filters are non-configurable anyway).
-`AiPayloadGuard::assertSafe` runs on the full payload **before** token fetch; a guard rejection
-is the approved fail-closed skip (`skipped:payload-guard`, §6).
+`AiPayloadGuard::assertSafe` runs on the **textual request view** (prompt, caption, transcript,
+catalog, generationConfig) *before* the base64 frame parts are attached and before token fetch
+— fail-fast, and no regex-scanning of ~2 MB of image data (base64 cannot trip the guard's
+patterns anyway: its alphabet contains no `@`, whitespace, or query separators). A guard
+rejection is the approved fail-closed skip (`skipped:payload-guard`, §6).
 
 **Response handling.** Success = candidate 0 with `finishReason STOP` and a JSON text part →
 `VerdictValidator`. `promptFeedback.blockReason` or `finishReason ∈ {SAFETY, RECITATION,
@@ -341,7 +346,7 @@ the decoding level:
     "outcome": { "type": "string", "enum": ["PRODUCT_CONFIRMED", "PRODUCT_ABSENT", "INCONCLUSIVE"] },
     "verdicts": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 3, "maxItems": 3,   // ← both set to the request's exact candidate count
       "items": {
         "type": "object",
         "propertyOrdering": ["product_key", "visible", "spoken", "gifting_cue",
@@ -364,20 +369,23 @@ the decoding level:
 }
 ```
 
-One verdict **per candidate** is instructed (look-alike disambiguation: the rationale must state
-why the runner-up was rejected); `frame_names` is enum-constrained to the frames actually sent,
-so timestamps can never be fabricated (the app maps names back to `timestamp_ms`). The prompt
+**Exact-cover contract:** exactly one verdict per candidate — `minItems`/`maxItems` are both set
+to the request's candidate count (decode-level enforcement; both fields are in the verified
+supported subset) and the prompt instructs one verdict per key (look-alike disambiguation: the
+rationale must state why the runner-up was rejected). `frame_names` is enum-constrained to the
+frames actually sent, so timestamps can never be fabricated (the app maps names back to
+`timestamp_ms`). The prompt
 instructs `outcome = INCONCLUSIVE` when frames are too poor/ambiguous to judge — INCONCLUSIVE is
 a first-class outcome, distinct from PRODUCT_ABSENT, end to end.
 
 **Validation (defense in depth, fail-closed).** `VerdictValidator` re-checks — even though the
-schema constrains decoding — that: JSON parses; required fields present; every `product_key` is
-in the request's candidate set; keys are unique; every `frame_name` was sent; confidence ∈ [0,1];
-and **outcome↔verdict consistency**: `PRODUCT_CONFIRMED` requires ≥ 1 verdict with
+schema constrains decoding — that: JSON parses; required fields present; the verdict set is an
+**exact cover** of the candidate set (every `product_key` present exactly once — a missing,
+duplicated, or out-of-catalog key is malformed); every `frame_name` was sent; confidence ∈
+[0,1]; and **outcome↔verdict consistency**: `PRODUCT_CONFIRMED` requires ≥ 1 verdict with
 (`visible` ∨ `spoken`) true and `confidence ≥ review` — a "confirmed" response with no such
 verdict is **normalized to INCONCLUSIVE** (recorded with signal `vlm-outcome-normalized`, not
-retried). A candidate the model omitted a verdict for is treated as an implicit absent/REJECT
-(fail-safe), never guessed. Any hard violation = **malformed output** → retry with a corrective
+retried). Any hard violation = **malformed output** → retry with a corrective
 suffix, up to `per_post_units = 3` total billed calls per post **across all job executions**
 (§10 accounting); still failing → run outcome `failed_malformed` (counts as unverifiable, never
 absent). A verdict never fabricates a product: an unlisted product mentioned in `rationale` text
@@ -432,9 +440,11 @@ evaluated per candidate in this order:
   plus `vlm-caption-echo` (§6 guard fired) and `vlm-outcome-normalized` (§6 consistency rule
   fired) when applicable;
 - provenance `{source: SRC-google-gemini-vlm, fetchedAt, sourceVersion: 'vlm-verification-v1'}`;
-- a later re-verification (only possible after catalog/model change) finding REJECT where an
-  `AI_ASSESSED` VLM row exists downgrades it to LOW + `vlm-support-withdrawn` (never deletes;
-  human-touched rows untouched) — C's withdraw pattern.
+- re-verification happens through exactly two append-only paths — a **new anchor run** (the
+  catalog/frames changed, C ran again and re-flagged) or a **VLM `model_version` bump** (the
+  §8 unique re-opens old anchors) — and when it finds REJECT where an `AI_ASSESSED` VLM row
+  exists, the row downgrades to LOW + `vlm-support-withdrawn` (never deletes; human-touched
+  rows untouched) — C's withdraw pattern.
 
 **Evidence gate** (`buildEvidence` — the only attribution touch, exactly C's shape):
 
@@ -472,20 +482,20 @@ FKs, XOR target CHECK — C's migration patterns verbatim.
 | id | bigint PK | |
 | tenant_id | FK tenants | + `(id, tenant_id)` unique |
 | content_item_id / story_id | nullable FKs | CHECK `num_nonnulls(...) = 1`; composite tenant FKs; indexes `(content_item_id, id)`, `(story_id, id)` |
-| visual_match_run_id | nullable FK → visual_match_runs, nullOnDelete | the anchor; **partial UNIQUE where not null = consumption bookkeeping**; null only for `unverifiable:no-run` discovery rows, which get their own dedup: partial UNIQUE on `(owner, trigger_reason)` WHERE `visual_match_run_id IS NULL` — the daily sweep can never duplicate them |
+| visual_match_run_id | nullable FK → visual_match_runs, nullOnDelete | the anchor; **partial UNIQUE on `(visual_match_run_id, model_version)` where not null = consumption bookkeeping** — one verification per anchor per VLM model, so a model upgrade re-opens old anchors (append-only re-verification) while catalog changes ride new C runs (new anchor ids) with no extra key needed; null only for `unverifiable:no-run` discovery rows, which get their own dedup: partial UNIQUE on `(owner, trigger_reason)` WHERE `visual_match_run_id IS NULL` — the daily sweep can never duplicate them |
 | correlation_id | varchar(64) | |
 | model_version | varchar(64) | e.g. `gemini-3.5-flash` |
 | trigger_reason | varchar(40) | CHECK IN (`review-band`, `no-band-shipment`, `sweep-catchup`, `unverifiable:no-run`, `unverifiable:skipped-run`) |
 | priority | varchar(10) | CHECK IN (high, medium) |
 | frames_sent | smallint | |
 | prompt_tokens / output_tokens / thinking_tokens | int nullable | from `usageMetadata` |
-| attempts | smallint | billed calls (≤ per_post_units) |
-| outcome | varchar(30) | CHECK IN (`confirmed`, `absent`, `inconclusive`, `unverifiable`, `failed_malformed`, `skipped_budget`, `skipped_read_only`, `skipped_provider`, `skipped_safety_block`, `skipped_payload_guard`, `skipped_no_frames`) |
+| attempts | smallint | billed calls; **incremented transactionally BEFORE each provider call** — the crash-safe billing ledger (a worker crash or timeout kill can never forget a billed attempt; the ≤ per_post_units ceiling survives job retries) |
+| outcome | varchar(30) | CHECK IN (`pending`, `confirmed`, `absent`, `inconclusive`, `unverifiable`, `failed_malformed`, `skipped_provider`, `skipped_safety_block`, `skipped_payload_guard`, `skipped_no_frames`). **Deferrable skips (budget / read-only / provider-unavailable before any billed call) write NO row** — the anchor stays unconsumed and the sweep retries them (§10); they are visible via budget counters and stage markers instead |
 | rejection_reason | varchar(100) nullable | |
 | thresholds | jsonb | snapshot `{auto, review, margin}` |
 | latency_ms | int | wall-clock across attempts |
 | estimated_cost_micro_usd | int | attempts × price constant |
-| created_at | | no updated_at (append-only) |
+| created_at / updated_at | | single-row lifecycle: created `pending` before the first call, attempts incremented, finalized once to a terminal outcome — never re-opened (append-only per verification; a re-verification is a new row under a new model_version) |
 
 ### 8.2 `vlm_candidate_verdicts` — per-candidate verdicts per run
 `id, tenant_id (+composite FK), vlm_verification_run_id FK cascadeOnDelete (+composite FK),
@@ -510,7 +520,9 @@ default 7) and `CreatorEraser` are the backstops (§12).
 1. `RecognitionType::VlmProduct = 'VLM_PRODUCT'` enum case + CHECK DROP/re-ADD (house pattern).
 2. `SourceRegistry::GOOGLE_GEMINI_VLM = 'SRC-google-gemini-vlm'` (+ ADR-0030, DP-006).
 3. The three tables above.
-4. Config additions (§13) — no schema impact.
+4. `content_transcripts` unique narrowed to `(content_item_id, provider)` (§9 identity fix;
+   duplicate-guard before constraint swap).
+5. Config additions (§13) — no schema impact.
 
 No pgvector involvement — D stores no vectors.
 
@@ -569,19 +581,29 @@ result is captured. Mono FLAC in, always (per-channel billing).
   the v2 switch is off — when on but unconfigured, speech skips fail-closed, like C).
 
 **Transcript persistence (content items).** One `content_transcripts` row per content item under
-provider `SRC-google-speech-to-text`: `language` = dominant detected language (most billed
-seconds; per-chunk languages preserved in segments), `status = available`, `segments` =
-`list<{start, dur, text, language, chunk}>` (chunk-level offsets D computes — provider word
-offsets are at-risk, §2b.11), `text` = stitched full text, checksum, provenance. Upserted on the
-unique `(content_item_id, language, provider)` key; the sync chunk writes/updates it first, the
-job appends. **Stories** keep detections-only (no transcript table for stories today —
-documented v1 limitation, §16). The transcript row is exactly what D's own VLM request (§6) and
+provider `SRC-google-speech-to-text`. **Identity fix (migration):** the unique key narrows from
+`(content_item_id, language, provider)` to **`(content_item_id, provider)`** — under the old
+key, the dominant language shifting after extended chunks arrive (German intro, English rest)
+would strand a stale partial row under the old language value. `language` becomes **mutable
+transcript metadata** (the dominant detected language by billed seconds; per-chunk languages
+preserved in segments). Safe for the existing YouTube provider: its enricher only ever writes
+`language = 'und'`, one row per content item — the narrowed key changes nothing for it
+(migration still guards against hypothetical duplicates before adding the constraint).
+`status = available`, `segments` = `list<{start, dur, text, language, chunk}>` (chunk-level
+offsets D computes — provider word offsets are at-risk, §2b.11), `text` = stitched full text,
+checksum, provenance. The sync chunk writes the row first, the job appends and re-stitches.
+**Stories** keep detections-only (no transcript table for stories today — documented v1
+limitation, §16). The transcript row is exactly what D's own VLM request (§6) and
 A's future text mining consume.
 
-**SPOKEN_BRAND detections** flow through the **existing** normalizer
-(`speechBatch`-equivalent per chunk: top alternative, `textCandidate(SpokenBrand, …)`,
-provider_label = truncated chunk transcript — per-chunk identity means later-in-video mentions
-become their own rows), provenance source `SRC-google-speech-to-text`,
+**SPOKEN_BRAND detections** flow through the **existing** normalizer matching
+(`speechBatch`-equivalent per chunk: top alternative, lexicon match) but with a **deterministic
+provider_label**: `speech-chunk:<ordinal>:<normalized brand>` — NOT the v1 path's
+truncated-transcript label, which is unstable across re-transcription, can collide at 255
+chars, and puts spoken personal content into a review-UI-visible identity field. Per-chunk
+identity means later-in-video mentions become their own rows; the transcript text itself stays
+in `detected_text` (bounded) and the transcript row. The legacy v1 path keeps its existing
+label scheme untouched (rollback purity). Provenance source `SRC-google-speech-to-text`,
 sourceVersion `google-speech-to-text-v2`. Brand-level only, as today — product-level speech
 claims are the VLM's job (§7 caps them at REVIEW).
 
@@ -596,44 +618,49 @@ gate). The switch covers client, tiering, persistence, and budget — a true no-
 **`VlmVerificationJob`** (`ShouldBeUnique` on `vlm-verify:{content|story}:{id}`, queue
 `qds.enrichment.vlm.queue` default `enrichment`, tries 4, timeout 180, `IngestionJobBehaviour`,
 `TenantContext::runAs`):
-1. Re-check gates in order, each with an explicit budget side effect (fixing what an implementer
-   would otherwise guess):
+1. Re-check gates in order. **Deferrable conditions write NO run row** (the anchor stays
+   unconsumed — the scheduled sweep retries them when the condition clears); **terminal
+   conditions** write/finalize a run row (consumed):
 
-   | Gate | Terminal outcome | Budget side effect |
-   |---|---|---|
-   | kill switch off / target or anchor gone | none (silent no-op — feature dark or stale job) | none |
-   | already consumed (run row exists for anchor) | none (idempotency no-op) | none |
-   | provider not configured / breaker open | `skipped_provider` | none (run row only) |
-   | frames gone (pruned since flag) | `skipped_no_frames` | none (run row only) |
-   | read-only mode | `skipped_read_only` | none (run row only) |
-   | budget deny | `skipped_budget` | `record(0, postsSkippedBudget: 1)` |
-   | payload guard trip | `skipped_payload_guard` | none (run row only) |
+   | Gate | Class | Effect | Budget side effect |
+   |---|---|---|---|
+   | kill switch off / target or anchor gone | no-op | nothing (feature dark or stale job) | none |
+   | already consumed (terminal row at this model_version) | no-op | nothing (idempotency) | none |
+   | provider not configured / breaker open | **deferral** | no row; stage/log marker | none |
+   | read-only mode | **deferral** | no row | none |
+   | budget deny | **deferral** | no row | `record(0, postsSkippedBudget: 1)` |
+   | frames gone (pruned since flag — never coming back) | terminal | row `skipped_no_frames` | none |
+   | payload guard trip (deterministic on this content) | terminal | row `skipped_payload_guard` | none |
 
-2. Call loop, with **cross-execution billing accounting**: before attempt *n* (1-based,
-   counting every billed call this post has ever made — attempts are persisted on the terminal
-   run row and, within an execution, in memory) the job calls
-   `allows('vlm_verification', tenant, n, priority)` — passing the **cumulative attempt count
-   as units** so the guard's `units > per_post_units` per-post ceiling actually binds (C passes
-   an aggregate projection for the same reason; a flat `allows(1)` would never trip it). Each
-   billed attempt then calls `record(1, postsProcessed: attempt 1 only)` and is telemetered
-   (`ProviderCallRecorder`, op `vlm.verify`). Validator-driven retries (§6) continue the same
-   loop, ≤ `per_post_units` total billed calls per post.
-3. Persist: run row + verdicts (append-only) → detections (band-gated) →
-   `AttributionService::enrich($target)` — the mention updates in the same tenant context
-   (backfill precedent).
-4. Failure semantics (designed so job-level `tries` can never multiply the per-post billing
-   ceiling):
-   - `ProviderCallException` **transient, before any billed call this post**: no run row →
-     `handleProviderFailure` (Retry-After release / backoff) — the retry is free by
-     construction.
-   - **Transient after ≥ 1 billed call**: do **not** release — write the terminal run row with
-     outcome `skipped_provider` (attempts + cost recorded; C's mid-run transient posture).
-     The post is consumed; if it still matters, a later catalog/model change or operator
-     re-open is the path, never silent re-billing.
-   - Safety block: terminal `skipped_safety_block`; the blocking attempt **was billed** and is
-     already in `record(1)`/attempts (HTTP 200 responses bill, §2b).
-   - Permanent categories (auth, malformed after retries) → `failed()` → JobFailed critical
-     alert + terminal run row (`failed_malformed` where applicable).
+2. **Crash-safe billing ledger.** Passing the gates, the job creates (or resumes) the run row
+   with outcome **`pending`** — a crashed/timeout-killed execution leaves this row behind, and
+   the retried job **resumes it, attempts intact**, instead of starting a fresh count. Before
+   attempt *n* (n = the row's `attempts + 1`): `allows('vlm_verification', tenant, n, priority)`
+   — the **cumulative count as units** makes the guard's `units > per_post_units` ceiling
+   actually bind (a flat `allows(1)` never would; C passes an aggregate projection for the same
+   reason) — then `attempts` is **incremented and committed BEFORE the provider call**, then the
+   call runs (`record(1, …)` + `ProviderCallRecorder`, op `vlm.verify`, per billed attempt).
+   A crash between increment and response wastes at most that one call and can never exceed the
+   ceiling. Validator-driven retries (§6) continue the same loop.
+3. Persist: finalize the run row (outcome + verdicts, single pending→terminal transition,
+   never re-opened) → detections (band-gated) → `AttributionService::enrich($target)` — the
+   mention updates in the same tenant context (backfill precedent).
+4. Failure semantics (job-level `tries` can never multiply the billing ceiling — the ledger is
+   authoritative):
+   - `ProviderCallException` **transient with `attempts = 0`**: delete the pending row (nothing
+     billed — unconsume) → `handleProviderFailure` (Retry-After release / backoff); the retry
+     is free by construction.
+   - **Transient with `attempts > 0`**: release is now safe (the ledger survives) — the retried
+     execution resumes the pending row; if job tries exhaust, `failed()` finalizes it as
+     `skipped_provider` (money spent, nothing learned — consumed; a later model_version bump or
+     new C run is the re-open path, never silent re-billing).
+   - Safety block: finalize `skipped_safety_block`; the blocking attempt **was billed** and is
+     already in the ledger (HTTP 200 responses bill, §2b).
+   - Permanent categories (auth; malformed after retries) → `failed()` → JobFailed critical
+     alert + finalize (`failed_malformed` where applicable).
+   - **Stale-pending backstop:** the sweep finalizes pending rows older than
+     `vlm.pending_stale_hours` (default 6): `attempts = 0` → row deleted (unconsumed, retried);
+     `attempts > 0` → `skipped_provider` (consumed).
    **A VLM failure never fails or blocks any enrichment run** — fail-closed skip is the worst
    case, evidence stays absent, the mention stands wherever the cheaper tiers put it.
 
@@ -642,9 +669,10 @@ tries 4, timeout 300), chunk loop as §9.
 
 **`qds:vlm-verify {--days=30} {--tenant=} {--dry-run}`** (scheduled daily; self-gated on both
 `vlm.enabled` and `visual_match.enabled`): (a) latest flagged-but-unconsumed visual runs in the
-window → dispatch `VlmVerificationJob` per target (counts printed; budget enforcement happens in
-the jobs); (b) DEF-021 discovery (§4) → direct `unverifiable` rows (no jobs, no spend);
-(c) `--dry-run` prints both sets without writing. Also the day-one backfill tool (§14).
+window (deferred skips have no row, so they reappear here automatically) → dispatch
+`VlmVerificationJob` per target (counts printed; budget enforcement happens in the jobs);
+(b) DEF-021 discovery (§4) → direct `unverifiable` rows (no jobs, no spend); (c) stale-pending
+finalization (§10 crash backstop); (d) `--dry-run` prints all sets without writing. Also the day-one backfill tool (§14).
 
 **Queue posture.** Both jobs default to the existing `enrichment` queue; the name is env-tunable
 (`qds.enrichment.vlm.queue`, `qds.enrichment.speech.queue`) so a dedicated `ai` queue with its
@@ -739,6 +767,7 @@ noted for the future hardening pass).
     'thresholds' => [ // placeholders — sub-project E calibrates
         'auto' => 0.85, 'review' => 0.60, 'margin' => 0.10,
     ],
+    'pending_stale_hours' => (int) env('QDS_ENRICHMENT_VLM_PENDING_STALE_HOURS', 6), // §10 crash backstop
 ],
 'speech' => [
     'v2_enabled' => (bool) env('QDS_ENRICHMENT_SPEECH_V2_ENABLED', false), // kill switch — off = exact legacy v1 path
@@ -830,18 +859,21 @@ detected-language mix → dominant-language row). Existing text/visual metrics u
   `frame_names`), visibility requirement (spoken-only caps REVIEW), set-wise margin ambiguity
   (3+ clustered candidates → no AUTO, all within margin REVIEW), caption-echo cap,
   INCONCLUSIVE vs ABSENT, threshold config resolution, determinism.
-- `VerdictValidator`: schema echo, out-of-catalog key, duplicate keys, unknown frame name,
-  confidence range, outcome↔verdict consistency (confirmed-empty → INCONCLUSIVE
-  normalization), implicit-absent for omitted candidates, retry-signal contract, fabrication
-  inertness.
+- `VerdictValidator`: schema echo, **exact-cover contract** (missing candidate, duplicate key,
+  out-of-catalog key, extra verdict — all malformed), unknown frame name, confidence range,
+  outcome↔verdict consistency (confirmed-empty → INCONCLUSIVE normalization), retry-signal
+  contract, fabrication inertness.
 - `GeminiVlmClient`: `Http::fake` request-shape tests (EU URL, schema injection, media_resolution
   per part, thinking_level, no safetySettings), safety-block permanence, MAX_TOKENS → retry
   path, error taxonomy, recorder/breaker wiring, `AiPayloadGuard` compliance (payload-guard trip
   → skip outcome).
-- `VlmVerificationJob`: full gate matrix (each skip outcome + its §10 budget side effect),
-  consumption idempotency (unique anchor; no-run discovery dedup), budget deny, cumulative
-  `allows(n)` per-post ceiling binding, **cross-execution billing cap** (transient-after-billed
-  → terminal `skipped_provider`, never released; transient-before-billed → free release),
+- `VlmVerificationJob`: full gate matrix (deferral-vs-terminal classes + §10 budget side
+  effects — deferrals leave no row and stay sweep-eligible), consumption idempotency (unique
+  `(anchor, model_version)`; no-run discovery dedup; model bump re-opens), cumulative
+  `allows(n)` per-post ceiling binding, **crash-safe ledger** (pending row created before the
+  first call; attempts committed pre-call; simulated crash/timeout → resumed execution honours
+  the ceiling; transient with attempts=0 → row deleted + free release; attempts>0 → resume,
+  tries-exhausted → `skipped_provider`), stale-pending sweep finalization both branches,
   attribution re-run, uniqueness.
 - `VlmDetectionWriter`: DP-004 matrix, provider_label idempotency, withdraw path, signals
   vocabulary, unique-violation recovery.
@@ -854,10 +886,13 @@ detected-language mix → dominant-language row). Existing text/visual metrics u
 - Speech: `GoogleSpeechV2Client` request shape (EU URL, chirp_3, `["auto"]`, adaptation
   phrases/boost, mono flac inline), detected-language capture; `AudioChunker` real-ffmpeg
   tests (chunk count/offsets/≤7 MB, determinism — `AudioExtractorTest` pattern);
-  tier decision (candidate-bearing × duration); transcript stitching + dominant language +
-  segments shape; per-chunk SPOKEN_BRAND identity; `TranscribeExtendedAudioJob` chunk loop /
-  partial failure / blob deletion / attribution re-run; **v2 switch off ⇒ v1 request
-  byte-identical** (characterization); budget-deny markers.
+  tier decision (candidate-bearing × duration); transcript stitching + dominant-language
+  mutation on the narrowed `(content_item_id, provider)` identity (no stale
+  language-keyed duplicates; YouTube 'und' rows unaffected — migration test); deterministic
+  `speech-chunk:<ordinal>:<brand>` provider_label (stable across re-transcription; v1 path
+  labels unchanged); `TranscribeExtendedAudioJob` chunk loop / partial failure / blob deletion /
+  attribution re-run; **v2 switch off ⇒ v1 request byte-identical** (characterization);
+  budget-deny markers.
 - GDPR: eraser extension (runs/verdicts/chunks + blobs), orphan prune, transcript coverage.
 - Eval: vlm + speech fixtures, cost output, existing metrics unchanged.
 

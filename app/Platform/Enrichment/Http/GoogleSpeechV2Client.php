@@ -75,7 +75,12 @@ final class GoogleSpeechV2Client
             'features' => ['enableAutomaticPunctuation' => true],
         ];
 
-        $hints = $this->preparePhrases($phrases);
+        // Adaptation is gated: chirp_3 rejects the inline_phrase_set shape with a
+        // 404 (go-live smoke, 2026-07-21). Default OFF so recognize works; re-enable
+        // via qds.enrichment.speech.adaptation_enabled once the shape is verified.
+        $hints = config('qds.enrichment.speech.adaptation_enabled')
+            ? $this->preparePhrases($phrases)
+            : [];
 
         if ($hints !== []) {
             $boost = min(20.0, max(0.0, (float) config('qds.enrichment.speech.boost')));

@@ -8,12 +8,16 @@ use App\Platform\Enrichment\VlmVerification\Requests\VlmRequest;
 use Tests\TestCase;
 
 /**
- * The generateContent request envelope (spec §5/§6): prompt text part +
- * one inlineData part per frame (each pinned to the configured
- * media_resolution), generationConfig with the per-request enum-grounded
+ * The generateContent request envelope (spec §5/§6): contents[0] carries
+ * the REQUIRED `role: user` (the live API 400s without it — go-live
+ * smoke, 2026-07-21), then the prompt text part + one inlineData part
+ * per frame, generationConfig with the per-request enum-grounded
  * responseSchema, and the textual view (no base64) that AiPayloadGuard
- * scans. The exact-cover contract — minItems = maxItems = the candidate
- * count — makes "one verdict per candidate" a decode-level guarantee.
+ * scans. The media_resolution (per part) and thinking_level
+ * (generationConfig) knobs are OMITTED while their configs are empty —
+ * the smoke saw HTTP 400 on both — and included only when set. The
+ * exact-cover contract — minItems = maxItems = the candidate count —
+ * makes "one verdict per candidate" a decode-level guarantee.
  */
 class VlmRequestTest extends TestCase
 {
@@ -42,16 +46,17 @@ class VlmRequestTest extends TestCase
         $parts = $payload['contents'][0]['parts'];
         $this->assertCount(4, $parts);
         $this->assertSame(['text' => 'PROMPT-TEXT'], $parts[0]);
-        // Gemini 3 per-part knob (spec §2b.4): MEDIUM = 560 tokens/frame.
+        // No media_resolution with the shipped empty default — the live API
+        // rejected MEDIA_RESOLUTION_MEDIUM with HTTP 400 (go-live smoke,
+        // 2026-07-21).
         $this->assertSame([
             'inlineData' => ['mimeType' => 'image/jpeg', 'data' => base64_encode('frame-one-bytes')],
-            'media_resolution' => 'MEDIA_RESOLUTION_MEDIUM',
         ], $parts[1]);
         $this->assertSame(base64_encode('frame-two-bytes'), $parts[2]['inlineData']['data']);
         $this->assertSame(base64_encode('frame-three-bytes'), $parts[3]['inlineData']['data']);
     }
 
-    public function test_generation_config_pins_json_schema_temperature_and_thinking_level(): void
+    public function test_generation_config_pins_json_schema_and_temperature_and_omits_thinking_level_by_default(): void
     {
         config(['qds.enrichment.vlm.max_output_tokens' => 1024]);
         $request = $this->request();
@@ -62,9 +67,63 @@ class VlmRequestTest extends TestCase
         $this->assertSame($request->schema(), $generationConfig['responseSchema']);
         $this->assertSame(0, $generationConfig['temperature']);
         $this->assertSame(1024, $generationConfig['maxOutputTokens']);
-        // LOW (spec §2b.5): thinking tokens bill as output; verification is
-        // extraction, not deep reasoning.
-        $this->assertSame('LOW', $generationConfig['thinking_level']);
+        // OMITTED with the shipped empty default — the live API rejected the
+        // field itself with HTTP 400 ("Unknown name" — go-live smoke,
+        // 2026-07-21).
+        $this->assertArrayNotHasKey('thinking_level', $generationConfig);
+    }
+
+    public function test_both_payload_views_stamp_the_required_user_role_on_contents(): void
+    {
+        $request = $this->request();
+
+        // generateContent REQUIRES the role ("Please use a valid role:
+        // user, model." — live HTTP 400, go-live smoke 2026-07-21).
+        $this->assertSame('user', $request->payload()['contents'][0]['role']);
+        $this->assertSame('user', $request->textualPayload()['contents'][0]['role']);
+    }
+
+    public function test_an_empty_media_resolution_config_omits_the_key_from_every_part(): void
+    {
+        config(['qds.enrichment.vlm.media_resolution' => '']);
+
+        foreach ($this->request()->payload()['contents'][0]['parts'] as $part) {
+            $this->assertArrayNotHasKey('media_resolution', $part);
+        }
+    }
+
+    public function test_a_configured_media_resolution_is_pinned_on_every_image_part(): void
+    {
+        // The re-enable path for the cost knob (spec §2b.4: MEDIUM = 560
+        // tokens/frame) — every frame part carries it, the text part never.
+        config(['qds.enrichment.vlm.media_resolution' => 'MEDIA_RESOLUTION_MEDIUM']);
+
+        $parts = $this->request()->payload()['contents'][0]['parts'];
+
+        $this->assertArrayNotHasKey('media_resolution', $parts[0]);
+        $this->assertSame('MEDIA_RESOLUTION_MEDIUM', $parts[1]['media_resolution']);
+        $this->assertSame('MEDIA_RESOLUTION_MEDIUM', $parts[2]['media_resolution']);
+        $this->assertSame('MEDIA_RESOLUTION_MEDIUM', $parts[3]['media_resolution']);
+    }
+
+    public function test_an_empty_thinking_level_config_omits_the_key_from_generation_config(): void
+    {
+        config(['qds.enrichment.vlm.thinking_level' => '']);
+        $request = $this->request();
+
+        $this->assertArrayNotHasKey('thinking_level', $request->payload()['generationConfig']);
+        $this->assertArrayNotHasKey('thinking_level', $request->textualPayload()['generationConfig']);
+    }
+
+    public function test_a_configured_thinking_level_is_included_in_generation_config(): void
+    {
+        // The re-enable path for the cost knob (spec §2b.5: thinking tokens
+        // bill as output) — present in both payload views.
+        config(['qds.enrichment.vlm.thinking_level' => 'LOW']);
+        $request = $this->request();
+
+        $this->assertSame('LOW', $request->payload()['generationConfig']['thinking_level']);
+        $this->assertSame('LOW', $request->textualPayload()['generationConfig']['thinking_level']);
     }
 
     public function test_the_textual_payload_is_the_payload_without_the_inline_frame_parts(): void

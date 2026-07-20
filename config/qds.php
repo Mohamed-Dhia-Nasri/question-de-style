@@ -303,6 +303,12 @@ return [
             'queue' => env('QDS_ENRICHMENT_SPEECH_QUEUE', 'enrichment'),
             'chunk_seconds' => (int) env('QDS_ENRICHMENT_SPEECH_CHUNK_SECONDS', 55),
             'max_minutes' => (int) env('QDS_ENRICHMENT_SPEECH_MAX_MINUTES', 10),
+            // Adaptation (brand/product phrase hints) is DEFAULT OFF: the go-live smoke
+            // (2026-07-21) confirmed chirp_3 rejects the inline_phrase_set adaptation shape
+            // with HTTP 404 "Requested entity was not found" (recognize works without it).
+            // Re-enable only once the correct chirp_3 biasing shape is verified against
+            // current official docs (spec §18 watch item).
+            'adaptation_enabled' => (bool) env('QDS_ENRICHMENT_SPEECH_ADAPTATION', false),
             'boost' => (float) env('QDS_ENRICHMENT_SPEECH_BOOST', 10.0),   // 0–20
             'phrase_cap' => (int) env('QDS_ENRICHMENT_SPEECH_PHRASE_CAP', 500), // model hard limit 1000
             'chunk_orphan_days' => (int) env('QDS_ENRICHMENT_SPEECH_CHUNK_ORPHAN_DAYS', 7),
@@ -373,8 +379,15 @@ return [
             'model_version' => env('QDS_ENRICHMENT_VLM_MODEL', 'gemini-3.5-flash'),
             'queue' => env('QDS_ENRICHMENT_VLM_QUEUE', 'enrichment'),
             'frame_budget' => (int) env('QDS_ENRICHMENT_VLM_FRAME_BUDGET', 12),
-            'media_resolution' => env('QDS_ENRICHMENT_VLM_MEDIA_RESOLUTION', 'MEDIA_RESOLUTION_MEDIUM'),
-            'thinking_level' => env('QDS_ENRICHMENT_VLM_THINKING_LEVEL', 'LOW'),
+            // Both DEFAULT EMPTY (omitted from the request): the go-live smoke
+            // (2026-07-21) confirmed the live generateContent API rejects
+            // media_resolution=MEDIA_RESOLUTION_MEDIUM (per Part) and the field
+            // thinking_level (generation_config) with HTTP 400. Empty ⇒ the model
+            // uses its own resolution/thinking (valid, just higher per-call cost).
+            // Re-enable each with a value/shape verified against current official
+            // docs (spec §18 — cost optimizations only, not correctness).
+            'media_resolution' => env('QDS_ENRICHMENT_VLM_MEDIA_RESOLUTION', ''),
+            'thinking_level' => env('QDS_ENRICHMENT_VLM_THINKING_LEVEL', ''),
             'max_output_tokens' => (int) env('QDS_ENRICHMENT_VLM_MAX_OUTPUT_TOKENS', 2048),
             'caption_max_chars' => (int) env('QDS_ENRICHMENT_VLM_CAPTION_MAX_CHARS', 2000),
             'transcript_max_chars' => (int) env('QDS_ENRICHMENT_VLM_TRANSCRIPT_MAX_CHARS', 4000),

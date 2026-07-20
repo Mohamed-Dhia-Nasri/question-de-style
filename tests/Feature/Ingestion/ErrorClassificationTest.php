@@ -136,6 +136,48 @@ class ErrorClassificationTest extends TestCase
         }
     }
 
+    public function test_apify_no_items_sentinel_resolves_to_empty_result_not_a_rejected_record(): void
+    {
+        // Instagram post/reel actors signal "no content for this input" as a
+        // SINGLE dataset item {error:"no_items", errorDescription:"Empty or
+        // private data ..."} — NOT an empty list. It means the account has no
+        // in-window posts (verified live: creator fouuu_x, zero reels in the
+        // 14-day window). It is a legitimate zero-result run, so the client
+        // resolves it to an EMPTY item list: no exception, so the batch is a
+        // clean success with nothing to quarantine and no false SCHEMA_DRIFT
+        // alert.
+        Http::fake([
+            'api.apify.com/*' => Http::response([[
+                'error' => 'no_items',
+                'errorDescription' => 'Empty or private data for provided input',
+                'requestErrorMessages' => ['Request got blocked. Will retry with different session'],
+            ]], 200),
+        ]);
+
+        $response = app(ApifyClient::class)->runActor(
+            SourceRegistry::APIFY_INSTAGRAM_POST_SCRAPER,
+            'apify~instagram-post-scraper',
+            ['username' => ['fouuu_x']],
+        );
+
+        $this->assertSame([], $response->items);
+    }
+
+    public function test_apify_unrecognized_actor_error_item_is_upstream_error_not_schema_drift(): void
+    {
+        // Any OTHER single-item {error:...} envelope is an actor-reported
+        // failure, not malformed content. Classify it as a (retryable)
+        // UPSTREAM_ERROR instead of letting it masquerade as a "missing id"
+        // record that trips a false schema-change alert.
+        Http::fake([
+            'api.apify.com/*' => Http::response([[
+                'error' => 'Something went wrong inside the actor run.',
+            ]], 200),
+        ]);
+
+        $this->expectCategory(ErrorCategory::UpstreamError);
+    }
+
     public function test_youtube_invalid_api_key_400_is_authentication_not_unknown(): void
     {
         // Google returns an invalid/absent key as HTTP 400 (reason

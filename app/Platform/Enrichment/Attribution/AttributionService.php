@@ -201,14 +201,16 @@ class AttributionService
 
     private function buildEvidence(ContentItem|Story $target): EvidenceBundle
     {
-        // Two kill switches. A (text_signals, sub-project A) gates the
+        // Three kill switches. A (text_signals, sub-project A) gates the
         // text-family product evidence, the LOGO precision gate, the paid
         // label and the contextual cues exactly as before. C (visual_match,
-        // sub-project C) gates VISUAL_PRODUCT evidence. EITHER switch alone
-        // enables the product-aware SEEDED doctrine; both off reproduces
-        // the legacy brand-level behaviour byte-identically.
+        // sub-project C) gates VISUAL_PRODUCT evidence. D (vlm, sub-project
+        // D) gates VLM_PRODUCT evidence the same way. ANY switch alone
+        // enables the product-aware SEEDED doctrine; all three off
+        // reproduces the legacy brand-level behaviour byte-identically.
         $textEnabled = (bool) config('qds.enrichment.text_signals.enabled');
         $visualEnabled = (bool) config('qds.enrichment.visual_match.enabled');
+        $vlmEnabled = (bool) config('qds.enrichment.vlm.enabled');
 
         $recognitions = [];
 
@@ -220,10 +222,17 @@ class AttributionService
         foreach ($detectionQuery->get() as $detection) {
             $assessment = $detection->assessment;
             $isVisual = $detection->recognition_type === RecognitionType::VisualProduct;
+            $isVlm = $detection->recognition_type === RecognitionType::VlmProduct;
 
             // Rollback no-op (sub-project C): with the switch off,
             // VISUAL_PRODUCT rows are excluded from evidence ENTIRELY.
             if ($isVisual && ! $visualEnabled) {
+                continue;
+            }
+
+            // Rollback no-op (sub-project D): with the switch off,
+            // VLM_PRODUCT rows are excluded from evidence ENTIRELY.
+            if ($isVlm && ! $vlmEnabled) {
                 continue;
             }
 
@@ -248,17 +257,18 @@ class AttributionService
                 continue;
             }
 
-            // Visual precision gate (closes the §2.4 trap): a REVIEW-band
-            // VISUAL_PRODUCT row (LOW/UNKNOWN, still AI-assessed) flows its
-            // BRAND but withholds the product id — the classifier then caps
-            // the mention at SEEDED/MEDIUM + product-unconfirmed (held for
-            // review, never auto-linked) instead of silently auto-linking on
-            // one isolated visual hit. A human approving the detection
+            // Visual precision gate (closes the §2.4 trap), shared by
+            // VISUAL_PRODUCT and VLM_PRODUCT rows: a REVIEW-band row
+            // (LOW/UNKNOWN, still AI-assessed) flows its BRAND but
+            // withholds the product id — the classifier then caps the
+            // mention at SEEDED/MEDIUM + product-unconfirmed (held for
+            // review, never auto-linked) instead of silently auto-linking
+            // on one isolated hit. A human approving the detection
             // (HUMAN_REVIEWED/…) re-opens the gate on the next run.
             // Text-family rows flow product evidence only under A's switch
             // (unchanged: a stale/rolled-back productId must never align a
             // shipment on its own when A is off).
-            $productFlows = $isVisual
+            $productFlows = ($isVisual || $isVlm)
                 ? ! ($assessment->verificationStatus === VerificationStatus::AiAssessed
                     && in_array($assessment->confidenceLevel, [ConfidenceLevel::Low, ConfidenceLevel::Unknown], true))
                 : $textEnabled;
@@ -286,7 +296,7 @@ class AttributionService
                 ? app(ContextualCueDetector::class)->detect($target->caption)
                 : [],
             publishedAt: $this->publicationDate($target),
-            productDoctrine: $textEnabled || $visualEnabled,
+            productDoctrine: $textEnabled || $visualEnabled || $vlmEnabled,
         );
     }
 

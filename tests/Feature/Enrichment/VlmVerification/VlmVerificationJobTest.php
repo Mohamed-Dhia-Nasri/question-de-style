@@ -21,6 +21,7 @@ use App\Platform\Ingestion\Models\IngestionAlert;
 use App\Platform\Ingestion\Models\ProviderHealthState;
 use App\Platform\Ingestion\SourceRegistry;
 use App\Platform\Ingestion\Support\AlertType;
+use App\Platform\Ingestion\Support\CallOutcome;
 use App\Platform\Ingestion\Support\ErrorCategory;
 use App\Platform\Ingestion\Support\ProviderStatus;
 use App\Shared\Enums\KeyframeKind;
@@ -722,5 +723,86 @@ class VlmVerificationJobTest extends TestCase
             'outcome' => 'confirmed',
         ]);
         $this->assertDatabaseMissing('vlm_verification_runs', ['tenant_id' => $this->defaultTenant->id]);
+    }
+
+    // ---------------------------------------------------------------
+    // Provider telemetry (spec §5): every billed call lands in
+    // provider_calls under (SRC-google-gemini-vlm, vlm.verify) and drives
+    // the health state the breaker consult reads — without it the breaker
+    // gate above could never trip for this source.
+    // ---------------------------------------------------------------
+
+    public function test_successful_verify_records_vlm_verify_provider_telemetry(): void
+    {
+        [$item, , $product] = $this->escalatedContentItem();
+        Http::fake(['aiplatform.eu.rep.googleapis.com/*' => Http::response($this->confirmedResponse($product))]);
+        $this->bindAttributionSpy();
+
+        $this->runJob($item->id);
+
+        $this->assertDatabaseHas('provider_calls', [
+            'source' => SourceRegistry::GOOGLE_GEMINI_VLM,
+            'operation' => 'vlm.verify',
+            'correlation_id' => 'corr-vlm-test',
+            'platform_account_id' => $item->platform_account_id,
+            'outcome' => CallOutcome::Success->value,
+            'result_count' => 1,
+            'retry_count' => 0,
+        ]);
+        $this->assertDatabaseHas('provider_health_states', [
+            'source' => SourceRegistry::GOOGLE_GEMINI_VLM,
+            'status' => ProviderStatus::Healthy->value,
+            'consecutive_failures' => 0,
+        ]);
+    }
+
+    public function test_provider_failure_records_failure_telemetry_and_health(): void
+    {
+        [$item] = $this->escalatedContentItem();
+        Http::fake(['aiplatform.eu.rep.googleapis.com/*' => Http::response(['error' => 'boom'], 500)]);
+
+        try {
+            $this->runJob($item->id);
+            $this->fail('Expected the transient ProviderCallException to propagate.');
+        } catch (ProviderCallException) {
+            // Expected — the ledger semantics of this path have their own
+            // test above; telemetry is this test's only subject.
+        }
+
+        $this->assertDatabaseHas('provider_calls', [
+            'source' => SourceRegistry::GOOGLE_GEMINI_VLM,
+            'operation' => 'vlm.verify',
+            'outcome' => CallOutcome::Failure->value,
+            'error_category' => ErrorCategory::UpstreamError->value,
+            'http_status' => 500,
+            'retry_count' => 0,
+        ]);
+        $this->assertDatabaseHas('provider_health_states', [
+            'source' => SourceRegistry::GOOGLE_GEMINI_VLM,
+            'status' => ProviderStatus::Degraded->value, // failing_after threshold (3) not yet reached
+            'consecutive_failures' => 1,
+            'last_error_category' => ErrorCategory::UpstreamError->value,
+        ]);
+    }
+
+    public function test_safety_block_records_success_telemetry_with_zero_results(): void
+    {
+        [$item] = $this->escalatedContentItem(VisualMatchBand::Reject);
+        Http::fake(['aiplatform.eu.rep.googleapis.com/*' => Http::response([
+            'promptFeedback' => ['blockReason' => 'PROHIBITED_CONTENT'],
+            'candidates' => [],
+        ])]);
+        $this->bindAttributionSpy();
+
+        $this->runJob($item->id);
+
+        // The blocking call billed (HTTP 200 bills) — telemetered as a
+        // completed operation that yielded zero usable results.
+        $this->assertDatabaseHas('provider_calls', [
+            'source' => SourceRegistry::GOOGLE_GEMINI_VLM,
+            'operation' => 'vlm.verify',
+            'outcome' => CallOutcome::Success->value,
+            'result_count' => 0,
+        ]);
     }
 }

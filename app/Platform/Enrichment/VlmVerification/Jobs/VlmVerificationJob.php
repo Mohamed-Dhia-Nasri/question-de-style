@@ -18,8 +18,10 @@ use App\Platform\Enrichment\VlmVerification\Requests\VlmRequestBuilder;
 use App\Platform\Enrichment\VlmVerification\Verdicts\VerdictValidator;
 use App\Platform\Enrichment\VlmVerification\VlmDetectionWriter;
 use App\Platform\Enrichment\VlmVerification\VlmRunRecorder;
+use App\Platform\Ingestion\DTO\ProviderResponse;
 use App\Platform\Ingestion\Exceptions\ProviderCallException;
 use App\Platform\Ingestion\Jobs\Concerns\IngestionJobBehaviour;
+use App\Platform\Ingestion\Observability\ProviderCallRecorder;
 use App\Platform\Ingestion\Observability\ProviderCircuitBreaker;
 use App\Platform\Ingestion\SourceRegistry;
 use App\Shared\Enums\VisualMatchBand;
@@ -103,6 +105,7 @@ final class VlmVerificationJob implements ShouldBeUnique, ShouldQueue
         ProviderCircuitBreaker $breaker,
         AttributionService $attribution,
         TenantContext $tenants,
+        ProviderCallRecorder $telemetry,
     ): void {
         $this->attachLogContext();
 
@@ -122,7 +125,7 @@ final class VlmVerificationJob implements ShouldBeUnique, ShouldQueue
             // owner — the EnrichContentItemJob precedent.
             $tenants->runAs(
                 (int) $target->tenant_id,
-                fn () => $this->verify($target, $client, $builder, $validator, $bands, $writer, $recorder, $budget, $breaker, $attribution),
+                fn () => $this->verify($target, $client, $builder, $validator, $bands, $writer, $recorder, $budget, $breaker, $attribution, $telemetry),
             );
         } catch (Throwable $e) {
             $this->handleProviderFailure($e);
@@ -140,6 +143,7 @@ final class VlmVerificationJob implements ShouldBeUnique, ShouldQueue
         AiBudgetGuard $budget,
         ProviderCircuitBreaker $breaker,
         AttributionService $attribution,
+        ProviderCallRecorder $telemetry,
     ): void {
         $anchor = $this->latestAnchor($target);
 
@@ -242,7 +246,45 @@ final class VlmVerificationJob implements ShouldBeUnique, ShouldQueue
                 $recorder->incrementAttempts($run);
                 $budget->record(self::CAPABILITY, $tenantId, 1);
 
-                $result = $client->verify($request);
+                // Spec §5 telemetry: every provider call lands in
+                // provider_calls under (SRC-google-gemini-vlm, vlm.verify)
+                // and drives the health state the breaker consult above
+                // reads — the client's frozen contract returns bare results,
+                // so the wrap lives at this seam (KeyframeEmbedder
+                // precedent). Bare autocommit writes, NEVER a transaction:
+                // the billing ledger's crash-safety rule owns this loop.
+                $call = $telemetry->start(
+                    SourceRegistry::GOOGLE_GEMINI_VLM,
+                    'vlm.verify',
+                    $correlationId,
+                    null,
+                    $target->platform_account_id === null ? null : (int) $target->platform_account_id,
+                    $run->attempts - 1,
+                );
+                $callStartedAt = microtime(true);
+
+                try {
+                    $result = $client->verify($request);
+                } catch (ProviderCallException $e) {
+                    // Failure telemetry (health/breaker/dashboards) lands
+                    // BEFORE the outer catch decides resume-vs-unconsume.
+                    $telemetry->recordFailure($call, $e);
+
+                    throw $e;
+                }
+
+                // recordOperation needs a ProviderResponse; the decoded JSON
+                // is the only payload visible at this seam, so its serialized
+                // size is the honest response-size proxy (no fabricated
+                // fields). Blocked/empty responses completed but yielded
+                // zero usable results.
+                $telemetry->recordOperation($call, new ProviderResponse(
+                    items: [],
+                    httpStatus: 200,
+                    responseBytes: strlen((string) json_encode($result->json)),
+                    requestMs: (microtime(true) - $callStartedAt) * 1000,
+                    sourceVersion: $modelVersion,
+                ), $result->json === [] ? 0 : 1);
 
                 if ($result->blockReason !== null) {
                     // Safety blocks are PERMANENT (spec §5): no retry, no

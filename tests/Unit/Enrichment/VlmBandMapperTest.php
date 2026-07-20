@@ -123,6 +123,22 @@ class VlmBandMapperTest extends TestCase
         $this->assertSame('no-frame-reference', $result->rejectionReason);
     }
 
+    public function test_all_unstamped_frame_references_still_reach_auto(): void
+    {
+        // Carousel/thumbnail posts: every surviving keyframe is unstamped,
+        // so the verdict's citations are all null entries (validator
+        // contract). They are still VALIDATED frame references — an
+        // auto-grade confirmed-visible verdict bands AUTO, never
+        // 'no-frame-reference' REVIEW.
+        $result = $this->mapper()->map(
+            $this->set('PRODUCT_CONFIRMED', $this->verdict(1, 0.91, frames: [null])),
+            $this->request(),
+        )[0];
+
+        $this->assertSame(VlmBand::Auto, $result->band);
+        $this->assertNull($result->rejectionReason);
+    }
+
     public function test_mid_band_confidence_lands_review_without_reason(): void
     {
         $result = $this->mapper()->map(
@@ -336,7 +352,7 @@ class VlmBandMapperTest extends TestCase
         return new VlmBandMapper;
     }
 
-    /** @param list<int> $frames */
+    /** @param list<int|null> $frames */
     private function verdict(int $productId, float $confidence, bool $visible = true, bool $spoken = false,
         bool $giftingCue = false, array $frames = [2000], string $rationale = 'Seen on the vanity.'): CandidateVerdict
     {

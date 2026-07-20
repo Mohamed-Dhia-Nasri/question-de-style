@@ -96,6 +96,7 @@ final class VerdictValidator
             }
 
             $timestamps = [];
+            $unstamped = 0;
             $seenNames = [];
 
             foreach ($frameNames as $name) {
@@ -114,12 +115,27 @@ final class VerdictValidator
                 $seenNames[$name] = true;
                 $timestamp = $request->frameTimestamp($name);
 
-                if ($timestamp !== null) {
-                    $timestamps[] = $timestamp;
+                if ($timestamp === null) {
+                    // A cited sent-but-unstamped frame (carousel image,
+                    // thumbnail) is a VALID frame reference: it appends a
+                    // null entry (the vlm_candidate_verdicts.frame_timestamps
+                    // column contract) so an all-unstamped post keeps its
+                    // frame evidence — dropping it would read as
+                    // 'no-frame-reference' downstream and lock carousels
+                    // out of AUTO regardless of confidence.
+                    $unstamped++;
+
+                    continue;
                 }
+
+                $timestamps[] = $timestamp;
             }
 
+            // Stamped citations sort ascending FIRST, null entries append
+            // AFTER — the detection writer's first-5 signal slice must
+            // never trade a real timestamp for an unstamped citation.
             sort($timestamps);
+            $timestamps = array_merge($timestamps, array_fill(0, $unstamped, null));
 
             $byKey[$key] = new CandidateVerdict(
                 productKey: $key,

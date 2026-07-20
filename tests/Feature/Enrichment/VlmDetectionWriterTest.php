@@ -43,7 +43,7 @@ class VlmDetectionWriterTest extends TestCase
         return [$content, $product];
     }
 
-    /** @param list<int> $frames */
+    /** @param list<int|null> $frames */
     private function bandResult(Product $product, VlmBand $band, bool $captionEcho = false, array $frames = [1000, 5000]): VlmBandResult
     {
         return new VlmBandResult(
@@ -143,6 +143,29 @@ class VlmDetectionWriterTest extends TestCase
             'vlm-frame:t=0ms', 'vlm-frame:t=1000ms', 'vlm-frame:t=2000ms',
             'vlm-frame:t=3000ms', 'vlm-frame:t=4000ms',
         ], $frameSignals);
+    }
+
+    public function test_null_timestamp_citations_write_no_frame_signals_but_the_detection_still_lands(): void
+    {
+        // All-unstamped citations (carousel lockout fix): the null entries
+        // are valid frame references for BANDING, but the signal trail
+        // stays timestamped-only — an AUTO verdict still writes at HIGH
+        // with zero vlm-frame entries.
+        [$content, $product] = $this->wired();
+
+        $written = app(VlmDetectionWriter::class)->write(
+            $content,
+            $this->bandResult($product, VlmBand::Auto, frames: [null, null]),
+            'gemini-3.5-flash',
+        );
+
+        $this->assertSame(1, $written);
+        $detection = RecognitionDetection::query()->firstOrFail();
+        $this->assertSame(ConfidenceLevel::High, $detection->assessment->confidenceLevel);
+        $this->assertSame([], array_values(array_filter(
+            $detection->assessment->signals,
+            fn (string $signal): bool => str_starts_with($signal, 'vlm-frame:'),
+        )));
     }
 
     public function test_rerun_updates_the_same_row_and_identity_fields_seed_only_on_create(): void

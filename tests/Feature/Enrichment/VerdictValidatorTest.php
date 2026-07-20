@@ -164,7 +164,7 @@ class VerdictValidatorTest extends TestCase
         $this->assertSame('unknown-frame-name:FRAME_9', $this->validate($json)->malformedReason);
     }
 
-    public function test_unstamped_frame_references_validate_but_add_no_timestamp(): void
+    public function test_a_cited_unstamped_frame_maps_to_a_null_entry(): void
     {
         $json = $this->confirmedJson();
         $json['verdicts'][0]['frame_names'] = ['FRAME_3', 'FRAME_1'];
@@ -172,7 +172,24 @@ class VerdictValidatorTest extends TestCase
         $result = $this->validate($json);
 
         $this->assertNull($result->malformedReason);
-        $this->assertSame([1500], $result->verdicts?->verdicts[0]->frameTimestampsMs);
+        // Stamped citations sort ascending FIRST; each cited unstamped
+        // frame (carousel image, thumbnail) appends a null entry — a VALID
+        // frame reference carrying no timestamp (the
+        // vlm_candidate_verdicts.frame_timestamps column contract).
+        // Dropping it instead would leave all-unstamped posts with [] and
+        // lock carousels out of AUTO forever.
+        $this->assertSame([1500, null], $result->verdicts?->verdicts[0]->frameTimestampsMs);
+    }
+
+    public function test_all_unstamped_citations_keep_one_null_entry_each(): void
+    {
+        $json = $this->confirmedJson();
+        $json['verdicts'][0]['frame_names'] = ['FRAME_3'];
+
+        $result = $this->validate($json);
+
+        $this->assertNull($result->malformedReason);
+        $this->assertSame([null], $result->verdicts?->verdicts[0]->frameTimestampsMs);
     }
 
     public function test_duplicate_frame_references_collapse(): void

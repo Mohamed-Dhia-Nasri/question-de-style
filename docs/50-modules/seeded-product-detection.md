@@ -3,7 +3,10 @@
 > **What this document is.** A complete, implementation-level description of how QuestionDeStyle
 > decides that a creator's public post shows a **product the brand gifted (seeded)** to that creator,
 > and attributes it to the documented gift. Read this to understand the detection end-to-end before
-> changing any of it. Design rationale/history lives in
+> changing any of it. This document is the **decision logic** (what the classifier does); for how the
+> pipeline **runs in production** — the schedules, what triggers a post's analysis, the async jobs,
+> and where to watch it — see [`seeded-detection-operations.md`](seeded-detection-operations.md).
+> Design rationale/history lives in
 > `docs/superpowers/specs/2026-07-18-seeded-detection-tier0-free-signals-design.md`; the doctrine ADR
 > is `ADR-0008`; tenancy is `ADR-0019`/`ADR-0020`.
 

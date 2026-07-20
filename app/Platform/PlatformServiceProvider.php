@@ -28,6 +28,7 @@ use App\Platform\Enrichment\VisualMatch\Console\VisualMatchBackfillCommand;
 use App\Platform\Enrichment\VisualMatch\Contracts\EmbeddingProvider;
 use App\Platform\Enrichment\VisualMatch\Http\GeminiMultimodalEmbeddingProvider;
 use App\Platform\Enrichment\VisualMatch\Http\GoogleServiceAccountTokenProvider;
+use App\Platform\Enrichment\VlmVerification\Console\VlmVerifySweepCommand;
 use App\Platform\Enrichment\VlmVerification\Http\GeminiVlmClient;
 use App\Platform\Export\Console\PruneExpiredExportsCommand;
 use App\Platform\Export\Contracts\ExportService;
@@ -155,6 +156,7 @@ class PlatformServiceProvider extends ServiceProvider
                 AiReadOnlyCommand::class,
                 AiQuotaCommand::class,
                 VisualMatchBackfillCommand::class,
+                VlmVerifySweepCommand::class,
             ]);
         }
     }

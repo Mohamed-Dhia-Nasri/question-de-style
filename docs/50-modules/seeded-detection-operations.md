@@ -81,6 +81,23 @@ persists a batch — one `EnrichContentItemJob` per **newly created** post. Stor
 `ArchiveStoryMediaJob → dispatchForStory` after the story media is archived (ADR-0023). Only
 **new** posts trigger analysis; a later metric-only refresh of an old post does **not** re-run it.
 
+**What "saved" means (the `external_id` upsert).** "Saved" is a specific idempotent upsert in
+[`ContentItemPersister::persist()`](../../app/Platform/Ingestion/Persistence/ContentItemPersister.php).
+For each pulled post it looks up an existing row by the **natural key
+`(tenant_id, platform, external_id)`** — where `external_id` is the platform's own post ID (e.g.
+the Instagram media ID), scoped explicitly to the account's tenant:
+
+- **No existing row → NEW:** a `content_items` row is `INSERT`ed (`save()`) and its id is added to
+  `createdIds` — this id is what gets queued for analysis.
+- **Row already exists → REFRESH:** the existing row is `UPDATE`d (caption, media, metrics) and
+  **not** added to `createdIds` — so a same-post metric refresh never re-triggers detection. A
+  refresh also preserves any human-overridden field, so it can't clobber a manual correction.
+
+Because `tenant_id` is part of the key, the **same external post monitored by two tenants** becomes
+**two separate rows**, each analyzed independently with its own catalog and gift records. The
+lookup is explicitly tenant-scoped (it does not rely on the ambient tenant scope) — "explicit beats
+ambient in pipeline code."
+
 Two gates on the shortcut (in `PerPullEnrichmentDispatcher`): the master switch
 `qds.enrichment.enabled` must be on, and the post's `published_at` must be within
 `qds.enrichment.content_window_days` (default 30) — so a deep historical backfill can't flood the

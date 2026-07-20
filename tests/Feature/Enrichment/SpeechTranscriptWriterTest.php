@@ -10,6 +10,7 @@ use App\Platform\Ingestion\SourceRegistry;
 use App\Shared\ValueObjects\Provenance;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Tests\TestCase;
 
@@ -167,6 +168,52 @@ class SpeechTranscriptWriterTest extends TestCase
         $this->assertSame($first->id, $second->id);
         $this->assertSame(1, ContentTranscript::query()->where('provider', SourceRegistry::GOOGLE_SPEECH_TO_TEXT)->count());
         $this->assertSame('en-US', $second->fresh()->language);
+    }
+
+    public function test_apply_locks_the_transcript_row_before_merging(): void
+    {
+        // Lost-update guard: a chunk-0 sync write racing an in-flight
+        // TranscribeExtendedAudioJob must not read-merge-save unlocked —
+        // it could clobber freshly appended segments whose chunk blobs
+        // are already deleted (unrecoverable transcript loss). True
+        // concurrency is not reproducible under RefreshDatabase's single
+        // connection, so the strongest available check is asserting the
+        // reload takes the row lock (FOR UPDATE) inside the transaction.
+        $item = ContentItem::factory()->create();
+        $this->writer()->apply($item, [$this->chunk(0, 'hallo und willkommen')]);
+
+        DB::enableQueryLog();
+        $this->writer()->apply($item, [$this->chunk(1, 'zweiter teil')]);
+        $queries = array_column(DB::getQueryLog(), 'query');
+        DB::disableQueryLog();
+        DB::flushQueryLog();
+
+        $locked = array_filter(
+            $queries,
+            static fn (string $sql): bool => str_contains(mb_strtolower($sql), 'for update'),
+        );
+        $this->assertNotEmpty($locked, 'the transcript reload must take a FOR UPDATE row lock before merging');
+    }
+
+    public function test_merge_preserves_existing_segments_for_both_apply_orderings(): void
+    {
+        // Ordering A: sync chunk 0 first, extension after.
+        $a = ContentItem::factory()->create();
+        $this->writer()->apply($a, [$this->chunk(0, 'intro')]);
+        $rowA = $this->writer()->apply($a, [$this->chunk(1, 'extension eins'), $this->chunk(2, 'extension zwei')])->fresh();
+
+        $this->assertSame([0, 1, 2], array_column($rowA->segments, 'chunk'));
+        $this->assertSame('intro extension eins extension zwei', $rowA->text);
+
+        // Ordering B: the extension lands FIRST, the chunk-0 sync write
+        // arrives late — it must merge INTO the extension's segments,
+        // never clobber them.
+        $b = ContentItem::factory()->create();
+        $this->writer()->apply($b, [$this->chunk(1, 'extension eins'), $this->chunk(2, 'extension zwei')]);
+        $rowB = $this->writer()->apply($b, [$this->chunk(0, 'intro')])->fresh();
+
+        $this->assertSame([0, 1, 2], array_column($rowB->segments, 'chunk'));
+        $this->assertSame('intro extension eins extension zwei', $rowB->text);
     }
 
     public function test_apply_with_no_chunks_is_a_programming_error(): void

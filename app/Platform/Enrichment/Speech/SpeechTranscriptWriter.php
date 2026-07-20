@@ -8,6 +8,7 @@ use App\Platform\Ingestion\SourceRegistry;
 use App\Shared\ValueObjects\Provenance;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
 /**
@@ -21,7 +22,10 @@ use InvalidArgumentException;
  * The sync chunk writes the row first; TranscribeExtendedAudioJob appends
  * and re-stitches. Stories keep detections-only (spec §16). Unlike the
  * YouTube enricher (whose rows are immutable caches), a lost INSERT race
- * here MERGES into the winner — both writers are additive.
+ * here MERGES into the winner — both writers are additive. The whole
+ * read-merge-save runs in one transaction with the row locked FOR UPDATE
+ * so a racing writer serializes behind it instead of clobbering freshly
+ * appended segments whose chunk blobs are already deleted.
  */
 final class SpeechTranscriptWriter
 {
@@ -39,23 +43,32 @@ final class SpeechTranscriptWriter
             'provider' => SourceRegistry::GOOGLE_SPEECH_TO_TEXT,
         ];
 
-        $row = ContentTranscript::query()->firstOrNew($identity);
-        $this->merge($row, $chunks);
-
-        try {
-            // A SAVEPOINT (when already inside a transaction) so a collision
-            // rolls back only this insert (YouTubeTranscriptEnricher pattern).
-            ContentTranscript::query()->withSavepointIfNeeded(fn () => $row->save());
-        } catch (UniqueConstraintViolationException) {
-            // A concurrent writer won the INSERT race on the narrowed
-            // (content_item_id, provider) key: reload the winner and merge
-            // our chunks ON TOP of its segments — never clobber.
-            $row = ContentTranscript::query()->where($identity)->firstOrFail();
+        // Lost-update guard: an unlocked read-merge-save would let a
+        // chunk-0 sync write racing an in-flight extension job clobber
+        // freshly appended segments (unrecoverable — the chunk blobs are
+        // already deleted). The FOR UPDATE reload serializes writers on
+        // the row for the duration of the merge.
+        return DB::transaction(function () use ($identity, $chunks): ContentTranscript {
+            $row = ContentTranscript::query()->lockForUpdate()->firstOrNew($identity);
             $this->merge($row, $chunks);
-            $row->save();
-        }
 
-        return $row;
+            try {
+                // A SAVEPOINT so an INSERT collision poisons only this save,
+                // never the wrapping transaction (YouTubeTranscriptEnricher
+                // pattern) — the recovery re-query below depends on it.
+                ContentTranscript::query()->withSavepointIfNeeded(fn () => $row->save());
+            } catch (UniqueConstraintViolationException) {
+                // A concurrent writer won the INSERT race on the narrowed
+                // (content_item_id, provider) key: reload the winner —
+                // locked — and merge our chunks ON TOP of its segments,
+                // never clobber.
+                $row = ContentTranscript::query()->lockForUpdate()->where($identity)->firstOrFail();
+                $this->merge($row, $chunks);
+                $row->save();
+            }
+
+            return $row;
+        });
     }
 
     /** @param list<ChunkTranscript> $chunks */

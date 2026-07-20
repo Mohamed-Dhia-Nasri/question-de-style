@@ -319,4 +319,188 @@ class MonitoringPlanTest extends TestCase
             ->assertSee('Plan &amp; cost', false)
             ->assertSee(route('monitoring.plan'), false);
     }
+
+    public function test_the_per_service_sheet_prices_vlm_verification(): void
+    {
+        config([
+            'qds.enrichment.enabled' => true,
+            'qds.enrichment.sweep_batch' => 50,
+            'qds.enrichment.visual_match.enabled' => false,
+            'qds.enrichment.vlm.enabled' => false,
+            'services.google_vlm.credentials_path' => null,
+            'services.google_vlm.project_id' => null,
+        ]);
+
+        $settings = new CadenceSettings(new MonitoringPlanSetting([
+            'baseline_content_interval_hours' => 84,
+            'campaign_content_interval_hours' => 12,
+            'stories_per_day' => 0,
+            'profile_poll_interval_hours' => 168,
+            'apify_plan' => 'STARTER',
+        ]));
+
+        $roster = [
+            'ig_accounts' => 300,
+            'tt_accounts' => 150,
+            'campaign_ig' => 30,
+            'campaign_tt' => 15,
+            'story_active_ig' => 0,
+        ];
+
+        $estimator = app(IngestionCostEstimator::class);
+        $estimate = $estimator->estimate($settings, $roster);
+        $rows = collect($estimator->perService($settings, $roster, $estimate))->keyBy('service');
+
+        // Sweep-capped volume: 6,000 items × 15% escalated × $0.030 = $27.00.
+        $row = $rows['VLM verification (Gemini)'];
+        $this->assertSame(27.0, $row['monthly']);
+        $this->assertSame(0.06, $row['per_creator']); // ÷ 450 accounts
+        $this->assertStringContainsString('$0.030 per Gemini verification request', $row['unit']);
+
+        // Kill switch off → visible but dimmed, priced for the decision.
+        $this->assertFalse($row['active']);
+        $this->assertStringContainsString('VLM verification is disabled', $row['note']);
+
+        // VLM switch on but visual matching (the escalation source) off →
+        // still inactive: D requires C (spec §4 tier order).
+        config(['qds.enrichment.vlm.enabled' => true]);
+        $rows = collect($estimator->perService($settings, $roster, $estimate))->keyBy('service');
+        $this->assertFalse($rows['VLM verification (Gemini)']['active']);
+        $this->assertStringContainsString('visual product matching', $rows['VLM verification (Gemini)']['note']);
+
+        // Visual on too, credentials still missing → inactive, says why.
+        config(['qds.enrichment.visual_match.enabled' => true]);
+        $rows = collect($estimator->perService($settings, $roster, $estimate))->keyBy('service');
+        $this->assertFalse($rows['VLM verification (Gemini)']['active']);
+        $this->assertStringContainsString('credentials', $rows['VLM verification (Gemini)']['note']);
+
+        // All four conditions met → active.
+        $credentialsPath = tempnam(sys_get_temp_dir(), 'qds-test-vlm-');
+        file_put_contents($credentialsPath, '{}');
+
+        try {
+            config([
+                'services.google_vlm.credentials_path' => $credentialsPath,
+                'services.google_vlm.project_id' => 'qds-vlm-test',
+            ]);
+            $rows = collect($estimator->perService($settings, $roster, $estimate))->keyBy('service');
+            $this->assertTrue($rows['VLM verification (Gemini)']['active']);
+        } finally {
+            @unlink($credentialsPath);
+        }
+    }
+
+    public function test_the_per_service_sheet_prices_multilingual_speech_when_v2_is_on(): void
+    {
+        config([
+            'qds.enrichment.enabled' => true,
+            'qds.enrichment.sweep_batch' => 50,
+            'qds.enrichment.speech.v2_enabled' => true,
+            'qds.enrichment.speech.max_minutes' => 10,
+            'services.google_speech_v2.credentials_path' => null,
+            'services.google_speech_v2.project_id' => null,
+        ]);
+
+        $settings = new CadenceSettings(new MonitoringPlanSetting([
+            'baseline_content_interval_hours' => 84,
+            'campaign_content_interval_hours' => 12,
+            'stories_per_day' => 0,
+            'profile_poll_interval_hours' => 168,
+            'apify_plan' => 'STARTER',
+        ]));
+
+        $roster = [
+            'ig_accounts' => 300,
+            'tt_accounts' => 150,
+            'campaign_ig' => 30,
+            'campaign_tt' => 15,
+            'story_active_ig' => 0,
+        ];
+
+        $estimator = app(IngestionCostEstimator::class);
+        $estimate = $estimator->estimate($settings, $roster);
+        $rows = collect($estimator->perService($settings, $roster, $estimate))->keyBy('service');
+        $row = $rows['Spoken brand mentions'];
+
+        // 1,200 sweep-capped first-minute-floor minutes + 45 campaign
+        // accounts × 6 extension minutes = 1,470 min × $0.016 = $23.52.
+        $this->assertSame(23.52, $row['monthly']);
+        $this->assertSame(0.0523, $row['per_creator']); // ÷ 450 accounts
+        $this->assertStringContainsString('$0.016 per audio minute', $row['unit']);
+
+        // Switch on but no v2 service-account credentials → inactive; the
+        // legacy v1 API key no longer counts (Speech v2 has no API-key auth).
+        config(['services.google_speech.api_key' => 'legacy-v1-key']);
+        $rows = collect($estimator->perService($settings, $roster, $estimate))->keyBy('service');
+        $this->assertFalse($rows['Spoken brand mentions']['active']);
+        $this->assertStringContainsString('service-account credentials', $rows['Spoken brand mentions']['note']);
+
+        // Credentials readable + project set → active, and the note states
+        // the per-audio-post floor (v2 has no free tier) and the tier cap.
+        $credentialsPath = tempnam(sys_get_temp_dir(), 'qds-test-speech-v2-');
+        file_put_contents($credentialsPath, '{}');
+
+        try {
+            config([
+                'services.google_speech_v2.credentials_path' => $credentialsPath,
+                'services.google_speech_v2.project_id' => 'qds-speech-test',
+            ]);
+            $rows = collect($estimator->perService($settings, $roster, $estimate))->keyBy('service');
+            $row = $rows['Spoken brand mentions'];
+            $this->assertTrue($row['active']);
+            $this->assertStringContainsString('first minute', $row['note']);
+            $this->assertStringContainsString('10 minutes', $row['note']);
+        } finally {
+            @unlink($credentialsPath);
+        }
+    }
+
+    public function test_the_speech_row_keeps_its_v1_presentation_when_v2_is_off(): void
+    {
+        // Characterization (rollback purity, spec §9): with the v2 switch
+        // OFF the row is byte-identical to the legacy sheet even when v2
+        // credentials exist — the v1 path is what actually runs.
+        config([
+            'qds.enrichment.enabled' => true,
+            'qds.enrichment.sweep_batch' => 50,
+            'qds.enrichment.speech.v2_enabled' => false,
+            'services.google_speech.api_key' => 'test-speech-key',
+            'services.google_speech_v2.credentials_path' => storage_path('nonexistent-sa.json'),
+            'services.google_speech_v2.project_id' => 'ignored-while-off',
+        ]);
+
+        $settings = new CadenceSettings(new MonitoringPlanSetting([
+            'baseline_content_interval_hours' => 84,
+            'campaign_content_interval_hours' => 12,
+            'stories_per_day' => 0,
+            'profile_poll_interval_hours' => 168,
+            'apify_plan' => 'STARTER',
+        ]));
+
+        $roster = [
+            'ig_accounts' => 300,
+            'tt_accounts' => 150,
+            'campaign_ig' => 30,
+            'campaign_tt' => 15,
+            'story_active_ig' => 0,
+        ];
+
+        $estimator = app(IngestionCostEstimator::class);
+        $estimate = $estimator->estimate($settings, $roster);
+        $rows = collect($estimator->perService($settings, $roster, $estimate))->keyBy('service');
+        $row = $rows['Spoken brand mentions'];
+
+        $this->assertSame(28.8, $row['monthly']); // 1,200 min × $0.024 — the v1 rate
+        $this->assertStringContainsString('$0.024 per audio minute', $row['unit']);
+        $this->assertTrue($row['active']); // the v1 key gates; v2 config is ignored
+    }
+
+    public function test_the_plan_page_shows_the_vlm_row(): void
+    {
+        $this->actingAs($this->makeUser(RoleName::Admin));
+
+        $this->get('/monitoring/plan')
+            ->assertOk()
+            ->assertSee('VLM verification (Gemini)');
+    }
 }

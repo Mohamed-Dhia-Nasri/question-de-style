@@ -75,6 +75,34 @@ class IngestionCostEstimator
     private const EMBEDDED_FRAMES_PER_ITEM = 6;
 
     /**
+     * Google Speech-to-Text v2 list price (USD per audio minute, verified
+     * 2026-07-20, sub-project D spec §2b.11): $0.016/min, billed per
+     * second rounded up, per channel (QDS always sends mono FLAC).
+     * v2 has NO free tier — unlike v1's 60 free minutes per month, so
+     * the first minute of EVERY audio post is metered once v2 is on.
+     */
+    private const SPEECH_V2_PER_MINUTE = 0.016;
+
+    /**
+     * ESTIMATE: long-audio extension minutes (chunks beyond the first)
+     * per campaign/seeding account per month. Only candidate-bearing
+     * posts pay for extension (spec §9 tiering) — everyone else stops
+     * at the first-minute floor.
+     */
+    private const SPEECH_V2_EXTENSION_MINUTES_PER_CAMPAIGN_ACCOUNT_MONTH = 6.0;
+
+    /**
+     * ESTIMATE (governance, not billing truth — sub-project D spec §11):
+     * one Gemini verification request ≈ $0.030 (~10k input tokens at
+     * $1.65/M + ~2k output incl. LOW thinking at $9.90/M on the EU rep
+     * endpoint), and the visual matcher escalates roughly 15% of
+     * enriched items. Real spend shows on /monitoring/operations.
+     */
+    private const VLM_PER_REQUEST = 0.030;
+
+    private const VLM_ESCALATION_RATE = 0.15;
+
+    /**
      * Current roster composition, straight from the database.
      *
      * @return array{ig_accounts: int, tt_accounts: int, campaign_ig: int, campaign_tt: int, story_active_ig: int}
@@ -255,6 +283,32 @@ class IngestionCostEstimator
         $visualMatchOn = $enrichmentOn && $visualMatchSwitchOn && $embeddingsConfigured;
         $embeddedImages = $enrichedItems * self::EMBEDDED_FRAMES_PER_ITEM;
 
+        // Speech (sub-project D): when the v2 switch is ON the row prices
+        // the multilingual chirp_3 path — a first-minute floor for EVERY
+        // audio post (v2 has no free tier) plus tiered long-audio
+        // extension for candidate-bearing creators. Switch OFF keeps the
+        // legacy v1 presentation byte-identical (rollback purity, §9).
+        $speechV2SwitchOn = (bool) config('qds.enrichment.speech.v2_enabled');
+        $speechV2CredentialsPath = (string) config('services.google_speech_v2.credentials_path');
+        $speechV2Configured = $speechV2CredentialsPath !== ''
+            && is_readable($speechV2CredentialsPath)
+            && (string) config('services.google_speech_v2.project_id') !== '';
+        $speechV2On = $enrichmentOn && $speechV2SwitchOn && $speechV2Configured;
+        $speechV2Minutes = $videoMinutes
+            + $campaignAccounts * self::SPEECH_V2_EXTENSION_MINUTES_PER_CAMPAIGN_ACCOUNT_MONTH;
+
+        // VLM verification (sub-project D): only posts the visual matcher
+        // escalates are verified; active needs all four of enrichment +
+        // VLM switch + VLM credentials + visual matching on (the
+        // escalation source — D requires C, spec §4).
+        $vlmSwitchOn = (bool) config('qds.enrichment.vlm.enabled');
+        $vlmCredentialsPath = (string) config('services.google_vlm.credentials_path');
+        $vlmConfigured = $vlmCredentialsPath !== ''
+            && is_readable($vlmCredentialsPath)
+            && (string) config('services.google_vlm.project_id') !== '';
+        $vlmOn = $enrichmentOn && $vlmSwitchOn && $vlmConfigured && $visualMatchSwitchOn;
+        $vlmRequests = $enrichedItems * self::VLM_ESCALATION_RATE;
+
         return [
             [
                 'service' => 'Instagram posts & reels',
@@ -338,19 +392,33 @@ class IngestionCostEstimator
                     default => 'Optional deep pass — off while AI enrichment is disabled.',
                 },
             ],
-            [
-                'service' => 'Spoken brand mentions',
-                'detail' => 'Google Speech-to-Text hears brand names in video audio',
-                'unit' => '$0.024 per audio minute (first minute of each video)',
-                'monthly' => round($videoMinutes * self::SPEECH_PER_MINUTE, 2),
-                'per_creator' => $this->perAccount($videoMinutes * self::SPEECH_PER_MINUTE, $allAccounts),
-                'active' => $speechOn,
-                'note' => match (true) {
-                    $speechOn => 'Billed by Google, not Apify — not part of the total above.',
-                    $enrichmentOn => 'Off — add a Google Speech API key to switch it on. Needs ffmpeg on the server.',
-                    default => 'Off — AI enrichment is disabled.',
-                },
-            ],
+            $speechV2SwitchOn
+                ? [
+                    'service' => 'Spoken brand mentions',
+                    'detail' => 'Google Speech-to-Text v2 hears brand names in any language',
+                    'unit' => '$0.016 per audio minute (chirp_3, EU, language auto-detect)',
+                    'monthly' => round($speechV2Minutes * self::SPEECH_V2_PER_MINUTE, 2),
+                    'per_creator' => $this->perAccount($speechV2Minutes * self::SPEECH_V2_PER_MINUTE, $allAccounts),
+                    'active' => $speechV2On,
+                    'note' => match (true) {
+                        $speechV2On => 'Billed by Google, not Apify — every video with audio pays for its first minute (v2 has no free tier); longer videos from creators with an active seeding transcribe up to '.max(1, (int) config('qds.enrichment.speech.max_minutes')).' minutes.',
+                        ! $enrichmentOn => 'Off — AI enrichment is disabled.',
+                        default => 'Off — add Google Speech v2 service-account credentials to switch this on.',
+                    },
+                ]
+                : [
+                    'service' => 'Spoken brand mentions',
+                    'detail' => 'Google Speech-to-Text hears brand names in video audio',
+                    'unit' => '$0.024 per audio minute (first minute of each video)',
+                    'monthly' => round($videoMinutes * self::SPEECH_PER_MINUTE, 2),
+                    'per_creator' => $this->perAccount($videoMinutes * self::SPEECH_PER_MINUTE, $allAccounts),
+                    'active' => $speechOn,
+                    'note' => match (true) {
+                        $speechOn => 'Billed by Google, not Apify — not part of the total above.',
+                        $enrichmentOn => 'Off — add a Google Speech API key to switch it on. Needs ffmpeg on the server.',
+                        default => 'Off — AI enrichment is disabled.',
+                    },
+                ],
             [
                 'service' => 'Visual product matching (embeddings)',
                 'detail' => 'Gemini image embeddings compare video frames with product reference photos',
@@ -363,6 +431,21 @@ class IngestionCostEstimator
                     ! $enrichmentOn => 'Off — AI enrichment is disabled.',
                     ! $visualMatchSwitchOn => 'Off — visual product matching is disabled (kill switch).',
                     default => 'Off — add Google Embeddings service-account credentials to switch this on.',
+                },
+            ],
+            [
+                'service' => 'VLM verification (Gemini)',
+                'detail' => 'Gemini double-checks escalated posts against the product catalog',
+                'unit' => '$0.030 per Gemini verification request',
+                'monthly' => round($vlmRequests * self::VLM_PER_REQUEST, 2),
+                'per_creator' => $this->perAccount($vlmRequests * self::VLM_PER_REQUEST, $allAccounts),
+                'active' => $vlmOn,
+                'note' => match (true) {
+                    $vlmOn => 'Billed by Google, not Apify — only posts the visual matcher escalates are verified, at most 3 calls each.',
+                    ! $enrichmentOn => 'Off — AI enrichment is disabled.',
+                    ! $vlmSwitchOn => 'Off — VLM verification is disabled (kill switch).',
+                    ! $visualMatchSwitchOn => 'Off — needs visual product matching (its escalation source) switched on first.',
+                    default => 'Off — add Google VLM service-account credentials to switch this on.',
                 },
             ],
         ];

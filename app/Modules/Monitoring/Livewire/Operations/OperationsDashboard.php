@@ -5,6 +5,7 @@ namespace App\Modules\Monitoring\Livewire\Operations;
 use App\Modules\Monitoring\Models\MetricSnapshot;
 use App\Modules\Monitoring\Models\Story;
 use App\Modules\Monitoring\Models\VisualMatchRun;
+use App\Modules\Monitoring\Models\VlmVerificationRun;
 use App\Platform\AiBudget\Models\AiUsageCounter;
 use App\Platform\Export\Models\ExportJob;
 use App\Platform\Export\Support\ExportJobStatus;
@@ -14,6 +15,7 @@ use App\Platform\Ingestion\Observability\ProviderHealthService;
 use App\Platform\Ingestion\SourceRegistry;
 use App\Shared\Authorization\PermissionsCatalog;
 use App\Shared\Enums\VisualMatchOutcome;
+use App\Shared\Enums\VlmRunOutcome;
 use App\Shared\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\View\View;
@@ -111,6 +113,10 @@ class OperationsDashboard extends Component
         $video = (bool) config('services.google_video_intelligence.api_key');
         $embeddings = (string) config('services.google_embeddings.credentials_path') !== ''
             && (string) config('services.google_embeddings.project_id') !== '';
+        $vlm = (string) config('services.google_vlm.credentials_path') !== ''
+            && (string) config('services.google_vlm.project_id') !== '';
+        $speechV2 = (string) config('services.google_speech_v2.credentials_path') !== ''
+            && (string) config('services.google_speech_v2.project_id') !== '';
 
         $configured = [];
 
@@ -119,9 +125,12 @@ class OperationsDashboard extends Component
                 str_starts_with($source, 'SRC-apify-'), $source === SourceRegistry::CLOCKWORKS_TIKTOK_SCRAPER => $apify,
                 $source === SourceRegistry::YOUTUBE_DATA_API_V3 => $youtube,
                 $source === SourceRegistry::GOOGLE_CLOUD_VISION => $vision,
-                $source === SourceRegistry::GOOGLE_SPEECH_TO_TEXT => $speech,
+                // Speech v2 runs on service-account credentials; the v1 API
+                // key is the legacy rollback path — either marks the source.
+                $source === SourceRegistry::GOOGLE_SPEECH_TO_TEXT => $speech || $speechV2,
                 $source === SourceRegistry::GOOGLE_VIDEO_INTELLIGENCE => $video,
                 $source === SourceRegistry::GOOGLE_GEMINI_EMBEDDINGS => $embeddings,
+                $source === SourceRegistry::GOOGLE_GEMINI_VLM => $vlm,
                 default => false,
             };
         }
@@ -138,7 +147,7 @@ class OperationsDashboard extends Component
      * because naming another tenant here would break the isolation
      * contract the cross-tenant alert tests pin down.
      *
-     * @return array{capabilities: list<array<string, mixed>>, visual: array<string, mixed>|null}
+     * @return array{capabilities: list<array<string, mixed>>, visual: array<string, mixed>|null, vlm: array<string, mixed>|null}
      */
     private function aiSpendPanel(?int $tenantId): array
     {
@@ -174,7 +183,11 @@ class OperationsDashboard extends Component
             ];
         }
 
-        return ['capabilities' => $capabilities, 'visual' => $this->visualRunAggregates($tenantId)];
+        return [
+            'capabilities' => $capabilities,
+            'visual' => $this->visualRunAggregates($tenantId),
+            'vlm' => $this->vlmRunAggregates($tenantId),
+        ];
     }
 
     /**
@@ -212,6 +225,53 @@ class OperationsDashboard extends Component
             'budget_denials' => (int) $recent()->where('outcome', VisualMatchOutcome::SkippedBudget->value)->count(),
             'avg_candidates' => round((float) $recent()->avg('candidates_checked'), 1),
             'avg_processing_ms' => (int) round((float) $recent()->avg('processing_ms')),
+        ];
+    }
+
+    /**
+     * Quality/spend aggregates over the last 7 days of VLM verification
+     * runs, mirroring visualRunAggregates() — the same explicit
+     * null-tenant filter keeps a null-context render from silently
+     * becoming an all-tenant aggregate. Budget denials are read from the
+     * AI-usage counters, NOT from run outcomes: a budget-deferred
+     * verification writes no run row at all (spec §10 — the anchor stays
+     * unconsumed for the sweep). Null when there are no recent runs.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function vlmRunAggregates(?int $tenantId): ?array
+    {
+        $recent = fn () => VlmVerificationRun::query()
+            ->where('tenant_id', $tenantId ?? 0)
+            ->where('created_at', '>=', CarbonImmutable::now()->subDays(7));
+
+        $runs = (int) $recent()->count();
+
+        if ($runs === 0) {
+            return null;
+        }
+
+        // toBase() so outcome keys stay raw strings (no enum cast on pluck).
+        $outcomes = $recent()
+            ->toBase()
+            ->select('outcome', DB::raw('count(*) as total'))
+            ->groupBy('outcome')
+            ->orderBy('outcome')
+            ->pluck('total', 'outcome')
+            ->map(fn ($total): int => (int) $total)
+            ->all();
+
+        return [
+            'runs' => $runs,
+            'outcomes' => $outcomes,
+            'avg_attempts' => round((float) $recent()->avg('attempts'), 1),
+            'avg_latency_ms' => (int) round((float) $recent()->avg('latency_ms')),
+            'unverifiable' => (int) ($outcomes[VlmRunOutcome::Unverifiable->value] ?? 0),
+            'budget_denials' => (int) AiUsageCounter::query()
+                ->where('capability', 'vlm_verification')
+                ->where('tenant_id', $tenantId ?? 0)
+                ->where('usage_date', '>=', CarbonImmutable::now()->subDays(7)->toDateString())
+                ->sum('posts_skipped_budget'),
         ];
     }
 }

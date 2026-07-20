@@ -7,6 +7,7 @@ use App\Platform\Ingestion\DTO\ProviderResponse;
 use App\Platform\Ingestion\DTO\RejectedRecord;
 use App\Platform\Ingestion\Support\ErrorCategory;
 use App\Shared\Enums\RecognitionType;
+use Illuminate\Support\Str;
 
 /**
  * Normalizes raw Google AI responses into canonical RecognitionCandidates
@@ -175,6 +176,53 @@ class RecognitionNormalizer
                 responseBytes: 0,
                 requestMs: 0.0,
                 sourceVersion: 'youtube-transcript-v1',
+            ),
+            validationMs: 0.0,
+            normalizationMs: (microtime(true) - $start) * 1000,
+        );
+    }
+
+    /**
+     * One transcribed audio chunk (sub-project D, spec §9) → SPOKEN_BRAND
+     * candidate under the v2 speech path. Same lexicon gate as speechBatch,
+     * but with a DETERMINISTIC provider label — 'speech-chunk:<ordinal>:
+     * <slugged brand>' — so the detection identity is stable across
+     * re-transcription, cannot collide at 255 chars, and never carries
+     * spoken personal content into a review-visible identity field. The
+     * legacy v1 path keeps its truncated-transcript labels (rollback
+     * purity). The synthetic response describes this LOCAL normalization
+     * pass (the billed v2 recognize call is telemetered by the caller).
+     */
+    public function transcriptChunkBatch(string $transcript, int $ordinal, ?float $score): NormalizedBatch
+    {
+        $start = microtime(true);
+
+        $items = [];
+        $brand = $this->lexicon->matchInText($transcript);
+
+        if ($brand !== null) {
+            $items[] = new RecognitionCandidate(
+                type: RecognitionType::SpokenBrand,
+                detectedText: mb_substr(trim($transcript), 0, self::MAX_TEXT_LENGTH),
+                detectedBrand: $brand,
+                providerLabel: 'speech-chunk:'.$ordinal.':'.Str::slug($brand),
+                score: $score,
+                signals: [
+                    'spoken-brand-transcript-match:'.$brand,
+                    $score !== null ? sprintf('provider-confidence:%.2f', $score) : 'provider-confidence:unavailable',
+                ],
+            );
+        }
+
+        return new NormalizedBatch(
+            items: $items,
+            rejected: [],
+            response: new ProviderResponse(
+                items: [],
+                httpStatus: 200,
+                responseBytes: 0,
+                requestMs: 0.0,
+                sourceVersion: 'google-speech-to-text-v2',
             ),
             validationMs: 0.0,
             normalizationMs: (microtime(true) - $start) * 1000,

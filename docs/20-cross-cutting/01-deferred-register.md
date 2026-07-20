@@ -11,7 +11,7 @@ depends_on:
   - ADR-0007
   - docs/05-decisions/decision-log.md
   - docs/20-cross-cutting/00-data-principles.md
-last_reviewed: 2026-07-19
+last_reviewed: 2026-07-20
 ---
 
 # Deferred Register
@@ -55,7 +55,13 @@ A deferred capability is distinct from a merely unbuilt one. Per the [status lif
 | [DEF-018](#def-018) | Tenant offboarding data purge | [ADR-0029](../05-decisions/decision-log.md#adr-0029) | — |
 | [DEF-019](#def-019) | Self-serve billing-plan AI-quota purchase | [ADR-0029](../05-decisions/decision-log.md#adr-0029) | — |
 | [DEF-020](#def-020) | EU residency for the existing Vision/Speech clients | [ADR-0029](../05-decisions/decision-log.md#adr-0029) | — |
-| [DEF-021](#def-021) | Shipped-but-frameless posts invisible to sub-project D's needs_verification poll | [ADR-0029](../05-decisions/decision-log.md#adr-0029) | — |
+| [DEF-021](#def-021) | ~~Shipped-but-frameless posts invisible to sub-project D's needs_verification poll~~ — **CLOSED by [ADR-0030](../05-decisions/decision-log.md#adr-0030)** (D-side sweep discovery) | [ADR-0029](../05-decisions/decision-log.md#adr-0029) | — |
+| [DEF-022](#def-022) | GCS-staged BatchRecognize long-audio speech (dynamic batch + diarization) | [ADR-0030](../05-decisions/decision-log.md#adr-0030) | [DP-005](00-data-principles.md#dp-005) |
+| [DEF-023](#def-023) | Reference-photo-in-prompt VLM verification | [ADR-0030](../05-decisions/decision-log.md#adr-0030) | — |
+| [DEF-024](#def-024) | Story transcript persistence (polymorphic `content_transcripts` owner) | [ADR-0030](../05-decisions/decision-log.md#adr-0030) | — |
+| [DEF-025](#def-025) | Per-segment speech language code-switching | [ADR-0030](../05-decisions/decision-log.md#adr-0030) | — |
+| [DEF-026](#def-026) | Caption/transcript PII scrubber ahead of AI payloads | [ADR-0030](../05-decisions/decision-log.md#adr-0030) | — |
+| [DEF-027](#def-027) | Per-tenant HIGH-priority AI budget ceiling | [ADR-0030](../05-decisions/decision-log.md#adr-0030) | — |
 
 ---
 
@@ -259,6 +265,7 @@ A deferred capability is distinct from a merely unbuilt one. Per the [status lif
 - **What v1 does instead.** Priorities high/medium gate budget behaviour ([ADR-0029](../05-decisions/decision-log.md#adr-0029) §5); empty-candidate posts record `skipped:no-candidates`.
 - **What would be needed later.** D's verifier plus a scheduled off-peak queue honouring the same `AiBudgetGuard`.
 - **Linked decision.** [ADR-0029](../05-decisions/decision-log.md#adr-0029) (Status APPROVED).
+- **Amended 2026-07-20 ([ADR-0030](../05-decisions/decision-log.md#adr-0030)).** Sub-project D landed the queue plumbing: `VlmVerificationJob` and `TranscribeExtendedAudioJob` read env-tunable queue names (`qds.enrichment.vlm.queue` / `qds.enrichment.speech.queue`, both default `enrichment`), so a dedicated lane with its own workers is a config flip. The off-peak schedule itself (scheduled off-peak workers honouring `AiBudgetGuard`) remains deferred.
 - **UI behaviour.** Not user-facing.
 
 <a id="def-018"></a>
@@ -295,6 +302,7 @@ A deferred capability is distinct from a merely unbuilt one. Per the [status lif
 - **What v1 does instead.** The recognition clients keep their current global endpoints; the gap is recorded here and in ADR-0029's consequences.
 - **What would be needed later.** Per-service EU endpoint/location support verified against official docs, config plumbing, and a residency follow-up decision.
 - **Linked decision.** [ADR-0029](../05-decisions/decision-log.md#adr-0029) (Status APPROVED).
+- **Amended 2026-07-20 ([ADR-0030](../05-decisions/decision-log.md#adr-0030)).** The **Speech portion is resolved**: behind `qds.enrichment.speech.v2_enabled`, speech runs on Speech-to-Text v2 at `eu-speech.googleapis.com` + `locations/eu` (contractual coverage via the Google Cloud data-residency terms). Google Cloud **Vision and Video Intelligence remain on global endpoints** — this entry stays open for those two clients only.
 - **UI behaviour.** Not user-facing.
 
 <a id="def-021"></a>
@@ -307,7 +315,80 @@ A deferred capability is distinct from a merely unbuilt one. Per the [status lif
 - **What v1 does instead.** `VisualProductMatcher` records `skipped:no-frames` in its own run log (not a `visual_match_runs` row) and moves on; a shipped, seeded-eligible post with no extracted frames surfaces nowhere in the visual-match review surfaces today — it looks identical to a post that was never a candidate at all.
 - **What would be needed later.** A decision, made at sub-project D's kickoff, on which of the two designs above (placeholder run row, or widened D-side discovery) closes the gap — recorded here as the design tension D's brainstorming must resolve, not a solved problem.
 - **Linked decision.** [ADR-0029](../05-decisions/decision-log.md#adr-0029) (Status APPROVED); related to [DEF-010](#def-010) (keyframe lifecycle state), which would let a future job tell "never extractable" apart from other zero-frame cases.
+- **CLOSED 2026-07-20 by sub-project D ([ADR-0030](../05-decisions/decision-log.md#adr-0030)).** D chose the **widened D-side discovery** design: the daily `qds:vlm-verify` sweep independently discovers shipped, in-window posts whose visual outcome is missing (`trigger_reason` `unverifiable:no-run`) or skipped (`unverifiable:skipped-run`) and records an `unverifiable` row in `vlm_verification_runs` — never sent to Gemini, never treated as product absence, deduplicated by the discovery partial-unique indexes on `(owner, trigger_reason)` whose predicate restricts them to `trigger_reason IN ('unverifiable:no-run', 'unverifiable:skipped-run')` (WS-A review fix, so a real `visual_match_run_id`-backed run can never collide with them). C's append-only "a run row = a real match attempt" semantics are untouched.
 - **UI behaviour.** Not user-facing; a shipped-but-frameless post shows no visual-match evidence and no review-queue entry — indistinguishable today from "matched cleanly, found nothing."
+
+<a id="def-022"></a>
+### DEF-022
+
+**GCS-staged BatchRecognize long-audio speech.**
+
+- **What is deferred.** Routing long audio through Speech-to-Text v2 `BatchRecognize` (dynamic batching at $0.003/min, diarization, no chunk boundaries) instead of chunked inline sync `recognize`.
+- **Why it is deferred.** `BatchRecognize` accepts **only `gs://` Cloud Storage URIs** — no bytes field exists at the RPC level — so it would reverse the inline-only doctrine ([DP-005](00-data-principles.md#dp-005)) and stand up the first GCS bucket; dynamic batching is "fulfilled within 24 hours" with no SLA, incompatible with hours-scale freshness.
+- **What v1 does instead.** [ADR-0030](../05-decisions/decision-log.md#adr-0030)'s chunked path: ≤ 55 s inline FLAC chunks, chunk 0 synchronous for every audio post, extension chunks to 10 min for candidate-bearing posts only.
+- **What would be needed later.** An EU GCS bucket, a DP-005 doctrine-exception ADR, and eval evidence that chunk-boundary losses actually bite.
+- **Linked decision.** [ADR-0030](../05-decisions/decision-log.md#adr-0030) (Status APPROVED).
+- **UI behaviour.** Not user-facing.
+
+<a id="def-023"></a>
+### DEF-023
+
+**Reference-photo-in-prompt VLM verification.**
+
+- **What is deferred.** Attaching each candidate's product reference photo as an extra `inlineData` part so the VLM compares against the actual catalog photo, not only names/labels.
+- **Why it is deferred.** +560 tokens per photo at MEDIUM resolution with unproven precision lift; [ADR-0030](../05-decisions/decision-log.md#adr-0030) ships the seam instead (spec §17): `VlmRequestBuilder` needs no schema change — a `sourceVersion: 'vlm-verification-v2'` bump plus a config flag.
+- **What v1 does instead.** The prompt carries the textual candidate catalog (labels, brands, aliases, C's similarity context) plus the post's frames.
+- **What would be needed later.** The config flag, the sourceVersion bump, and an eval A/B showing the lift pays for the tokens.
+- **Linked decision.** [ADR-0030](../05-decisions/decision-log.md#adr-0030) (Status APPROVED).
+- **UI behaviour.** Not user-facing.
+
+<a id="def-024"></a>
+### DEF-024
+
+**Story transcript persistence.**
+
+- **What is deferred.** `content_transcripts` rows for stories — the table is content-item-keyed; a polymorphic owner (the keyframes pattern) would be a schema change.
+- **Why it is deferred.** A documented v1 limitation of [ADR-0030](../05-decisions/decision-log.md#adr-0030) (spec §9): the v2 speech path persists transcripts for content items only.
+- **What v1 does instead.** Story audio (v2 path) still mines `SPOKEN_BRAND` detections; only the stitched transcript row is missing for stories.
+- **What would be needed later.** A polymorphic-owner migration on `content_transcripts` plus writer support.
+- **Linked decision.** [ADR-0030](../05-decisions/decision-log.md#adr-0030) (Status APPROVED).
+- **UI behaviour.** A story transcript surface would render **"unavailable"** per the rule above; story SPOKEN_BRAND detections are unaffected.
+
+<a id="def-025"></a>
+### DEF-025
+
+**Per-segment speech language code-switching.**
+
+- **What is deferred.** Per-segment language codes within one audio (true code-switching) rather than one dominant language per chunk.
+- **Why it is deferred.** `chirp_3` with `language_codes: ["auto"]` documents **dominant-language-only** detection; per-segment switching is undocumented (a recorded watch item in the D spec §18).
+- **What v1 does instead.** Each chunk's detected language is preserved in the transcript `segments`; the transcript row's `language` is the dominant language by billed seconds.
+- **What would be needed later.** Documented provider support (or explicit restricted per-chunk language lists) — the segment-level persistence is already in place.
+- **Linked decision.** [ADR-0030](../05-decisions/decision-log.md#adr-0030) (Status APPROVED).
+- **UI behaviour.** Not user-facing; segment languages are visible in the stored transcript data.
+
+<a id="def-026"></a>
+### DEF-026
+
+**Caption/transcript PII scrubber ahead of AI payloads.**
+
+- **What is deferred.** Scrubbing/redacting PII from captions and transcripts so a payload the `AiPayloadGuard` would reject can still be sent safely.
+- **Why it is deferred.** The approved posture is **fail-closed skip** ([ADR-0030](../05-decisions/decision-log.md#adr-0030), spec Q6): the guard rejects, the run records `skipped_payload_guard`, and no redacted derivative is invented. A scrubber is only worth building if telemetry shows the guard biting on real content.
+- **What v1 does instead.** `AiPayloadGuard::assertSafe` runs on the textual request view before any bytes or tokens move; a trip is a terminal, explainable skip.
+- **What would be needed later.** A deterministic scrubber, a guard re-check on the scrubbed text, and an ADR authorizing redacted-content submission.
+- **UI behaviour.** Not user-facing; skipped posts simply carry no VLM evidence (unavailable ≠ absent).
+- **Linked decision.** [ADR-0030](../05-decisions/decision-log.md#adr-0030) (Status APPROVED).
+
+<a id="def-027"></a>
+### DEF-027
+
+**Per-tenant HIGH-priority AI budget ceiling.**
+
+- **What is deferred.** A per-tenant cap on HIGH-priority AI spend, so one tenant's HIGH-priority storm (a big ACTIVE campaign) cannot exhaust the global soft pool and deny every other tenant's MEDIUM work.
+- **Why it is deferred.** C's inherited priority semantics, accepted with eyes open in [ADR-0030](../05-decisions/decision-log.md#adr-0030) (spec §11): HIGH bypasses tenant soft caps and stops only at global hard caps / read-only / breaker.
+- **What v1 does instead.** The 50/80/95/100 % global threshold alerts surface the storm; `qds:ai-quota` can clamp the offender; `qds:ai-read-only` is the brake.
+- **What would be needed later.** A per-tenant high-priority dimension in `AiBudgetGuard` (config + counters + guard check).
+- **Linked decision.** [ADR-0030](../05-decisions/decision-log.md#adr-0030) (Status APPROVED).
+- **UI behaviour.** Not user-facing in v1; quota state is visible to staff on the operations dashboard.
 
 ## Dependency map
 
@@ -335,6 +416,12 @@ flowchart LR
   ADR0029 --> DEF019["DEF-019\nBilling quota purchase"]
   ADR0029 --> DEF020["DEF-020\nVision/Speech EU residency"]
   ADR0029 --> DEF021["DEF-021\nFrameless posts invisible to D"]
+  ADR0030["ADR-0030"] --> DEF022["DEF-022\nGCS batch speech"]
+  ADR0030 --> DEF023["DEF-023\nReference photos in prompt"]
+  ADR0030 --> DEF024["DEF-024\nStory transcripts"]
+  ADR0030 --> DEF025["DEF-025\nPer-segment code-switching"]
+  ADR0030 --> DEF026["DEF-026\nCaption PII scrubber"]
+  ADR0030 --> DEF027["DEF-027\nPer-tenant HIGH ceiling"]
   DEF009 --> DEF012
   DEF010 --> DEF012
   DEF010 --> DEF021

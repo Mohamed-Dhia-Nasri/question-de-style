@@ -58,11 +58,12 @@ class EnvelopeTest extends TestCase
 
     public function test_source_registry_contains_exactly_the_canonical_sources(): void
     {
-        // 13 external providers (ADR-0001, frozen + ADR-0028/ADR-0029
-        // amendments) + the internal manual-entry marker (ADR-0015) —
-        // nothing else.
-        $this->assertCount(14, SourceRegistry::all());
+        // 14 external providers (ADR-0001, frozen + ADR-0028/ADR-0029/
+        // ADR-0030 amendments) + the internal manual-entry marker
+        // (ADR-0015) — nothing else.
+        $this->assertCount(15, SourceRegistry::all());
         $this->assertTrue(SourceRegistry::isRegistered('SRC-clockworks-tiktok-scraper'));
+        $this->assertTrue(SourceRegistry::isRegistered('SRC-google-gemini-vlm'));
         $this->assertTrue(SourceRegistry::isRegistered('SRC-agency-manual-entry'));
         $this->assertFalse(SourceRegistry::isRegistered('SRC-modash'));
     }

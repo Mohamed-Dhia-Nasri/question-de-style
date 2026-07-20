@@ -148,6 +148,43 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Google Gemini VLM verification (SRC-google-gemini-vlm — ADR-0030)
+    |--------------------------------------------------------------------------
+    | Sub-project D catalog-grounded verification (gemini-3.5-flash on the
+    | EU jurisdictional multi-region — ML processing stays within EU member
+    | states; the global endpoint carries NO residency guarantee and is
+    | rejected). Bearer-token auth ONLY, via the generalized
+    | service-account token provider; credentials come ONLY from
+    | environment-managed secrets and MAY reuse the embeddings key file.
+    */
+    'google_vlm' => [
+        'credentials_path' => env('GOOGLE_VLM_CREDENTIALS'),      // service-account JSON key file (may equal GOOGLE_EMBEDDINGS_CREDENTIALS)
+        'project_id' => env('GOOGLE_VLM_PROJECT'),
+        'location' => env('GOOGLE_VLM_LOCATION', 'eu'),           // EU multi-region (spec §5); 'global' is rejected — no residency guarantee
+        'base_url' => env('GOOGLE_VLM_BASE_URL'),                 // default derived: https://aiplatform.eu.rep.googleapis.com/v1
+        'timeout' => (int) env('GOOGLE_VLM_TIMEOUT_SECONDS', 60), // VLM calls are slower than embeddings
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Google Speech-to-Text v2 (SRC-google-speech-to-text — ADR-0030)
+    |--------------------------------------------------------------------------
+    | Sub-project D multilingual speech (chirp_3, language auto-detect, EU
+    | multi-region endpoint). v2 documents service-account auth ONLY (no
+    | API keys) — Bearer tokens via the generalized token provider. The v1
+    | 'google_speech' block above stays UNTOUCHED: it is the rollback path
+    | while qds.enrichment.speech.v2_enabled is off.
+    */
+    'google_speech_v2' => [
+        'credentials_path' => env('GOOGLE_SPEECH_V2_CREDENTIALS'), // service-account JSON key file
+        'project_id' => env('GOOGLE_SPEECH_V2_PROJECT'),
+        'location' => env('GOOGLE_SPEECH_V2_LOCATION', 'eu'),      // EU multi-region (spec §9)
+        'base_url' => env('GOOGLE_SPEECH_V2_BASE_URL'),            // default derived: https://eu-speech.googleapis.com/v2
+        'timeout' => (int) env('GOOGLE_SPEECH_V2_TIMEOUT_SECONDS', 60),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Stripe (ADR-0021 — SaaS billing processor, NOT a data provider)
     |--------------------------------------------------------------------------
     | Outside the frozen SRC-* data-provider set (ADR-0001): Stripe processes

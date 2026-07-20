@@ -179,6 +179,34 @@
         @else
             <p class="mt-3 text-theme-xs text-gray-400">No visual-match runs in the last 7 days.</p>
         @endif
+
+        @if ($aiSpend['vlm'] !== null)
+            <h4 class="mt-4 text-sm font-semibold text-gray-700 dark:text-gray-200">VLM verification (7 d)</h4>
+            <div class="mt-2 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <div class="rounded-lg border border-gray-100 px-3 py-2 dark:border-gray-800">
+                    <p class="text-theme-xs text-gray-500 dark:text-gray-400">Runs / outcomes</p>
+                    <p class="mt-1 text-sm font-semibold text-gray-800 dark:text-white/90">{{ number_format($aiSpend['vlm']['runs']) }}</p>
+                    <p class="text-theme-xs text-gray-400">@foreach ($aiSpend['vlm']['outcomes'] as $outcome => $count){{ $loop->first ? '' : ' · ' }}{{ $outcome }}: {{ number_format($count) }}@endforeach</p>
+                </div>
+                <div class="rounded-lg border border-gray-100 px-3 py-2 dark:border-gray-800">
+                    <p class="text-theme-xs text-gray-500 dark:text-gray-400">Avg attempts / post</p>
+                    <p class="mt-1 text-sm font-semibold text-gray-800 dark:text-white/90">{{ $aiSpend['vlm']['avg_attempts'] }}</p>
+                    <p class="text-theme-xs text-gray-400">billed Gemini calls</p>
+                </div>
+                <div class="rounded-lg border border-gray-100 px-3 py-2 dark:border-gray-800">
+                    <p class="text-theme-xs text-gray-500 dark:text-gray-400">Avg latency</p>
+                    <p class="mt-1 text-sm font-semibold text-gray-800 dark:text-white/90">{{ number_format($aiSpend['vlm']['avg_latency_ms']) }} ms</p>
+                    <p class="text-theme-xs text-gray-400">wall-clock across attempts</p>
+                </div>
+                <div class="rounded-lg border border-gray-100 px-3 py-2 dark:border-gray-800">
+                    <p class="text-theme-xs text-gray-500 dark:text-gray-400">Budget denials / unverifiable (7 d)</p>
+                    <p class="mt-1 text-sm font-semibold text-gray-800 dark:text-white/90">{{ number_format($aiSpend['vlm']['budget_denials']) }} / {{ number_format($aiSpend['vlm']['unverifiable']) }}</p>
+                    <p class="text-theme-xs text-gray-400">denials write no run row — counted from the budget counters</p>
+                </div>
+            </div>
+        @else
+            <p class="mt-3 text-theme-xs text-gray-400">No VLM verification runs in the last 7 days.</p>
+        @endif
     </div>
 
     {{-- Provider configuration + health (sanitized; staff-only screen) --}}

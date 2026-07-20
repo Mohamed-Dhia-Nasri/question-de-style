@@ -64,6 +64,83 @@ class AiBudgetGuardTest extends TestCase
         $this->assertSame(2000000, config('qds.ai_budget.capabilities.embedding.global_monthly_hard_units'));
     }
 
+    public function test_shipped_vlm_verification_defaults_match_the_spec(): void
+    {
+        $this->assertSame(30000, config('qds.ai_budget.capabilities.vlm_verification.price_micro_usd_per_unit'));
+        $this->assertSame(3, config('qds.ai_budget.capabilities.vlm_verification.per_post_units'));
+        $this->assertSame(150, config('qds.ai_budget.capabilities.vlm_verification.tenant_daily_units'));
+        $this->assertSame(3000, config('qds.ai_budget.capabilities.vlm_verification.tenant_monthly_units'));
+        $this->assertSame(1500, config('qds.ai_budget.capabilities.vlm_verification.global_daily_units'));
+        $this->assertSame(3000, config('qds.ai_budget.capabilities.vlm_verification.global_daily_hard_units'));
+        $this->assertSame(30000, config('qds.ai_budget.capabilities.vlm_verification.global_monthly_units'));
+        $this->assertSame(60000, config('qds.ai_budget.capabilities.vlm_verification.global_monthly_hard_units'));
+    }
+
+    public function test_shipped_speech_transcription_defaults_match_the_spec(): void
+    {
+        $this->assertSame(16000, config('qds.ai_budget.capabilities.speech_transcription.price_micro_usd_per_unit'));
+        $this->assertSame(10, config('qds.ai_budget.capabilities.speech_transcription.per_post_units'));
+        $this->assertSame(300, config('qds.ai_budget.capabilities.speech_transcription.tenant_daily_units'));
+        $this->assertSame(6000, config('qds.ai_budget.capabilities.speech_transcription.tenant_monthly_units'));
+        $this->assertSame(3000, config('qds.ai_budget.capabilities.speech_transcription.global_daily_units'));
+        $this->assertSame(6000, config('qds.ai_budget.capabilities.speech_transcription.global_daily_hard_units'));
+        $this->assertSame(60000, config('qds.ai_budget.capabilities.speech_transcription.global_monthly_units'));
+        $this->assertSame(120000, config('qds.ai_budget.capabilities.speech_transcription.global_monthly_hard_units'));
+    }
+
+    public function test_vlm_verification_is_a_registered_capability_with_a_binding_per_post_ceiling(): void
+    {
+        // SHIPPED config on purpose (no configureBudget() override) —
+        // before sub-project D this denied 'unknown-capability'.
+        $guard = app(AiBudgetGuard::class);
+        $tenantId = $this->defaultTenant->id;
+
+        $this->assertTrue($guard->allows('vlm_verification', $tenantId, 1, Priority::Medium)->allowed);
+
+        // The §11 per-post ceiling (3 = 1 call + <=2 validator retries)
+        // binds for Medium because Task 13's job passes the CUMULATIVE
+        // billed-attempt count as units — a flat allows(1) never would.
+        $this->assertTrue($guard->allows('vlm_verification', $tenantId, 3, Priority::Medium)->allowed);
+
+        $decision = $guard->allows('vlm_verification', $tenantId, 4, Priority::Medium);
+        $this->assertFalse($decision->allowed);
+        $this->assertSame('per-post-exceeded', $decision->reason);
+
+        // High bypasses every soft cap (C's semantics, inherited verbatim).
+        $this->assertTrue($guard->allows('vlm_verification', $tenantId, 4, Priority::High)->allowed);
+    }
+
+    public function test_speech_transcription_is_a_registered_capability_with_a_binding_per_post_ceiling(): void
+    {
+        $guard = app(AiBudgetGuard::class);
+        $tenantId = $this->defaultTenant->id;
+
+        // per_post_units 10 = qds.enrichment.speech.max_minutes (1 unit
+        // per ~1-minute audio chunk).
+        $this->assertTrue($guard->allows('speech_transcription', $tenantId, 10, Priority::Medium)->allowed);
+
+        $decision = $guard->allows('speech_transcription', $tenantId, 11, Priority::Medium);
+        $this->assertFalse($decision->allowed);
+        $this->assertSame('per-post-exceeded', $decision->reason);
+    }
+
+    public function test_record_prices_the_d_capabilities_at_their_spec_constants(): void
+    {
+        $guard = app(AiBudgetGuard::class);
+        $tenantId = $this->defaultTenant->id;
+
+        $guard->record('vlm_verification', $tenantId, 2, postsProcessed: 1);
+        $guard->record('speech_transcription', $tenantId, 3, postsProcessed: 1);
+
+        $vlm = AiUsageCounter::query()->where('capability', 'vlm_verification')->firstOrFail();
+        $this->assertSame(2, $vlm->units);
+        $this->assertSame(2 * 30000, $vlm->estimated_cost_micro_usd); // $0.030/request governance estimate
+
+        $speech = AiUsageCounter::query()->where('capability', 'speech_transcription')->firstOrFail();
+        $this->assertSame(3, $speech->units);
+        $this->assertSame(3 * 16000, $speech->estimated_cost_micro_usd); // $0.016/min (verified 2026-07-20)
+    }
+
     public function test_counter_and_quota_rows_persist_with_their_unique_keys(): void
     {
         $tenantId = $this->defaultTenant->id;

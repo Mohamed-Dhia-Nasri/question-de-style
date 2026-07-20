@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Enrichment;
 
+use App\Modules\CRM\Models\Brand;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Tests\TestCase;
@@ -134,6 +135,103 @@ class EvalDetectionCommandTest extends TestCase
             ->expectsOutputToContain('product recall')
             ->expectsOutputToContain('band distribution')
             ->expectsOutputToContain('recall')
+            ->assertExitCode(0);
+    }
+
+    public function test_vlm_cases_score_through_the_real_validator_and_band_mapper(): void
+    {
+        $path = base_path('tests/Fixtures/eval/vlm-tiny.json');
+        File::ensureDirectoryExists(dirname($path));
+        File::put($path, json_encode([
+            [
+                'platform' => 'INSTAGRAM', 'caption' => '', 'mentions' => [], 'is_seeded' => false,
+                'vlm' => [
+                    'candidates' => [['product' => 'Test Widget', 'brand' => 'Test Labs', 'category' => 'TECH']],
+                    'frames' => [['name' => 'FRAME_1', 't_ms' => 1000], ['name' => 'FRAME_2', 't_ms' => 3000]],
+                    'verdict_fixture' => [
+                        'outcome' => 'PRODUCT_CONFIRMED',
+                        'verdicts' => [[
+                            'product_key' => 'P1', 'visible' => true, 'spoken' => false,
+                            'gifting_cue' => false, 'confidence' => 0.91,
+                            'frame_names' => ['FRAME_1'], 'rationale' => 'clearly on screen',
+                        ]],
+                    ],
+                    'expected' => ['product' => 'Test Widget', 'band' => 'auto'],
+                    'look_alike' => false,
+                ],
+            ],
+            [
+                'platform' => 'TIKTOK', 'caption' => '', 'mentions' => [], 'is_seeded' => false,
+                'vlm' => [
+                    'candidates' => [
+                        ['product' => 'Test Widget', 'brand' => 'Test Labs', 'category' => 'TECH'],
+                        ['product' => 'Other Gadget', 'brand' => 'Other Co', 'category' => 'BEAUTY'],
+                    ],
+                    'frames' => [['name' => 'FRAME_1', 't_ms' => 1000]],
+                    'verdict_fixture' => [
+                        'outcome' => 'PRODUCT_CONFIRMED',
+                        // Exact-cover violation: P2 has no verdict — the real
+                        // VerdictValidator must reject; eval must never score a product.
+                        'verdicts' => [[
+                            'product_key' => 'P1', 'visible' => true, 'spoken' => false,
+                            'gifting_cue' => false, 'confidence' => 0.88,
+                            'frame_names' => ['FRAME_1'], 'rationale' => 'covers only one candidate',
+                        ]],
+                    ],
+                    'expected' => ['product' => null, 'band' => 'none'],
+                    'look_alike' => false,
+                ],
+            ],
+        ]));
+
+        // Register in output order (see the Mockery line-claiming note above).
+        $this->artisan('qds:eval-detection', ['--fixture' => $path])
+            ->expectsOutputToContain('VLM grounding')
+            ->expectsOutputToContain('vlm product recall')
+            ->expectsOutputToContain('auto=1 none=1')     // band distribution
+            ->expectsOutputToContain('validator rejects')
+            ->expectsOutputToContain('$0.030000')          // 1 request/case × $0.030
+            ->assertExitCode(0);
+
+        File::delete($path);
+    }
+
+    public function test_speech_cases_mine_brands_through_the_lexicon_and_pick_the_dominant_language(): void
+    {
+        Brand::factory()->create(['name' => 'Velura Cosmetics', 'aliases' => []]);
+        Brand::factory()->create(['name' => 'PureGlow Skin', 'aliases' => []]);
+
+        $path = base_path('tests/Fixtures/eval/speech-tiny.json');
+        File::ensureDirectoryExists(dirname($path));
+        File::put($path, json_encode([[
+            'platform' => 'INSTAGRAM', 'caption' => '', 'mentions' => [], 'is_seeded' => false,
+            'speech' => [
+                'chunks' => [
+                    ['ordinal' => 0, 'offset_ms' => 0, 'duration_ms' => 55000, 'language' => 'de-DE',
+                        'text' => 'heute zeige ich euch das neue Velura Cosmetics Serum'],
+                    ['ordinal' => 1, 'offset_ms' => 55000, 'duration_ms' => 30000, 'language' => 'en-US',
+                        'text' => 'and a quick look at the PureGlow Skin routine'],
+                ],
+                'expected' => ['brands' => ['Velura Cosmetics', 'PureGlow Skin'], 'dominant_language' => 'de-DE'],
+            ],
+        ]]));
+
+        $this->artisan('qds:eval-detection', ['--fixture' => $path])
+            ->expectsOutputToContain('Multilingual speech')
+            ->expectsOutputToContain('2/2')                // spoken brands found
+            ->expectsOutputToContain('1/1')                // dominant language as expected
+            ->expectsOutputToContain('$0.032000')          // 2 chunks × $0.016
+            ->assertExitCode(0);
+
+        File::delete($path);
+    }
+
+    public function test_bundled_golden_set_scores_vlm_and_speech_sections(): void
+    {
+        $this->artisan('qds:eval-detection')
+            ->expectsOutputToContain('VLM grounding')
+            ->expectsOutputToContain('look-alike disambiguation')
+            ->expectsOutputToContain('Multilingual speech')
             ->assertExitCode(0);
     }
 }

@@ -55,6 +55,21 @@
             "expected": {"product": null, "band": "none"},
             "brief_appearance": false,
             "reason": "The jacket on screen does not resemble the reference photos (similarity 0.0) — clean coverage, run outcome no_match: a correct visual true negative."
+        },
+        "vlm": {
+            "candidates": [
+                {"product": "Atelier Nord Jacket", "brand": "Atelier Nord", "category": "FASHION"}
+            ],
+            "frames": [{"name": "FRAME_1", "t_ms": 2000}],
+            "verdict_fixture": {
+                "outcome": "PRODUCT_ABSENT",
+                "verdicts": [
+                    {"product_key": "P1", "visible": false, "spoken": false, "gifting_cue": false, "confidence": 0.1, "frame_names": [], "rationale": "No jacket resembling the reference product is visible in the frame."}
+                ]
+            },
+            "expected": {"product": null, "band": "none"},
+            "look_alike": false,
+            "reason": "C escalated (shipmentless REVIEW context) and the VLM confirms absence — PRODUCT_ABSENT rejects every candidate; predicted band none, no detection would be written."
         }
     },
     {
@@ -84,6 +99,21 @@
             "expected": {"product": "Hearthside Candle Set", "band": "review"},
             "brief_appearance": true,
             "reason": "One frame lands in the review band [T_review, T_auto) — the lone-hit rule holds it for humans instead of auto-linking; the brief appearance is CAUGHT, not missed."
+        },
+        "vlm": {
+            "candidates": [
+                {"product": "Hearthside Candle Set", "brand": "Hearthside Living", "category": "HOME_INTERIOR"}
+            ],
+            "frames": [{"name": "FRAME_1", "t_ms": 1000}, {"name": "FRAME_2", "t_ms": 3000}],
+            "verdict_fixture": {
+                "outcome": "PRODUCT_CONFIRMED",
+                "verdicts": [
+                    {"product_key": "P1", "visible": false, "spoken": true, "gifting_cue": true, "confidence": 0.74, "frame_names": [], "rationale": "The creator says the candle set arrived in the PR box but it is never clearly shown on screen."}
+                ]
+            },
+            "expected": {"product": "Hearthside Candle Set", "band": "review"},
+            "look_alike": false,
+            "reason": "Spoken-only claim: a visual grounding stage never auto-confirms an unseen product — capped at REVIEW (LOW detection, human queue) regardless of confidence."
         }
     },
     {
@@ -154,6 +184,106 @@
             "expected": {"product": "Nexon Labs Headset", "band": "auto"},
             "brief_appearance": false,
             "reason": "The embargoed product is visually confirmed across two distinct timestamps — AUTO."
+        },
+        "vlm": {
+            "candidates": [
+                {"product": "Nexon Labs Headset", "brand": "Nexon Labs", "category": "TECH"}
+            ],
+            "frames": [{"name": "FRAME_1", "t_ms": 1500}, {"name": "FRAME_2", "t_ms": 4500}],
+            "verdict_fixture": {
+                "outcome": "PRODUCT_CONFIRMED",
+                "verdicts": [
+                    {"product_key": "P1", "visible": true, "spoken": false, "gifting_cue": true, "confidence": 0.91, "frame_names": ["FRAME_1", "FRAME_2"], "rationale": "The embargoed headset is unboxed and clearly visible at both timestamps; the PR framing is a gifting cue."}
+                ]
+            },
+            "expected": {"product": "Nexon Labs Headset", "band": "auto"},
+            "look_alike": false,
+            "reason": "Confirmed + visible + valid frame references + confidence above the auto threshold, and the caption never names the product (no caption-echo cap) — AUTO."
+        }
+    },
+    {
+        "platform": "INSTAGRAM",
+        "caption": "morning shelfie, this little bottle has earned its spot",
+        "mentions": [],
+        "product_tags": [],
+        "is_seeded": false,
+        "brand": null,
+        "product": null,
+        "reason": "Organic shelf post with no brand text — text-level true negative; the vlm block exercises look-alike disambiguation between two visually similar serums from C's shortlist.",
+        "vlm": {
+            "candidates": [
+                {"product": "Velura Serum 01", "brand": "Velura Cosmetics", "category": "BEAUTY"},
+                {"product": "Velura Serum 02", "brand": "Velura Cosmetics", "category": "BEAUTY"}
+            ],
+            "frames": [{"name": "FRAME_1", "t_ms": 2000}, {"name": "FRAME_2", "t_ms": 5000}],
+            "verdict_fixture": {
+                "outcome": "PRODUCT_CONFIRMED",
+                "verdicts": [
+                    {"product_key": "P1", "visible": true, "spoken": false, "gifting_cue": false, "confidence": 0.89, "frame_names": ["FRAME_1", "FRAME_2"], "rationale": "The gold-cap 01 bottle is visible; the runner-up 02 has a silver cap, absent here."},
+                    {"product_key": "P2", "visible": false, "spoken": false, "gifting_cue": false, "confidence": 0.24, "frame_names": [], "rationale": "The silver-cap 02 variant does not appear in any frame."}
+                ]
+            },
+            "expected": {"product": "Velura Serum 01", "band": "auto"},
+            "look_alike": true
+        }
+    },
+    {
+        "platform": "TIKTOK",
+        "caption": "asmr unboxing, guess what is inside",
+        "mentions": [],
+        "product_tags": [],
+        "is_seeded": false,
+        "brand": null,
+        "product": null,
+        "reason": "Text-level true negative; the vlm verdict fixture violates the exact-cover contract (one of two candidates has no verdict) — the validator must reject it and eval must count the reject, never score a product.",
+        "vlm": {
+            "candidates": [
+                {"product": "CorePulse Resistance Kit", "brand": "CorePulse", "category": "FITNESS"},
+                {"product": "Verdana Foods Snack Box", "brand": "Verdana Foods", "category": "FOOD_BEVERAGE"}
+            ],
+            "frames": [{"name": "FRAME_1", "t_ms": 1000}],
+            "verdict_fixture": {
+                "outcome": "PRODUCT_CONFIRMED",
+                "verdicts": [
+                    {"product_key": "P1", "visible": true, "spoken": false, "gifting_cue": false, "confidence": 0.88, "frame_names": ["FRAME_1"], "rationale": "Deliberately malformed fixture: P2 is missing, an exact-cover violation."}
+                ]
+            },
+            "expected": {"product": null, "band": "none"},
+            "look_alike": false
+        }
+    },
+    {
+        "platform": "INSTAGRAM",
+        "caption": "new video is live, link in bio",
+        "mentions": [],
+        "product_tags": [],
+        "is_seeded": false,
+        "brand": null,
+        "product": null,
+        "reason": "Text-level true negative; the speech block carries a German-dominant chunk mix naming two brands in speech only — exactly what the v1 de-DE/60 s path could catch only partially and only in German.",
+        "speech": {
+            "chunks": [
+                {"ordinal": 0, "offset_ms": 0, "duration_ms": 55000, "language": "de-DE", "text": "heute zeige ich euch das neue Velura Cosmetics Serum und meine Abendroutine"},
+                {"ordinal": 1, "offset_ms": 55000, "duration_ms": 30000, "language": "en-US", "text": "and for my english viewers a quick look at the PureGlow Skin routine"}
+            ],
+            "expected": {"brands": ["Velura Cosmetics", "PureGlow Skin"], "dominant_language": "de-DE"}
+        }
+    },
+    {
+        "platform": "TIKTOK",
+        "caption": "grwm du soir",
+        "mentions": [],
+        "product_tags": [],
+        "is_seeded": false,
+        "brand": null,
+        "product": null,
+        "reason": "French spoken-brand case crossing a chunk boundary: the brand is only ever said out loud, mid-video — invisible to the legacy de-DE/60 s path; dominant language must stitch to fr-FR.",
+        "speech": {
+            "chunks": [
+                {"ordinal": 0, "offset_ms": 0, "duration_ms": 55000, "language": "fr-FR", "text": "ce soir je vous montre le coffret Atelier Nord qu'on m'a offert"},
+                {"ordinal": 1, "offset_ms": 55000, "duration_ms": 55000, "language": "fr-FR", "text": "franchement la qualite Atelier Nord est superbe"}
+            ],
+            "expected": {"brands": ["Atelier Nord"], "dominant_language": "fr-FR"}
         }
     }
 ]

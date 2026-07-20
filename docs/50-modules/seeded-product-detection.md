@@ -41,7 +41,7 @@ Ingestion (per tenant, per monitored creator)
    │  writes ContentItem / Story with caption, media URLs, and the free structured signals
    ▼
 EnrichmentPipeline  (App\Platform\Enrichment\EnrichmentPipeline)
-   hashtags → transcript → recognition → keyframes → VISUAL MATCH → text-signals → sentiment → SEEDED ATTRIBUTION → EMV → reach
+   hashtags → transcript → recognition → keyframes → VISUAL MATCH → VLM VERIFICATION → text-signals → sentiment → SEEDED ATTRIBUTION → EMV → reach
    │            │             │                              │
    │            │             │                              └─ AttributionService: assemble evidence, classify, upsert the Mention
    │            │             └─ TextSignalRecognizer: mine caption + platform tags → RecognitionDetection rows (kill-switch gated)
@@ -49,7 +49,9 @@ EnrichmentPipeline  (App\Platform\Enrichment\EnrichmentPipeline)
    └─ HashtagEnricher: caption #tags → ContentHashtag rows matched to configured lists
    (transcript + keyframes: sub-project B, ADR-0028 — YouTube captions text and persisted ffmpeg
    frames; VISUAL MATCH: sub-project C, ADR-0029 — keyframes vs reference-photo embeddings →
-   VISUAL_PRODUCT detections, §3f; each of these stages is kill-switched)
+   VISUAL_PRODUCT detections, §3f; VLM VERIFICATION: sub-project D, ADR-0030 — a dispatch-only
+   stage that queues the async Gemini verifier for posts C flagged → VLM_PRODUCT detections, §3g;
+   each of these stages is kill-switched)
    ▼
 SeededContentLinker  (scheduled, separate)
    materialises shipment ↔ content links from the SEEDED mentions produced above
@@ -83,7 +85,15 @@ via `App\Platform\Ingestion\Normalization\SignalExtract`), fail-closed (absent �
 Writes `recognition_detections` of type `LOGO`, `IMAGE_TEXT_OCR`, `ON_SCREEN_TEXT`, `SPOKEN_BRAND`.
 Brand-level only (a logo/OCR/transcript hit is matched to a CRM brand via `BrandLexicon`; it is never
 narrowed to a product). Google Cloud Vision (image OCR + logo), Video Intelligence (on-screen text +
-logo), Speech-to-Text (de-DE). **Media recognition currently runs on Instagram media only**; see §12.
+logo), and speech: with `qds.enrichment.speech.v2_enabled` ON (sub-project D, ADR-0030),
+Speech-to-Text **v2 `chirp_3` on the EU multi-region** — language auto-detect (dominant language),
+brand/product phrase hints, chunk 0 (≤ 55 s) synchronous in-pipeline, extension chunks to 10 min
+transcribed asynchronously for candidate-bearing posts (`TranscribeExtendedAudioJob`), a persisted
+`content_transcripts` row per content item (provider `SRC-google-speech-to-text`, mutable dominant
+`language`, chunk-level segment offsets), and deterministic `speech-chunk:<ordinal>:<brand>`
+provider labels; with the switch OFF (default), the legacy v1 path (de-DE, ≤ 60 s, API key, global
+endpoint, no transcript rows) runs byte-identically. **Media recognition currently runs on
+Instagram media only**; see §12.
 
 ### 3c. Text signals (mined from the caption + structured tags, no external cost)
 `App\Platform\Enrichment\TextSignals\TextSignalRecognizer` (gated by the kill switch, §8) writes
@@ -124,6 +134,28 @@ Candidates are scoped to the creator's plausible catalog only (in-window shipmen
 roster primaries — an empty candidate set costs nothing); every run and its ranked candidate scores
 persist in `visual_match_runs` / `visual_match_candidates`, and `needs_verification` flags the
 posts sub-project D's VLM verifier should look at (ADR-0029).
+
+### 3g. VLM verification (sub-project D, `VlmVerificationJob`)
+`app/Platform/Enrichment/VlmVerification/` (gated by `qds.enrichment.vlm.enabled`, default OFF;
+requires visual matching to be ON — D verifies C, it never re-derives candidates). For posts whose
+**latest** `visual_match_runs` row has `needs_verification = true`, a dispatch-only pipeline stage
+(plus the daily `qds:vlm-verify` sweep) queues an async job that sends the stored keyframes (via
+C's frame preparation), caption/transcript excerpts, and C's persisted candidate shortlist to
+`gemini-3.5-flash` on the EU endpoint with an **enum-grounded per-request response schema** — the
+model can only answer about the shortlisted products (closed set, exact cover). Verdicts persist in
+`vlm_verification_runs` / `vlm_candidate_verdicts`, and banded results write
+`recognition_detections` of type:
+
+- `VLM_PRODUCT` — the confirmed product (brand + product + `product_id`,
+  `provider_label = 'vlm-product:<productId>'`), at HIGH for the AUTO band (confirmed + visible +
+  valid frame reference + confidence ≥ the auto threshold + runner-up margin, and not
+  caption-echoed) or LOW for the REVIEW band (spoken-only / unseen / borderline / margin-ambiguous
+  — routes to human review; the §9 evidence gate withholds `product_id` until a human approves).
+
+INCONCLUSIVE is first-class and never means "product absent"; safety blocks, payload-guard trips,
+and pruned-frames record explainable skip outcomes; shipped posts whose visual outcome is missing
+or skipped get an `unverifiable` run row from the sweep (the DEF-021 closure) — "we could not
+look" is recorded as a fact. A VLM failure never fails or blocks an enrichment run (fail-closed).
 
 ---
 
@@ -283,7 +315,7 @@ reproduces the old behaviour. All of this is in `AttributionService::buildEviden
 | Table | Detection-relevant columns |
 |---|---|
 | `content_items` | `caption`, `media_urls`, `mentioned_handles`, `product_tags`, `collaborators`, `branded_content_label` |
-| `recognition_detections` | `recognition_type` (LOGO / IMAGE_TEXT_OCR / ON_SCREEN_TEXT / SPOKEN_BRAND / CAPTION_TEXT / MENTION / PRODUCT_TAG / VISUAL_PRODUCT — DB CHECK constraint), `detected_brand`, `detected_product`, `product_id`, `provider_label` (immutable per-match key), `assessment`, `provenance` |
+| `recognition_detections` | `recognition_type` (LOGO / IMAGE_TEXT_OCR / ON_SCREEN_TEXT / SPOKEN_BRAND / CAPTION_TEXT / MENTION / PRODUCT_TAG / VISUAL_PRODUCT / VLM_PRODUCT — DB CHECK constraint), `detected_brand`, `detected_product`, `product_id`, `provider_label` (immutable per-match key), `assessment`, `provenance` |
 | `mentions` | `mention_type`, `classification` (confidence envelope + signals), `campaign_id` |
 | `content_hashtags` | `normalized`, `matches`, `is_ambiguous`, `resolved_*` |
 | `brands` | `name`, `aliases`, `social_handles` |
@@ -305,8 +337,11 @@ caption become distinct rows.
 - `qds.enrichment.text_signals.gifting_cues` — DE/EN/FR cue phrase lists.
 - `qds.enrichment.text_signals.short_brand_allowlist` — short brands allowed to match despite the ≥3-char noise guard (e.g. `dm`).
 - `qds.enrichment.visual_match.enabled` — the visual product-matching kill switch (sub-project C, ADR-0029, default off); `qds.enrichment.visual_match.*` carries model version, frame budget, photo cap, and the E-calibrated placeholder thresholds.
-- `qds.ai_budget.*` — capability-keyed AI spend governance (capability `embedding`); emergency stop `qds:ai-read-only`, per-tenant overrides `qds:ai-quota`.
+- `qds.enrichment.vlm.enabled` — the VLM verification kill switch (sub-project D, ADR-0030, default off); `qds.enrichment.vlm.*` carries the model pin (`gemini-3.5-flash`), frame budget (12), media resolution (MEDIUM), thinking level (LOW), caption/transcript truncation, the E-calibrated placeholder thresholds (`auto 0.85 / review 0.60 / margin 0.10`), and the stale-pending backstop. `qds:vlm-verify {--days=} {--tenant=} {--dry-run}` (scheduled daily 05:00) is the catch-up sweep, the DEF-021 `unverifiable` discovery, and the day-one backfill tool.
+- `qds.enrichment.speech.v2_enabled` — the multilingual speech switch (default off = byte-identical v1 path); `qds.enrichment.speech.*` carries the model (`chirp_3`), chunking (`chunk_seconds` 55, `max_minutes` 10), phrase hints (`boost` 10, `phrase_cap` 500), and `chunk_orphan_days` (7) for the daily `qds:prune-audio-chunks` backstop. The `speech_transcription` per-post budget ceiling binds by **ordinal projection** — `TranscribeExtendedAudioJob` charges the guard `chunk.ordinal + 1` cumulative units (chunk 0's synchronous unit included) so the ≤ 10-chunk ceiling actually bites across executions; a transient breaker/budget release re-projects on retry, so a post's worst-case billed spend is `per_post + (tries − 1)` units.
+- `qds.ai_budget.*` — capability-keyed AI spend governance (capabilities `embedding`, `vlm_verification`, `speech_transcription`); emergency stop `qds:ai-read-only`, per-tenant overrides `qds:ai-quota`.
 - The plan-page "Visual product matching (embeddings)" row's `active` flag requires all three of the master enrichment switch (`qds.enrichment.enabled`), the visual-match kill switch above, and configured Google Embeddings service-account credentials to be true.
+- The plan page adds a "VLM verification (Gemini)" row (active only when the master enrichment switch, the vlm switch, configured `google_vlm` credentials, AND visual matching are all on) and updates the "Spoken brand mentions" row to the v2 rate (active = enrichment + the v2 switch + configured `google_speech_v2` credentials). Note the v2 floor: speech has no free tier — chunk 0 meters every audio-bearing post.
 - `qds.enrichment.confidence.{high,medium}` — score→level cut-points (0.85 / 0.60, ADR-0026).
 - `qds.enrichment.attribution.shipment_window_days` — default gift-link window (60), per-tenant via Settings → Monitoring (ADR-0025).
 - `qds.matching.enabled` / `qds.matching.lookback_hours` — the `SeededContentLinker` sweep.
@@ -318,6 +353,11 @@ baseline: **recall ≈ 0.71, precision ≈ 0.83** (10-case seed set). Extend the
 baseline meaningful before gating future work on it. Cases may also carry a "visual" block (candidate
 photo vectors + frame vectors) scored through the real BandMapper — product-level precision/recall,
 false positives by category, band distribution, and estimated embedding cost per case.
+Since sub-project D, cases may also carry a "vlm" block (candidate catalog + fixture verdicts
+scored through the real `VerdictValidator` + `VlmBandMapper` — product-level precision/recall on
+the escalated subset, look-alike disambiguation, band distribution, validator rejects, token/cost
+estimates) and a "speech" block (multilingual transcript chunks mined through the real
+`BrandLexicon`, with a dominant-language check and per-chunk cost estimate).
 
 ---
 
@@ -326,22 +366,26 @@ false positives by category, band distribution, and estimated embedding cost per
 Detection today is **brand/name-based**, not visual — a product is only found when a brand *name* is
 legible/spoken/typed, a *known logo* is detected, or a *structured tag* names it. In particular:
 
-- **Visual product recognition is closed-set embeddings only** — sub-project C (ADR-0029) matches
-  keyframes against the tenant's *uploaded reference photos* for *candidate* products (in-window
-  shipments + active roster). A product with no reference photos, or shown in a form the photos do
-  not cover, is still missed; open-set **Gemini VLM** grounding is sub-project D
-  (`needs_verification` on `visual_match_runs` is its pickup).
+- **Visual product recognition is closed-set** — sub-project C (ADR-0029) matches keyframes against
+  the tenant's *uploaded reference photos*, and sub-project D (ADR-0030) verifies C's escalations
+  with a **closed-set Gemini VLM** grounded to C's candidate shortlist. A product that never enters
+  the shortlist (no reference photos, no in-window shipment, no active roster line) is still
+  invisible; open-set recognition of arbitrary products remains out of scope.
 - **YouTube video files are not downloaded** (DEF-007) — YouTube's visual signal is the single
   Data-API thumbnail keyframe; TikTok and Instagram get real multi-frame coverage since
   sub-project B (ADR-0028), and every platform's frames feed §3f.
-- **Speech is de-DE only, capped at ~60 s**; non-German or later-in-video spoken mentions are missed.
+- **Speech (v2 switch ON) is multilingual with chunked coverage to 10 min** — dominant-language
+  auto-detect only (no per-segment code-switching promise, DEF-025), extension chunks only for
+  candidate-bearing posts, and stories keep detections-only (no story transcript rows, DEF-024).
+  With the switch OFF (default), the legacy de-DE / ~60 s limits still apply.
 - **Confidence is bucketed provider scores**, not calibrated seeding probabilities.
 - **Comments** are not used for seeding evidence.
 
-Media resolution/keyframes (B, ADR-0028) and reference-photo embeddings (C, ADR-0029) have landed;
-the forward plan (VLM grounding → confidence calibration) is tracked in
+Media resolution/keyframes (B, ADR-0028), reference-photo embeddings (C, ADR-0029), and VLM
+grounding + multilingual speech (D, ADR-0030) have landed; the remaining piece (confidence
+calibration & eval expansion, E) is tracked in
 `docs/50-modules/seeded-product-detection-roadmap.md`. This document describes the **current**
-behaviour; update it when D/E land.
+behaviour; update it when E lands.
 
 ---
 
@@ -362,9 +406,11 @@ behaviour; update it when D/E land.
 | Content ↔ shipment linking | `app/Platform/Enrichment/Matching/SeededContentLinker.php` |
 | Quality scorecard | `app/Platform/Enrichment/Console/EvalDetectionCommand.php` |
 | Visual product matching (C) | `app/Platform/Enrichment/VisualMatch/` — `VisualProductMatcher`, `CandidateScope`, `FrameProductScorer`, `BandMapper`, `VisualMatchWriter`, frame/photo embedders |
+| VLM verification (D) | `app/Platform/Enrichment/VlmVerification/` — `Http/GeminiVlmClient`, `Requests/VlmRequestBuilder`, `Verdicts/VerdictValidator`, `Banding/VlmBandMapper`, `VlmDetectionWriter`, `VlmRunRecorder`, `Jobs/VlmVerificationJob`, `Console/VlmVerifySweepCommand` |
+| Multilingual speech (D) | `app/Platform/Enrichment/Http/GoogleSpeechV2Client.php`, `app/Platform/Enrichment/Recognition/AudioChunker.php`, `app/Platform/Enrichment/Speech/` — `SpeechAudioChunkWriter`, `SpeechTranscriptWriter`, `Jobs/TranscribeExtendedAudioJob`, `Console/PruneAudioChunksCommand` |
 | AI budget governance | `app/Platform/AiBudget/` — `AiBudgetGuard`, `TenantQuotaResolver`, `qds:ai-read-only`, `qds:ai-quota` |
 
 **Related docs:** `docs/50-modules/module-1-monitoring.md`, `docs/50-modules/module-3-crm-seeding.md`,
 `ADR-0008` (attribution doctrine), `ADR-0019`/`ADR-0020` (tenancy), `ADR-0023` (per-pull enrichment),
 `ADR-0025` (per-tenant settings), `ADR-0026` (confidence cut-points), `ADR-0028` (media/keyframes),
-`ADR-0029` (visual matching), and the design spec noted at the top.
+`ADR-0029` (visual matching), `ADR-0030` (VLM grounding & multilingual speech), and the design spec noted at the top.

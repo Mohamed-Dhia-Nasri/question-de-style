@@ -291,6 +291,23 @@ return [
             'inline_max_bytes' => (int) env('QDS_ENRICHMENT_INLINE_MAX_BYTES', 20_000_000),
         ],
 
+        // Multilingual speech v2 (sub-project D, spec §9/§13). Kill switch
+        // default OFF = the v1 path (de-DE, ≤60 s, API key, no transcript
+        // rows, no chunks, no budget gate) runs byte-identically. NOTE:
+        // v2 has NO free tier — chunk 0 bills for EVERY audio-bearing
+        // post the moment the switch turns on (a new always-on floor).
+        'speech' => [
+            'v2_enabled' => (bool) env('QDS_ENRICHMENT_SPEECH_V2_ENABLED', false),
+            'model' => env('QDS_ENRICHMENT_SPEECH_MODEL', 'chirp_3'),
+            'language_codes' => ['auto'], // override with an explicit list via config only
+            'queue' => env('QDS_ENRICHMENT_SPEECH_QUEUE', 'enrichment'),
+            'chunk_seconds' => (int) env('QDS_ENRICHMENT_SPEECH_CHUNK_SECONDS', 55),
+            'max_minutes' => (int) env('QDS_ENRICHMENT_SPEECH_MAX_MINUTES', 10),
+            'boost' => (float) env('QDS_ENRICHMENT_SPEECH_BOOST', 10.0),   // 0–20
+            'phrase_cap' => (int) env('QDS_ENRICHMENT_SPEECH_PHRASE_CAP', 500), // model hard limit 1000
+            'chunk_orphan_days' => (int) env('QDS_ENRICHMENT_SPEECH_CHUNK_ORPHAN_DAYS', 7),
+        ],
+
         // Keyframe sampling (sub-project B): deterministic even-interval
         // frames for ALL platforms — the artifact tiers C/D consume.
         // N = clamp(ceil(duration/interval), min, max). Persisted on the
@@ -338,6 +355,33 @@ return [
                 'enabled' => (bool) env('QDS_ENRICHMENT_VISUAL_MATCH_DEDUP', true),
                 'hamming_threshold' => (int) env('QDS_ENRICHMENT_VISUAL_MATCH_DEDUP_HAMMING', 6),     // of 64 dHash bits
             ],
+        ],
+
+        // VLM grounding verification (sub-project D, ADR-0030). Kill
+        // switch default OFF = true no-op (stage records skipped:disabled,
+        // zero dispatches, zero provider calls). model_version is stamped
+        // on every vlm_verification_runs row — changing it is a NEW
+        // model_version that re-opens consumed anchors (append-only
+        // re-verification), never a mutation. Do not reference preview
+        // models: gemini-3.5-flash is the only GA + EU-resident +
+        // structured-output pin (gemini-3.1-flash-lite is the documented
+        // cheap-tier swap). Thresholds are explicit placeholders —
+        // sub-project E calibrates them (the 0.85/0.60 alignment with
+        // ADR-0026 cut-points is deliberate).
+        'vlm' => [
+            'enabled' => (bool) env('QDS_ENRICHMENT_VLM_ENABLED', false), // kill switch — true no-op
+            'model_version' => env('QDS_ENRICHMENT_VLM_MODEL', 'gemini-3.5-flash'),
+            'queue' => env('QDS_ENRICHMENT_VLM_QUEUE', 'enrichment'),
+            'frame_budget' => (int) env('QDS_ENRICHMENT_VLM_FRAME_BUDGET', 12),
+            'media_resolution' => env('QDS_ENRICHMENT_VLM_MEDIA_RESOLUTION', 'MEDIA_RESOLUTION_MEDIUM'),
+            'thinking_level' => env('QDS_ENRICHMENT_VLM_THINKING_LEVEL', 'LOW'),
+            'max_output_tokens' => (int) env('QDS_ENRICHMENT_VLM_MAX_OUTPUT_TOKENS', 2048),
+            'caption_max_chars' => (int) env('QDS_ENRICHMENT_VLM_CAPTION_MAX_CHARS', 2000),
+            'transcript_max_chars' => (int) env('QDS_ENRICHMENT_VLM_TRANSCRIPT_MAX_CHARS', 4000),
+            'thresholds' => [ // placeholders — sub-project E calibrates
+                'auto' => 0.85, 'review' => 0.60, 'margin' => 0.10,
+            ],
+            'pending_stale_hours' => (int) env('QDS_ENRICHMENT_VLM_PENDING_STALE_HOURS', 6), // §10 crash backstop
         ],
 
         // Numeric provider score → ENUM-ConfidenceLevel bucketing
@@ -417,7 +461,39 @@ return [
                 'global_monthly_units' => (int) env('QDS_AI_EMBEDDING_GLOBAL_MONTHLY', 1000000),
                 'global_monthly_hard_units' => (int) env('QDS_AI_EMBEDDING_GLOBAL_MONTHLY_HARD', 2000000),
             ],
-            // 'vlm_verification' => reserved for sub-project D
+            // Sub-project D (ADR-0030, spec §11). Prices are ESTIMATES for
+            // governance, not billing truth (same caveat as embedding).
+            // Daily = burst, monthly = sustained: tenant 150/day x 30 >
+            // 3,000/month BY DESIGN (campaign-launch bursts; ~100/day
+            // sustained). Cross-tenant fairness is the global hard cap,
+            // accepted for v1 (per-tenant HIGH ceiling is deferred).
+            'vlm_verification' => [
+                // ~$0.030/Gemini request: ~9.5-10k input tokens (12 frames
+                // x 560 MEDIUM dominate, plus caption/transcript/catalog/
+                // schema) @ $1.65/M + up to ~2k output incl. LOW thinking
+                // @ $9.90/M — rounded UP so caps aren't loose.
+                'price_micro_usd_per_unit' => (int) env('QDS_AI_VLM_PRICE_MICRO_USD', 30000),
+                'per_post_units' => (int) env('QDS_AI_VLM_PER_POST', 3), // 1 call + <=2 validator retries
+                'tenant_daily_units' => (int) env('QDS_AI_VLM_TENANT_DAILY', 150),
+                'tenant_monthly_units' => (int) env('QDS_AI_VLM_TENANT_MONTHLY', 3000),
+                'global_daily_units' => (int) env('QDS_AI_VLM_GLOBAL_DAILY', 1500),
+                'global_daily_hard_units' => (int) env('QDS_AI_VLM_GLOBAL_DAILY_HARD', 3000),
+                'global_monthly_units' => (int) env('QDS_AI_VLM_GLOBAL_MONTHLY', 30000),
+                'global_monthly_hard_units' => (int) env('QDS_AI_VLM_GLOBAL_MONTHLY_HARD', 60000),
+            ],
+            'speech_transcription' => [
+                // $0.016/min, Speech-to-Text v2 (verified 2026-07-20; v2
+                // has NO free tier). One unit = one audio chunk (~1 min,
+                // chunk_seconds 55).
+                'price_micro_usd_per_unit' => (int) env('QDS_AI_SPEECH_PRICE_MICRO_USD', 16000),
+                'per_post_units' => (int) env('QDS_AI_SPEECH_PER_POST', 10), // = speech max_minutes
+                'tenant_daily_units' => (int) env('QDS_AI_SPEECH_TENANT_DAILY', 300),
+                'tenant_monthly_units' => (int) env('QDS_AI_SPEECH_TENANT_MONTHLY', 6000),
+                'global_daily_units' => (int) env('QDS_AI_SPEECH_GLOBAL_DAILY', 3000),
+                'global_daily_hard_units' => (int) env('QDS_AI_SPEECH_GLOBAL_DAILY_HARD', 6000),
+                'global_monthly_units' => (int) env('QDS_AI_SPEECH_GLOBAL_MONTHLY', 60000),
+                'global_monthly_hard_units' => (int) env('QDS_AI_SPEECH_GLOBAL_MONTHLY_HARD', 120000),
+            ],
         ],
     ],
 

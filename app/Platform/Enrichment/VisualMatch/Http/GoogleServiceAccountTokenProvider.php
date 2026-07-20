@@ -11,13 +11,21 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
 /**
- * OAuth bearer tokens for SRC-google-gemini-embeddings (sub-project C,
- * ADR-0029). API keys CANNOT call :embedContent (verified 2026-07-19), so
- * this is the repo's first service-account flow: sign a self-issued RS256
- * JWT from the configured JSON key file (openssl — no new dependency) and
+ * OAuth bearer tokens for Google service-account flows (built for
+ * SRC-google-gemini-embeddings in sub-project C, ADR-0029; generalized by
+ * sub-project D, spec §5). API keys CANNOT call :embedContent (verified
+ * 2026-07-19) and Speech-to-Text v2 documents no API-key auth at all, so
+ * this is the repo's service-account flow: sign a self-issued RS256 JWT
+ * from the configured JSON key file (openssl — no new dependency) and
  * exchange it at Google's token endpoint per the documented
  * server-to-server flow, then cache the bearer token until shortly before
  * expiry.
+ *
+ * Parameterized on (services.* config block, cache key, SRC-* source id)
+ * so google_embeddings (the DEFAULT — C's behaviour unchanged),
+ * google_vlm, and google_speech_v2 each get their own instance via the
+ * PlatformServiceProvider contextual bindings. The credential paths may
+ * all point at the same service-account JSON file.
  *
  * Security invariants (house rules): key material and tokens never appear
  * in URLs, logs, or exception messages; every failure surfaces as a
@@ -25,12 +33,15 @@ use Illuminate\Support\Facades\Http;
  * crash an enrichment run. This is auth plumbing, not an AI payload: the
  * JWT assertion legitimately IS a credential, so it does not pass
  * AiPayloadGuard (which keeps credentials/personal data out of AI request
- * bodies — the embedding payload itself is guarded in
- * GeminiMultimodalEmbeddingProvider).
+ * bodies — the AI payloads themselves are guarded inside each client).
  */
 final class GoogleServiceAccountTokenProvider
 {
-    /** Shared across workers; also the test seam for pre-warming a token. */
+    /**
+     * The embeddings default (shared across workers; also the test seam
+     * for pre-warming a token). Parameterized instances use their own
+     * $cacheKey instead.
+     */
     public const CACHE_KEY = 'qds:google-embeddings-token';
 
     private const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
@@ -45,18 +56,24 @@ final class GoogleServiceAccountTokenProvider
     /** Refresh this many seconds BEFORE the token would expire. */
     private const EXPIRY_SAFETY_SECONDS = 60;
 
+    public function __construct(
+        private readonly string $configKey = 'google_embeddings',
+        private readonly string $cacheKey = 'qds:google-embeddings-token',
+        private readonly string $sourceId = SourceRegistry::GOOGLE_GEMINI_EMBEDDINGS,
+    ) {}
+
     public function isConfigured(): bool
     {
-        $path = (string) config('services.google_embeddings.credentials_path');
+        $path = (string) config("services.{$this->configKey}.credentials_path");
 
         return $path !== ''
             && is_readable($path)
-            && (string) config('services.google_embeddings.project_id') !== '';
+            && (string) config("services.{$this->configKey}.project_id") !== '';
     }
 
     public function token(): string
     {
-        $cached = Cache::get(self::CACHE_KEY);
+        $cached = Cache::get($this->cacheKey);
 
         if (is_string($cached) && $cached !== '') {
             return $cached;
@@ -66,7 +83,7 @@ final class GoogleServiceAccountTokenProvider
             $this->signAssertion($this->credentials()),
         );
 
-        Cache::put(self::CACHE_KEY, $token, max(1, $expiresIn - self::EXPIRY_SAFETY_SECONDS));
+        Cache::put($this->cacheKey, $token, max(1, $expiresIn - self::EXPIRY_SAFETY_SECONDS));
 
         return $token;
     }
@@ -76,7 +93,7 @@ final class GoogleServiceAccountTokenProvider
      */
     private function credentials(): array
     {
-        $path = (string) config('services.google_embeddings.credentials_path');
+        $path = (string) config("services.{$this->configKey}.credentials_path");
         $raw = $path !== '' && is_readable($path) ? file_get_contents($path) : false;
         $decoded = is_string($raw) ? json_decode($raw, true) : null;
 
@@ -134,7 +151,7 @@ final class GoogleServiceAccountTokenProvider
         try {
             $response = Http::asForm()
                 ->acceptJson()
-                ->timeout((int) config('services.google_embeddings.timeout'))
+                ->timeout((int) config("services.{$this->configKey}.timeout"))
                 ->connectTimeout(10)
                 ->post(self::TOKEN_ENDPOINT, [
                     'grant_type' => self::GRANT_TYPE,
@@ -164,14 +181,15 @@ final class GoogleServiceAccountTokenProvider
 
     /**
      * Every failure of this flow is an Authentication-category provider
-     * failure (frozen contract) with a message safe to persist and log.
+     * failure (frozen contract) under THIS instance's source id, with a
+     * message safe to persist and log.
      */
     private function failure(string $sanitizedMessage, ?int $httpStatus = null): ProviderCallException
     {
         return new ProviderCallException(
-            SourceRegistry::GOOGLE_GEMINI_EMBEDDINGS,
+            $this->sourceId,
             ErrorCategory::Authentication,
-            SourceRegistry::GOOGLE_GEMINI_EMBEDDINGS.' '.$sanitizedMessage,
+            $this->sourceId.' '.$sanitizedMessage,
             $httpStatus,
         );
     }

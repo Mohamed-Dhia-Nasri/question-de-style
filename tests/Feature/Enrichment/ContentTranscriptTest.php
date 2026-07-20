@@ -50,13 +50,15 @@ class ContentTranscriptTest extends TestCase
         $this->assertSame(ContentTranscript::STATUS_AVAILABLE, $row->status);
     }
 
-    public function test_one_transcript_per_item_language_provider(): void
+    public function test_one_transcript_per_item_provider(): void
     {
         $item = $this->makeContentItem();
         ContentTranscript::query()->create($this->attributes($item));
 
         $this->expectException(UniqueConstraintViolationException::class);
-        ContentTranscript::query()->create($this->attributes($item));
+        // Narrowed identity (sub-project D, spec §9): a second row under
+        // the SAME provider collides even when the language differs.
+        ContentTranscript::query()->create([...$this->attributes($item), 'language' => 'en-US']);
     }
 
     public function test_unavailable_negative_cache_row_needs_no_text(): void

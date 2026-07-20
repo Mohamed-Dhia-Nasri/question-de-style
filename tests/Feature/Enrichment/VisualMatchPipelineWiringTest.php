@@ -65,7 +65,7 @@ class VisualMatchPipelineWiringTest extends TestCase
         // assembly) is the real ordering contract and is verified by
         // EnrichmentPipeline::run's source, not by this DB read.
         $this->assertEqualsCanonicalizing(
-            ['hashtags', 'transcript', 'recognition', 'keyframes', 'visual_match', 'text_signals', 'sentiment', 'attribution', 'emv', 'reach'],
+            ['hashtags', 'transcript', 'recognition', 'keyframes', 'visual_match', 'vlm_verification', 'text_signals', 'sentiment', 'attribution', 'emv', 'reach'],
             array_keys($run->stages),
         );
         $this->assertSame('skipped:disabled', $run->stages['visual_match']);

@@ -6,17 +6,28 @@ use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\ContentTranscript;
 use App\Modules\Monitoring\Models\RecognitionDetection;
 use App\Modules\Monitoring\Models\Story;
+use App\Platform\AiBudget\AiBudgetGuard;
 use App\Platform\Enrichment\Http\GoogleSpeechClient;
+use App\Platform\Enrichment\Http\GoogleSpeechV2Client;
 use App\Platform\Enrichment\Http\GoogleVideoIntelligenceClient;
 use App\Platform\Enrichment\Http\GoogleVisionClient;
+use App\Platform\Enrichment\Http\SpeechV2Result;
+use App\Platform\Enrichment\Media\LocalMediaAsset;
 use App\Platform\Enrichment\Media\MediaWorkspace;
 use App\Platform\Enrichment\Media\MediaWorkspaceFactory;
+use App\Platform\Enrichment\Speech\ChunkTranscript;
+use App\Platform\Enrichment\Speech\Jobs\TranscribeExtendedAudioJob;
+use App\Platform\Enrichment\Speech\SpeechAudioChunkWriter;
+use App\Platform\Enrichment\Speech\SpeechPhraseHints;
+use App\Platform\Enrichment\Speech\SpeechTranscriptWriter;
 use App\Platform\Enrichment\Support\ConfidenceScore;
 use App\Platform\Enrichment\Support\HumanPrecedence;
+use App\Platform\Enrichment\VisualMatch\Candidates\CandidateScope;
 use App\Platform\Ingestion\DTO\NormalizedBatch;
 use App\Platform\Ingestion\Exceptions\ProviderCallException;
 use App\Platform\Ingestion\Observability\AlertService;
 use App\Platform\Ingestion\Observability\ProviderCallRecorder;
+use App\Platform\Ingestion\Observability\ProviderCircuitBreaker;
 use App\Platform\Ingestion\Persistence\PersistenceResult;
 use App\Platform\Ingestion\SourceRegistry;
 use App\Platform\Ingestion\Support\AlertType;
@@ -50,6 +61,8 @@ use Illuminate\Database\UniqueConstraintViolationException;
  */
 class RecognitionService
 {
+    private const SPEECH_CAPABILITY = 'speech_transcription';
+
     public function __construct(
         private readonly GoogleVisionClient $vision,
         private readonly GoogleVideoIntelligenceClient $videoIntelligence,
@@ -59,6 +72,14 @@ class RecognitionService
         private readonly MediaWorkspaceFactory $workspaces,
         private readonly ProviderCallRecorder $recorder,
         private readonly AlertService $alerts,
+        private readonly GoogleSpeechV2Client $speechV2,
+        private readonly AudioChunker $chunker,
+        private readonly SpeechAudioChunkWriter $chunkWriter,
+        private readonly SpeechTranscriptWriter $transcripts,
+        private readonly SpeechPhraseHints $phrases,
+        private readonly CandidateScope $candidateScope,
+        private readonly AiBudgetGuard $budget,
+        private readonly ProviderCircuitBreaker $breaker,
     ) {}
 
     /**
@@ -90,11 +111,16 @@ class RecognitionService
         }
 
         // No configured provider → nothing to annotate; don't download
-        // media for nobody (cost control).
-        if (! $this->vision->isConfigured() && ! $this->videoIntelligence->isConfigured() && ! $this->speech->isConfigured()) {
+        // media for nobody (cost control). With the v2 switch on, the v2
+        // client is the speech provider this gate consults (spec §9).
+        $speechConfigured = $this->speechV2Enabled()
+            ? $this->speechV2->isConfigured()
+            : $this->speech->isConfigured();
+
+        if (! $this->vision->isConfigured() && ! $this->videoIntelligence->isConfigured() && ! $speechConfigured) {
             $skipped[] = 'vision:not-configured';
             $skipped[] = 'video-intelligence:not-configured';
-            $skipped[] = 'speech:not-configured';
+            $skipped[] = $this->speechV2Enabled() ? 'speech:v2-not-configured' : 'speech:not-configured';
 
             return [
                 'status' => $created + $updated > 0 ? 'completed' : 'completed-empty',
@@ -172,7 +198,17 @@ class RecognitionService
                 // transcribe. Each gate records its own skip marker so a
                 // missing detection is always explainable. Runs for ANY
                 // downloaded video size — the cap above is inline-only.
-                if (! $this->speech->isConfigured()) {
+                // The v2 sub-path (sub-project D, spec §9) is a full
+                // routing swap; OFF keeps this v1 arm byte-identical.
+                if ($this->speechV2Enabled()) {
+                    [$c, $u, $speechMarkers] = $this->speechV2Pass($target, $video, $correlationId, $retryCount);
+                    $created += $c;
+                    $updated += $u;
+
+                    foreach ($speechMarkers as $marker) {
+                        $skipped[] = $marker;
+                    }
+                } elseif (! $this->speech->isConfigured()) {
                     $skipped[] = 'speech:not-configured';
                 } elseif (! $this->audio->isAvailable()) {
                     $skipped[] = 'speech:ffmpeg-unavailable';
@@ -269,8 +305,15 @@ class RecognitionService
         return [$created, $updated];
     }
 
-    /** @return array{0: int, 1: int} */
-    private function persist(ContentItem|Story $target, string $source, NormalizedBatch $batch): array
+    /**
+     * Public since sub-project D: TranscribeExtendedAudioJob persists its
+     * per-chunk SPOKEN_BRAND batches through this exact upsert (identity,
+     * DP-004 precedence, unique-violation recovery) instead of duplicating
+     * it — the same augment-not-replace shape as the backfill precedent.
+     *
+     * @return array{0: int, 1: int}
+     */
+    public function persist(ContentItem|Story $target, string $source, NormalizedBatch $batch): array
     {
         $created = 0;
         $updated = 0;
@@ -363,5 +406,197 @@ class RecognitionService
                 sourceVersion: $sourceVersion,
             ),
         ]);
+    }
+
+    private function speechV2Enabled(): bool
+    {
+        return (bool) config('qds.enrichment.speech.v2_enabled');
+    }
+
+    /**
+     * The v2 speech sub-path (sub-project D, spec §9): chunk 0 (the first
+     * chunk_seconds of audio) is transcribed synchronously — today's
+     * latency, now multilingual (chirp_3, auto language detect, phrase
+     * hints) and budget-metered (v2 has NO free tier: every audio-bearing
+     * post bills from the first second once the switch is on). Candidate-
+     * bearing posts longer than one chunk additionally persist extension
+     * chunks for TranscribeExtendedAudioJob. Fail-closed: v2 on but
+     * unconfigured skips — it NEVER falls back to v1.
+     *
+     * @return array{0: int, 1: int, 2: list<string>} [created, updated, markers]
+     */
+    private function speechV2Pass(ContentItem|Story $target, LocalMediaAsset $video, string $correlationId, int $retryCount): array
+    {
+        if (! $this->speechV2->isConfigured()) {
+            return [0, 0, ['speech:v2-not-configured']];
+        }
+
+        if (! $this->chunker->isAvailable()) {
+            return [0, 0, ['speech:ffmpeg-unavailable']];
+        }
+
+        $audioBytes = $this->chunker->extractChunk($video->tempPath, 0);
+
+        if ($audioBytes === null) {
+            // Muted/undecodable media — unavailable, never fabricated.
+            return [0, 0, ['speech:audio-extraction-failed']];
+        }
+
+        // Consulted BEFORE spending (house convention — v2 bills per call).
+        if ($this->breaker->shouldSkip(SourceRegistry::GOOGLE_SPEECH_TO_TEXT)) {
+            return [0, 0, ['speech:provider-error']];
+        }
+
+        $tenantId = (int) $target->tenant_id;
+        $candidates = $this->candidateScope->forTarget($target);
+        $decision = $this->budget->allows(self::SPEECH_CAPABILITY, $tenantId, 1, $candidates->priority);
+
+        if (! $decision->allowed) {
+            if ($decision->reason !== 'read-only') {
+                $this->budget->record(self::SPEECH_CAPABILITY, $tenantId, 0, postsSkippedBudget: 1);
+            }
+
+            return [0, 0, ['speech:budget-exhausted']];
+        }
+
+        $phrases = $this->phrases->build($candidates);
+        $markers = [];
+        $created = 0;
+        $updated = 0;
+
+        try {
+            $v2Result = null;
+
+            [$created, $updated] = $this->annotate(
+                $target,
+                SourceRegistry::GOOGLE_SPEECH_TO_TEXT,
+                'speech.recognize',
+                $correlationId,
+                $retryCount,
+                function () use (&$v2Result, $audioBytes, $phrases): NormalizedBatch {
+                    $v2Result = $this->speechV2->recognize($audioBytes, $phrases);
+
+                    return $this->normalizer->transcriptChunkBatch(
+                        $this->joinedTranscript($v2Result),
+                        0,
+                        $this->chunkConfidence($v2Result),
+                    );
+                },
+            );
+
+            $this->budget->record(self::SPEECH_CAPABILITY, $tenantId, 1, postsProcessed: 1);
+
+            $text = $v2Result !== null ? $this->joinedTranscript($v2Result) : '';
+
+            if ($target instanceof ContentItem && $v2Result !== null && trim($text) !== '') {
+                // The sync chunk writes the transcript row FIRST; the async
+                // job appends and re-stitches. Stories: detections-only
+                // (documented v1 limitation, spec §16).
+                $this->transcripts->apply($target, [new ChunkTranscript(
+                    ordinal: 0,
+                    offsetMs: 0,
+                    durationMs: ($v2Result->billedSeconds ?? (int) config('qds.enrichment.speech.chunk_seconds')) * 1000,
+                    text: $text,
+                    languageCode: $this->chunkLanguage($v2Result),
+                    confidence: $this->chunkConfidence($v2Result),
+                )]);
+            }
+        } catch (ProviderCallException) {
+            // A transient speech failure must NOT fail the whole run (v1
+            // posture). The attempt may still have billed — counted
+            // conservatively so caps never drift loose.
+            $this->budget->record(self::SPEECH_CAPABILITY, $tenantId, 1);
+            $markers[] = 'speech:provider-error';
+        }
+
+        // Extension tier (chunks 1..N): candidate-bearing posts only —
+        // non-candidate posts never pay beyond chunk 0 (spec §9).
+        if (! $candidates->isEmpty()) {
+            $queued = $this->persistExtensionChunks($target, $video->tempPath);
+
+            if ($queued > 0) {
+                $markers[] = 'speech:chunks-queued='.$queued;
+                TranscribeExtendedAudioJob::dispatch(
+                    $target instanceof ContentItem ? 'content' : 'story',
+                    $target->id,
+                    $correlationId,
+                );
+            }
+        }
+
+        return [$created, $updated, $markers];
+    }
+
+    /**
+     * Persist extension chunks (ordinals 1..N) while the video temp file
+     * still exists. Two ceilings, both restated from config so neither can
+     * silently drift: max_minutes bounds the audio scanned, and
+     * per_post_units - 1 bounds the chunks that can EVER be billed (chunk
+     * 0 already billed synchronously) — a chunk the budget ceiling can
+     * never pay for is never persisted.
+     */
+    private function persistExtensionChunks(ContentItem|Story $target, string $videoPath): int
+    {
+        $chunkSeconds = (int) config('qds.enrichment.speech.chunk_seconds');
+        $maxSeconds = ((int) config('qds.enrichment.speech.max_minutes')) * 60;
+        $maxOrdinal = min(
+            $this->chunker->chunkCount((float) $maxSeconds) - 1,
+            (int) config('qds.ai_budget.capabilities.speech_transcription.per_post_units') - 1,
+        );
+
+        $queued = 0;
+
+        for ($ordinal = 1; $ordinal <= $maxOrdinal; $ordinal++) {
+            $bytes = $this->chunker->extractChunk($videoPath, $ordinal);
+
+            if ($bytes === null) {
+                break; // past the end of the audio (or ffmpeg failure) — stop.
+            }
+
+            $this->chunkWriter->persist($target, $ordinal, $ordinal * $chunkSeconds * 1000, $chunkSeconds * 1000, $bytes);
+            $queued++;
+        }
+
+        return $queued;
+    }
+
+    /** All result transcripts of one chunk, joined — the chunk's text. */
+    private function joinedTranscript(SpeechV2Result $result): string
+    {
+        $parts = [];
+
+        foreach ($result->results as $row) {
+            $part = trim((string) ($row['transcript'] ?? ''));
+
+            if ($part !== '') {
+                $parts[] = $part;
+            }
+        }
+
+        return implode(' ', $parts);
+    }
+
+    /** The MINIMUM non-null confidence across the chunk's results — conservative. */
+    private function chunkConfidence(SpeechV2Result $result): ?float
+    {
+        $min = null;
+
+        foreach ($result->results as $row) {
+            $confidence = $row['confidence'] ?? null;
+
+            if (is_float($confidence) || is_int($confidence)) {
+                $min = $min === null ? (float) $confidence : min($min, (float) $confidence);
+            }
+        }
+
+        return $min;
+    }
+
+    /** The first result's detected language — the chunk-level code (≤55 s chunks). */
+    private function chunkLanguage(SpeechV2Result $result): ?string
+    {
+        $code = $result->results[0]['languageCode'] ?? null;
+
+        return is_string($code) && $code !== '' ? $code : null;
     }
 }

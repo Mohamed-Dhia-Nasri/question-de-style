@@ -23,6 +23,7 @@ use App\Platform\Enrichment\Http\GoogleSpeechV2Client;
 use App\Platform\Enrichment\Matching\Console\LinkSeededContentCommand;
 use App\Platform\Enrichment\Reach\DefaultReachEstimator;
 use App\Platform\Enrichment\Sentiment\UnavailableSentimentClassifier;
+use App\Platform\Enrichment\Speech\Console\PruneAudioChunksCommand;
 use App\Platform\Enrichment\VisualMatch\Console\EmbedProductPhotosCommand;
 use App\Platform\Enrichment\VisualMatch\Console\VisualMatchBackfillCommand;
 use App\Platform\Enrichment\VisualMatch\Contracts\EmbeddingProvider;
@@ -157,6 +158,7 @@ class PlatformServiceProvider extends ServiceProvider
                 AiQuotaCommand::class,
                 VisualMatchBackfillCommand::class,
                 VlmVerifySweepCommand::class,
+                PruneAudioChunksCommand::class,
             ]);
         }
     }

@@ -72,6 +72,12 @@ Schedule::command('qds:prune-story-media')->daily();
 // per-tenant retention window are deleted — file first, then row (DP-005).
 Schedule::command('qds:prune-keyframes')->daily();
 
+// Speech chunk lifecycle (sub-project D): extension-chunk artifacts are
+// deleted by TranscribeExtendedAudioJob on success; anything older than
+// the orphan window was left behind by a failure — prune rows + blobs
+// (DP-005).
+Schedule::command('qds:prune-audio-chunks')->daily();
+
 // VLM verification sweep (sub-project D, spec §10/§14): catch-up dispatch
 // for flagged-but-unconsumed visual runs (the jobs enforce the AI budget),
 // DEF-021 'unverifiable' surfacing, and the stale-pending crash backstop.

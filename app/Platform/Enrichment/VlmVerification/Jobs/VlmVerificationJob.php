@@ -11,6 +11,7 @@ use App\Modules\Monitoring\Models\VlmVerificationRun;
 use App\Platform\AiBudget\AiBudgetGuard;
 use App\Platform\AiBudget\Priority;
 use App\Platform\Enrichment\Attribution\AttributionService;
+use App\Platform\Enrichment\Matching\SeededContentLinker;
 use App\Platform\Enrichment\Support\AiPayloadGuard;
 use App\Platform\Enrichment\VlmVerification\Banding\VlmBandMapper;
 use App\Platform\Enrichment\VlmVerification\Http\GeminiVlmClient;
@@ -345,7 +346,12 @@ final class VlmVerificationJob implements ShouldBeUnique, ShouldQueue
                 // Re-classify in the SAME tenant context so the fresh VLM
                 // evidence lands on the Mention now (backfill precedent —
                 // AttributionService::enrich's third caller).
-                $attribution->enrich($target);
+                $mentions = $attribution->enrich($target);
+
+                // A D-confirmed post becomes SEEDED here — instant-link it to
+                // its shipment now (self-gating, fire-and-forget) rather than
+                // waiting for the scheduled sweep. Already in the tenant context.
+                app(SeededContentLinker::class)->linkFreshlySeeded($target, $mentions);
 
                 return;
             }

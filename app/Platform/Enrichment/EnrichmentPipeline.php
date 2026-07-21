@@ -9,6 +9,7 @@ use App\Platform\Enrichment\Attribution\AttributionService;
 use App\Platform\Enrichment\Emv\EmvCalculator;
 use App\Platform\Enrichment\Hashtags\HashtagEnricher;
 use App\Platform\Enrichment\Keyframes\KeyframeExtractor;
+use App\Platform\Enrichment\Matching\SeededContentLinker;
 use App\Platform\Enrichment\Media\MediaWorkspaceFactory;
 use App\Platform\Enrichment\Models\EnrichmentRun;
 use App\Platform\Enrichment\Reach\ReachCalculator;
@@ -51,6 +52,7 @@ class EnrichmentPipeline
         private readonly YouTubeTranscriptEnricher $transcripts,
         private readonly VisualProductMatcher $visualMatch,
         private readonly VlmRunRecorder $vlmRuns,
+        private readonly SeededContentLinker $linker,
     ) {}
 
     public function run(ContentItem|Story $target, string $correlationId, int $retryCount = 0): EnrichmentRun
@@ -126,6 +128,13 @@ class EnrichmentPipeline
 
             $mentions = $this->attribution->enrich($target);
             $stages['attribution'] = 'completed:'.count($mentions).' mention(s)';
+
+            // Instant-link (spec: detection feels immediate): the moment this
+            // post classifies SEEDED, link it to its shipment now rather than
+            // waiting for the scheduled qds:link-seeded-content sweep. Self-
+            // gating (qds.matching.enabled) and fire-and-forget — it never
+            // fails the run, and the sweep remains the idempotent backstop.
+            $this->linker->linkFreshlySeeded($target, $mentions);
 
             if ($target instanceof ContentItem) {
                 $result = $this->emv->calculate($target);

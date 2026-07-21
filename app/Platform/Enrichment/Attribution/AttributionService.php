@@ -194,7 +194,18 @@ class AttributionService
             ->where('creator_id', $creatorId)
             ->where('active', true)
             ->get()
-            ->filter(fn (MonitoredSubject $subject): bool => collect($subject->platforms)->contains($target->platform))
+            // An empty platform list means "no filter" — the same convention
+            // roster enrollment (RosterEnrollmentService writes platforms => [])
+            // uses: attribute EVERY platform the creator posts on. `platforms`
+            // casts to an enum Collection (nullable), so wrap once with collect()
+            // and read empty/null as "match all". Reading empty as "match
+            // nothing" here silently dropped every post of every on-demand-
+            // enrolled creator from attribution.
+            ->filter(function (MonitoredSubject $subject) use ($target): bool {
+                $platforms = collect($subject->platforms);
+
+                return $platforms->isEmpty() || $platforms->contains($target->platform);
+            })
             ->values()
             ->all();
     }

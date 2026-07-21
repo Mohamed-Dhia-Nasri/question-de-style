@@ -266,6 +266,10 @@ class GoogleSpeechV2ClientTest extends TestCase
     public function test_the_payload_guard_rejects_credential_bearing_phrases_before_any_byte_leaves(): void
     {
         $this->configureClient();
+        // Phrases only reach the payload (and the guard) when adaptation is on;
+        // with the default-off gate they are simply never assembled, so nothing
+        // leaks. Enable it here to exercise the guard-rejection path itself.
+        config(['qds.enrichment.speech.adaptation_enabled' => true]);
         Http::fake();
 
         // A signed-URL-style phrase trips the DP-005 credential pattern —

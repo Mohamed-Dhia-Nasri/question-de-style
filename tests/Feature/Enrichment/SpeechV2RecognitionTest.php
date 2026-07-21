@@ -253,11 +253,13 @@ class SpeechV2RecognitionTest extends TestCase
                 return false;
             }
 
-            // Bearer-only auth, never a key in the URL; phrase hints ride
-            // along (the ASCII alias avoids JSON unicode-escape ambiguity).
+            // Bearer-only auth, never a key in the URL. Adaptation (phrase
+            // hints) is gated OFF by default — chirp_3 rejects the
+            // inline_phrase_set shape with HTTP 404 (go-live smoke 2026-07-21) —
+            // so no adaptation block rides along on the default path.
             return ($request->header('Authorization')[0] ?? null) === 'Bearer test-bearer-token'
                 && ! str_contains($request->url(), 'key=')
-                && str_contains($request->body(), 'lumiere');
+                && ! str_contains($request->body(), 'adaptation');
         });
     }
 

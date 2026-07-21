@@ -9,6 +9,7 @@ use App\Platform\AiBudget\AiBudgetGuard;
 use App\Platform\Enrichment\Attribution\AttributionService;
 use App\Platform\Enrichment\Http\GoogleSpeechV2Client;
 use App\Platform\Enrichment\Http\SpeechV2Result;
+use App\Platform\Enrichment\Matching\SeededContentLinker;
 use App\Platform\Enrichment\Recognition\RecognitionNormalizer;
 use App\Platform\Enrichment\Recognition\RecognitionService;
 use App\Platform\Enrichment\Speech\ChunkTranscript;
@@ -257,7 +258,12 @@ final class TranscribeExtendedAudioJob implements ShouldBeUnique, ShouldQueue
         if ($transcribed > 0) {
             // ONE re-classification after the last chunk — the mention
             // updates inside the same tenant context (backfill precedent).
-            $attribution->enrich($target);
+            $mentions = $attribution->enrich($target);
+
+            // A speech-confirmed post becomes SEEDED here — instant-link it now
+            // (self-gating, fire-and-forget) rather than waiting for the
+            // scheduled sweep. Already inside the target's tenant context.
+            app(SeededContentLinker::class)->linkFreshlySeeded($target, $mentions);
         }
     }
 

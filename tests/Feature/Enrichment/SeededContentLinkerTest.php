@@ -303,4 +303,104 @@ class SeededContentLinkerTest extends TestCase
             ->expectsOutputToContain('Linked 1 content item(s)')
             ->assertExitCode(0);
     }
+
+    public function test_link_for_content_links_only_the_given_post(): void
+    {
+        // This post's SEEDED mention + shipment.
+        $shipment = $this->makeShipment();
+        $this->makeSeededMention(['shipment-record:'.$shipment->id]);
+
+        // A SECOND post (different platform — one-per-platform invariant) with
+        // its own SEEDED mention + shipment. The scoped instant path must
+        // leave it entirely alone.
+        $account = PlatformAccount::factory()->forCreator($this->creator)->onPlatform(Platform::TikTok)->create();
+        $otherContent = ContentItem::factory()->create(['platform_account_id' => $account->id]);
+        $otherShipment = $this->makeShipment();
+        Mention::factory()->create([
+            'content_item_id' => $otherContent->id,
+            'mention_type' => MentionType::Seeded,
+            'classification' => new ConfidenceAssessment(
+                MentionType::Seeded->value,
+                ConfidenceLevel::High,
+                ['shipment-record:'.$otherShipment->id],
+                VerificationStatus::AiAssessed,
+            ),
+        ]);
+
+        $summary = app(SeededContentLinker::class)->linkForContent($this->content);
+
+        $this->assertSame(1, $summary->linked);
+        $this->assertDatabaseHas('shipment_resulting_content', [
+            'shipment_id' => $shipment->id,
+            'content_item_id' => $this->content->id,
+        ]);
+        $this->assertDatabaseMissing('shipment_resulting_content', ['shipment_id' => $otherShipment->id]);
+    }
+
+    public function test_link_for_content_is_idempotent(): void
+    {
+        $shipment = $this->makeShipment();
+        $this->makeSeededMention(['shipment-record:'.$shipment->id]);
+
+        $linker = app(SeededContentLinker::class);
+        $first = $linker->linkForContent($this->content);
+        $second = $linker->linkForContent($this->content);
+
+        $this->assertSame(1, $first->linked);
+        $this->assertSame(0, $second->linked);
+        $this->assertSame(1, $second->alreadyLinked);
+        $this->assertDatabaseCount('shipment_resulting_content', 1);
+    }
+
+    public function test_link_freshly_seeded_links_immediately_when_matching_is_enabled(): void
+    {
+        config(['qds.matching.enabled' => true]);
+
+        $shipment = $this->makeShipment();
+        $mention = $this->makeSeededMention(['shipment-record:'.$shipment->id]);
+
+        app(SeededContentLinker::class)->linkFreshlySeeded($this->content, [$mention]);
+
+        $this->assertDatabaseHas('shipment_resulting_content', [
+            'shipment_id' => $shipment->id,
+            'content_item_id' => $this->content->id,
+        ]);
+    }
+
+    public function test_link_freshly_seeded_no_ops_when_matching_is_disabled(): void
+    {
+        config(['qds.matching.enabled' => false]);
+
+        $shipment = $this->makeShipment();
+        $mention = $this->makeSeededMention(['shipment-record:'.$shipment->id]);
+
+        app(SeededContentLinker::class)->linkFreshlySeeded($this->content, [$mention]);
+
+        // When the instant path is off the scheduled sweep is the backstop —
+        // nothing is linked eagerly.
+        $this->assertDatabaseCount('shipment_resulting_content', 0);
+    }
+
+    public function test_link_freshly_seeded_no_ops_when_nothing_was_classified_seeded(): void
+    {
+        config(['qds.matching.enabled' => true]);
+
+        $shipment = $this->makeShipment();
+        // A non-SEEDED mention that still (spuriously) references a shipment:
+        // the guard keys off the just-written mention types, so no link.
+        $mention = Mention::factory()->create([
+            'content_item_id' => $this->content->id,
+            'mention_type' => MentionType::Unknown,
+            'classification' => new ConfidenceAssessment(
+                MentionType::Unknown->value,
+                ConfidenceLevel::Low,
+                ['shipment-record:'.$shipment->id],
+                VerificationStatus::AiAssessed,
+            ),
+        ]);
+
+        app(SeededContentLinker::class)->linkFreshlySeeded($this->content, [$mention]);
+
+        $this->assertDatabaseCount('shipment_resulting_content', 0);
+    }
 }

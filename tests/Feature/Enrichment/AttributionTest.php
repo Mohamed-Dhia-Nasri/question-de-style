@@ -267,4 +267,39 @@ class AttributionTest extends TestCase
         $this->assertSame([], $mentions);
         $this->assertSame(0, Mention::query()->count());
     }
+
+    public function test_a_subject_with_no_platform_filter_attributes_content_on_any_platform(): void
+    {
+        // On-demand roster enrollment (RosterEnrollmentService) creates the
+        // CREATOR subject with an EMPTY platform list — the "no filter, watch
+        // every account the creator has" convention. Attribution must honour
+        // it: reading empty as "match nothing" silently dropped every post of
+        // every such creator, so no mention was ever produced (the empty-
+        // platforms bug).
+        $this->subject->update(['platforms' => []]);
+
+        $this->strongRecognition();
+        $this->bindAlignedShipmentSource();
+
+        $mentions = app(AttributionService::class)->enrich($this->content);
+
+        $this->assertCount(1, $mentions);
+        $this->assertSame($this->subject->id, $mentions[0]->fresh()->monitored_subject_id);
+        $this->assertSame(MentionType::Seeded, $mentions[0]->fresh()->mention_type);
+    }
+
+    public function test_a_platform_filtered_subject_still_ignores_other_platforms(): void
+    {
+        // The empty-list "match all" must not weaken a real filter: a subject
+        // watching ONLY TikTok gets no mention for this Instagram content.
+        $this->subject->update(['platforms' => [Platform::TikTok]]);
+
+        $this->strongRecognition();
+        $this->bindAlignedShipmentSource();
+
+        $mentions = app(AttributionService::class)->enrich($this->content);
+
+        $this->assertSame([], $mentions);
+        $this->assertSame(0, Mention::query()->count());
+    }
 }

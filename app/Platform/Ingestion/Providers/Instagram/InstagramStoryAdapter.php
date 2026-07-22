@@ -14,14 +14,22 @@ use App\Shared\ValueObjects\Provenance;
 use Carbon\CarbonImmutable;
 
 /**
- * SRC-apify-instagram-story-details — the louisdeconinck actor; returns
- * live stories with no login required
- * (docs/40-integrations/00-data-source-matrix.md §3). Feeds ENT-Story
- * archival before platform expiry (REQ-M1-004, AC-M1-005). Stories are
- * never ContentItems (rule F8).
+ * SRC-apify-instagram-story-details — the louisdeconinck
+ * `instagram-story-details-scraper` actor; returns live stories with no
+ * login required (docs/40-integrations/00-data-source-matrix.md §3). Feeds
+ * ENT-Story archival before platform expiry (REQ-M1-004, AC-M1-005).
+ * Stories are never ContentItems (rule F8).
  *
- * expires_at is stored only when the provider reports it — never fabricated
- * from an assumed 24h window.
+ * The actor returns Instagram's RAW private-API media object (snake_case),
+ * so normalization reads the NESTED IG shape — not a flattened one:
+ *   - media  : video_versions[].url (video) else
+ *              image_versions2.candidates[].url (photo)
+ *   - expiry : expiring_at (unix seconds) — stored ONLY when the provider
+ *              reports it, never fabricated from an assumed 24h window
+ *   - owner  : user.username (nested; there is no top-level username)
+ *   - id     : id (the "{mediaPk}_{userPk}" string) or pk
+ * The actor exposes no story view/viewer count, so publicMetrics is empty
+ * (a zero is never fabricated).
  */
 class InstagramStoryAdapter implements BatchStoryProvider
 {
@@ -68,14 +76,47 @@ class InstagramStoryAdapter implements BatchStoryProvider
             return new StoryData(
                 platform: Platform::Instagram,
                 externalId: $externalId,
-                mediaSourceUrl: Extract::string($item, 'videoUrl', 'imageUrl', 'mediaUrl', 'displayUrl'),
-                expiresAt: Extract::timestamp($item, 'expiresAt', 'expiringAt'),
-                publicMetrics: array_filter([
-                    Extract::publicMetric('views', Extract::int($item, 'viewCount', 'viewersCount')),
-                ]),
+                mediaSourceUrl: $this->mediaUrl($item),
+                expiresAt: Extract::timestamp($item, 'expiring_at'),
+                publicMetrics: [], // the actor exposes no view/viewer count
                 provenance: new Provenance($this->source(), CarbonImmutable::now(), $response->sourceVersion),
-                ownerHandle: Extract::string($item, 'username', 'ownerUsername', 'user'),
+                ownerHandle: $this->ownerHandle($item),
             );
         });
+    }
+
+    /**
+     * The single media URL to archive once into private storage. A video
+     * story exposes video_versions[].url; a photo story
+     * image_versions2.candidates[].url (best candidate first). Prefer the
+     * video so a video story archives the clip, not its poster frame.
+     *
+     * @param  array<array-key, mixed>  $item
+     */
+    private function mediaUrl(array $item): ?string
+    {
+        $video = $item['video_versions'][0]['url'] ?? null;
+
+        if (is_string($video) && trim($video) !== '') {
+            return $video;
+        }
+
+        $image = $item['image_versions2']['candidates'][0]['url'] ?? null;
+
+        return is_string($image) && trim($image) !== '' ? $image : null;
+    }
+
+    /**
+     * The posting account's handle, nested at user.username in the raw IG
+     * object (there is no top-level username). Required to attribute items
+     * when one BATCHED run covers many roster handles (cost plan rec 3).
+     *
+     * @param  array<array-key, mixed>  $item
+     */
+    private function ownerHandle(array $item): ?string
+    {
+        $username = $item['user']['username'] ?? null;
+
+        return is_string($username) && trim($username) !== '' ? $username : null;
     }
 }

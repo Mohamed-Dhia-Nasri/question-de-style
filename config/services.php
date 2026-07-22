@@ -61,16 +61,19 @@ return [
             'instagram_post' => env('APIFY_ACTOR_INSTAGRAM_POST', 'apify~instagram-post-scraper'),
             // SRC-apify-instagram-reel-scraper
             'instagram_reel' => env('APIFY_ACTOR_INSTAGRAM_REEL', 'apify~instagram-reel-scraper'),
-            // SRC-apify-instagram-story-details.
-            // DEVIATION (needs a doc/ADR note): the data-source matrix names
-            // the `louisdeconinck` actor, but that actor is paid/rental and
-            // its `instagram-story-details` slug 404s. Per the operator's
-            // instruction the default is the `datavoyantlab` advanced stories
-            // actor instead. The SRC-* contract id (provenance) is unchanged;
-            // only the underlying Apify actor differs. NOTE: this actor is
-            // ALSO paid — a free Apify account gets an access-error item
-            // (surfaced as AUTHENTICATION by ApifyClient). Override per env.
-            'instagram_story' => env('APIFY_ACTOR_INSTAGRAM_STORY', 'datavoyantlab~advanced-instagram-stories-scraper'),
+            // SRC-apify-instagram-story-details — the `louisdeconinck` stories
+            // actor named in the data-source matrix. The correct current slug
+            // is `instagram-story-details-scraper` (the bare
+            // `instagram-story-details` slug 404s). PAID actor (pay-per-event,
+            // ~$7/1000 profiles + activation fee, "only available for paying
+            // Apify users") — a non-paying account gets an access-error item
+            // surfaced as AUTHENTICATION by ApifyClient. Input is
+            // {"usernames": [bare handles]}; output is Instagram's RAW
+            // private-API story object (snake_case: expiring_at,
+            // video_versions[].url, image_versions2.candidates[].url,
+            // media_type, user.username) — see InstagramStoryAdapter for the
+            // normalization. Override per env.
+            'instagram_story' => env('APIFY_ACTOR_INSTAGRAM_STORY', 'louisdeconinck~instagram-story-details-scraper'),
             // SRC-clockworks-tiktok-scraper — the ONLY TikTok source (ADR-0002)
             'tiktok' => env('APIFY_ACTOR_TIKTOK', 'clockworks~tiktok-scraper'),
             // SRC-apify-instagram-scraper — the general actor, used ONLY for

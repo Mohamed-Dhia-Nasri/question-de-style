@@ -7,30 +7,24 @@ use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\CRM\Models\SeedingCampaign;
 use App\Modules\Monitoring\Livewire\Dashboard\MonitoringOverview;
 use App\Modules\Monitoring\Models\ContentItem;
-use App\Modules\Monitoring\Models\Mention;
-use App\Modules\Monitoring\Models\MetricSnapshot;
 use App\Modules\Monitoring\Models\MonitoredSubject;
-use App\Modules\Monitoring\Models\Story;
-use App\Platform\Analytics\Contracts\AnalyticsService;
 use App\Shared\Enums\MetricTier;
 use App\Shared\Enums\MonitoredSubjectType;
 use App\Shared\Enums\Platform;
 use App\Shared\Enums\RoleName;
 use App\Shared\Enums\SeedingCampaignStatus;
 use App\Shared\ValueObjects\MetricValue;
-use App\Shared\ValueObjects\Provenance;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
- * The "Active seeding only" toggle (spec 2026-07-17): re-scopes roster,
- * new-content, active-stories, mentions-by-type and the creatorTotals KPI
- * to creators enrolled in ACTIVE/SHIPPING seeding. Toggle OFF must be
- * byte-identical to today; toggle ON with an empty set filters to zero,
- * never silently unfiltered.
+ * The roster-first Monitoring Overview and its "In active seeding" toggle
+ * (spec 2026-07-17): the toggle re-scopes both the headline counts and the
+ * creator grid to creators enrolled in ACTIVE/SHIPPING seeding. Toggle OFF
+ * counts the whole roster; toggle ON with an empty set filters to zero, never
+ * silently unfiltered. Platform + name search narrow the grid, and enrolled
+ * creators carry the "In active seeding" tag.
  */
 class MonitoringSeedingFilterTest extends TestCase
 {
@@ -43,94 +37,21 @@ class MonitoringSeedingFilterTest extends TestCase
         $this->actingAs($this->makeUser(RoleName::Analyst));
     }
 
-    public function test_the_platform_filter_narrows_the_kpi_totals(): void
+    private function rosterCreator(string $name): Creator
     {
-        $creator = Creator::factory()->create();
-        $ig = PlatformAccount::factory()->create(['creator_id' => $creator->id, 'platform' => Platform::Instagram]);
-        $yt = PlatformAccount::factory()->create(['creator_id' => $creator->id, 'platform' => Platform::YouTube]);
-
-        foreach ([[$ig, Platform::Instagram, 111], [$yt, Platform::YouTube, 777]] as [$account, $platform, $views]) {
-            $content = ContentItem::factory()->create(['platform_account_id' => $account->id, 'platform' => $platform]);
-            MetricSnapshot::create([
-                'content_item_id' => $content->id,
-                'captured_at' => now(),
-                'metrics' => [new MetricValue($views, MetricTier::Public, 'views')],
-                'provenance' => new Provenance('SRC-apify-instagram-profile-scraper', now()->toImmutable(), 'v1'),
-            ]);
-        }
-
-        app(AnalyticsService::class)->refreshRollups();
-
-        // No filter → both platforms (111 + 777).
-        Livewire::test(MonitoringOverview::class)
-            ->assertViewHas('creatorTotals', fn (object $t): bool => (int) $t->views_sum === 888);
-
-        // YouTube only.
-        Livewire::test(MonitoringOverview::class)
-            ->set('platform', Platform::YouTube->value)
-            ->assertViewHas('creatorTotals', fn (object $t): bool => (int) $t->views_sum === 777);
-    }
-
-    public function test_the_overview_shows_the_engagement_breakdown_by_type(): void
-    {
-        $creator = Creator::factory()->create();
-        $account = PlatformAccount::factory()->create(['creator_id' => $creator->id, 'platform' => Platform::Instagram]);
-        $content = ContentItem::factory()->create(['platform_account_id' => $account->id]);
-
-        MetricSnapshot::create([
-            'content_item_id' => $content->id,
-            'captured_at' => now(),
-            'metrics' => [
-                new MetricValue(400, MetricTier::Public, 'likes'),
-                new MetricValue(90, MetricTier::Public, 'comments'),
-                new MetricValue(30, MetricTier::Public, 'shares'),
-                new MetricValue(20, MetricTier::Public, 'saves'),
-            ],
-            'provenance' => new Provenance('SRC-apify-instagram-profile-scraper', now()->toImmutable(), 'v1'),
-        ]);
-
-        app(AnalyticsService::class)->refreshRollups();
-
-        Livewire::test(MonitoringOverview::class)
-            ->assertSee('Engagement')
-            ->assertSee('Likes')
-            ->assertSee('Comments')
-            ->assertSee('Shares')
-            ->assertSee('Saves')
-            ->assertSee('400')   // likes
-            ->assertSee('90')    // comments
-            ->assertSee('540');  // engagement total = 400+90+30+20
-    }
-
-    public function test_week_grain_overview_aligns_the_label_and_live_counts_to_whole_weeks(): void
-    {
-        // 2026-07-13 is a Monday; 2026-07-15 is the Wednesday of the same ISO
-        // week. A mention on the Monday must be reflected consistently: the
-        // week-grain KPI rollups always count it, so the range label and the
-        // live mentions-by-type count must too (M14/M25).
-        $creator = Creator::factory()->create();
-        $subject = MonitoredSubject::factory()->create([
+        $creator = Creator::factory()->create(['display_name' => $name]);
+        MonitoredSubject::factory()->create([
             'subject_type' => MonitoredSubjectType::Creator->value,
             'creator_id' => $creator->id,
             'active' => true,
         ]);
-        $account = PlatformAccount::factory()->create(['creator_id' => $creator->id, 'platform' => Platform::Instagram]);
-        $content = ContentItem::factory()->create(['platform_account_id' => $account->id]);
-        $mention = Mention::factory()->create([
-            'monitored_subject_id' => $subject->id,
-            'content_item_id' => $content->id,
-        ]);
-        DB::table('mentions')->where('id', $mention->id)->update(['created_at' => '2026-07-13 09:00:00']);
 
-        Livewire::test(MonitoringOverview::class)
-            ->set('from', '2026-07-15')
-            ->assertViewHas('rangeLabel', fn (string $label) => str_contains($label, '13 Jul 2026'))
-            ->assertViewHas('mentionsByType', fn (Collection $c) => (int) $c->sum() === 1);
+        return $creator;
     }
 
     /**
-     * One enrolled + one unenrolled roster creator, each with content,
-     * an active story and a mention.
+     * One enrolled + one unenrolled roster creator, each with a platform
+     * account and a content item published inside the 90-day window.
      *
      * @return array{seeded: Creator, other: Creator}
      */
@@ -138,22 +59,15 @@ class MonitoringSeedingFilterTest extends TestCase
     {
         $world = [];
 
-        foreach (['seeded', 'other'] as $key) {
-            $creator = Creator::factory()->create();
-            $subject = MonitoredSubject::factory()->create([
-                'subject_type' => MonitoredSubjectType::Creator->value,
-                'creator_id' => $creator->id,
-                'active' => true,
-            ]);
+        foreach (['seeded' => 'Seeded Sam', 'other' => 'Plain Pat'] as $key => $name) {
+            $creator = $this->rosterCreator($name);
             $account = PlatformAccount::factory()->create([
                 'creator_id' => $creator->id,
                 'platform' => Platform::Instagram,
             ]);
-            $content = ContentItem::factory()->create(['platform_account_id' => $account->id]);
-            Story::factory()->create(['platform_account_id' => $account->id]);
-            Mention::factory()->create([
-                'monitored_subject_id' => $subject->id,
-                'content_item_id' => $content->id,
+            ContentItem::factory()->create([
+                'platform_account_id' => $account->id,
+                'published_at' => now()->subDays(3),
             ]);
 
             $world[$key] = $creator;
@@ -165,30 +79,30 @@ class MonitoringSeedingFilterTest extends TestCase
         return $world;
     }
 
-    public function test_toggle_off_counts_all_roster_creators(): void
+    public function test_toggle_off_counts_the_whole_roster(): void
     {
         $this->seedWorld();
 
         Livewire::test(MonitoringOverview::class)
             ->assertSet('activeSeedingOnly', false)
-            ->assertViewHas('rosterCount', 2)
-            ->assertViewHas('newContent', 2)
-            ->assertViewHas('activeStories', 2)
+            ->assertViewHas('totalPosts', 2)
             ->assertViewHas('seedingSetEmpty', fn (mixed $empty): bool => $empty === false)
-            ->assertViewHas('mentionsByType', fn (Collection $byType): bool => (int) $byType->sum() === 2);
+            // Both creators appear as cards.
+            ->assertSee('Seeded Sam')
+            ->assertSee('Plain Pat');
     }
 
-    public function test_toggle_on_scopes_every_creator_keyed_card_to_enrolled_creators(): void
+    public function test_toggle_on_scopes_the_totals_and_the_grid_to_enrolled_creators(): void
     {
         $this->seedWorld();
 
         Livewire::test(MonitoringOverview::class)
             ->set('activeSeedingOnly', true)
-            ->assertViewHas('rosterCount', 1)
-            ->assertViewHas('newContent', 1)
-            ->assertViewHas('activeStories', 1)
+            ->assertViewHas('totalPosts', 1)
             ->assertViewHas('seedingSetEmpty', fn (mixed $empty): bool => $empty === false)
-            ->assertViewHas('mentionsByType', fn (Collection $byType): bool => (int) $byType->sum() === 1);
+            // Only the enrolled creator's card remains.
+            ->assertSee('Seeded Sam')
+            ->assertDontSee('Plain Pat');
     }
 
     public function test_toggle_on_with_no_active_seeding_filters_to_zero_not_unfiltered(): void
@@ -199,13 +113,138 @@ class MonitoringSeedingFilterTest extends TestCase
 
         Livewire::test(MonitoringOverview::class)
             ->set('activeSeedingOnly', true)
-            ->assertViewHas('rosterCount', 0)
-            ->assertViewHas('newContent', 0)
-            ->assertViewHas('activeStories', 0)
+            ->assertViewHas('totalPosts', 0)
             ->assertViewHas('seedingSetEmpty', fn (mixed $empty): bool => $empty === true)
-            ->assertViewHas('mentionsByType', fn (Collection $byType): bool => (int) $byType->sum() === 0)
-            // KPI aggregate over no rows: null (unavailable), never zero (DP-001).
-            ->assertViewHas('creatorTotals', fn (object $totals): bool => $totals->views_sum === null);
+            ->assertSee('No creators are currently in an active seeding.')
+            ->assertDontSee('Seeded Sam');
+    }
+
+    public function test_the_headline_totals_sum_each_posts_latest_metrics_over_90_days(): void
+    {
+        $creator = $this->rosterCreator('Metric Mabel');
+        $account = PlatformAccount::factory()->create([
+            'creator_id' => $creator->id,
+            'platform' => Platform::Instagram,
+        ]);
+
+        // Two posts, each counted ONCE at its latest reading (public_metrics).
+        foreach ([[1000, 80, 20], [500, 40, 10]] as [$views, $likes, $comments]) {
+            ContentItem::factory()->create([
+                'platform_account_id' => $account->id,
+                'published_at' => now()->subDays(3),
+                'public_metrics' => [
+                    new MetricValue($views, MetricTier::Public, 'views'),
+                    new MetricValue($likes, MetricTier::Public, 'likes'),
+                    new MetricValue($comments, MetricTier::Public, 'comments'),
+                ],
+            ]);
+        }
+
+        Livewire::test(MonitoringOverview::class)
+            ->assertViewHas('totalPosts', 2)
+            ->assertViewHas('totalViews', fn (mixed $v): bool => (int) $v === 1500)   // 1000 + 500
+            ->assertViewHas('totalLikes', fn (mixed $v): bool => (int) $v === 120)    // 80 + 40
+            ->assertViewHas('totalComments', fn (mixed $v): bool => (int) $v === 30)  // 20 + 10
+            ->assertSee('Total posts')
+            ->assertSee('Total views')
+            ->assertSee('1,500'); // views, thousands-formatted
+    }
+
+    public function test_a_post_older_than_90_days_is_excluded_from_the_totals(): void
+    {
+        $creator = $this->rosterCreator('Old Olive');
+        $account = PlatformAccount::factory()->create([
+            'creator_id' => $creator->id,
+            'platform' => Platform::Instagram,
+        ]);
+        ContentItem::factory()->create([
+            'platform_account_id' => $account->id,
+            'published_at' => now()->subDays(120), // outside the window
+            'public_metrics' => [new MetricValue(9999, MetricTier::Public, 'views')],
+        ]);
+
+        Livewire::test(MonitoringOverview::class)
+            ->assertViewHas('totalPosts', 0)
+            ->assertViewHas('totalViews', fn (mixed $v): bool => $v === null); // nothing in window
+    }
+
+    public function test_the_in_active_seeding_tag_shows_only_for_enrolled_creators(): void
+    {
+        $seeded = $this->rosterCreator('Seeded Sam');
+        $run = SeedingCampaign::factory()->create(['status' => SeedingCampaignStatus::Active]);
+        $run->creators()->attach([$seeded->id]);
+
+        Livewire::test(MonitoringOverview::class)
+            ->assertSee('Seeded Sam')
+            ->assertSee('In active seeding');
+    }
+
+    public function test_unseeded_creators_carry_no_seeding_tag(): void
+    {
+        $this->rosterCreator('Plain Pat');
+
+        Livewire::test(MonitoringOverview::class)
+            ->assertSee('Plain Pat')
+            ->assertDontSee('In active seeding');
+    }
+
+    public function test_search_narrows_the_creator_grid(): void
+    {
+        $this->rosterCreator('Anna Weber');
+        $this->rosterCreator('Zoe Martin');
+
+        Livewire::test(MonitoringOverview::class)
+            ->assertSee('Anna Weber')
+            ->assertSee('Zoe Martin')
+            ->set('search', 'Anna')
+            ->assertSee('Anna Weber')
+            ->assertDontSee('Zoe Martin');
+    }
+
+    public function test_the_roster_subtitle_says_matching_when_filtered_and_on_the_roster_when_not(): void
+    {
+        // $creators->total() is the count AFTER filters, so the subtitle must
+        // not call a narrowed subset "on the roster" — that would misreport the
+        // true roster size.
+        $this->rosterCreator('Anna Weber');
+        $this->rosterCreator('Zoe Martin');
+
+        Livewire::test(MonitoringOverview::class)
+            ->assertSee('on the roster')
+            ->assertDontSee('matching')
+            ->set('search', 'Anna')
+            ->assertSee('matching')
+            ->assertDontSee('on the roster');
+    }
+
+    public function test_an_out_of_range_page_does_not_show_the_add_creators_empty_state(): void
+    {
+        // 13 roster creators paginate to two pages of 12. Page 3 is out of
+        // range: the current page is empty but the roster is NOT. The empty
+        // state gates on total(), so it must NOT falsely tell the operator to
+        // add creators over a populated roster (paginate() never clamps page).
+        for ($i = 0; $i < 13; $i++) {
+            $this->rosterCreator(sprintf('Creator %02d', $i));
+        }
+
+        Livewire::test(MonitoringOverview::class)
+            ->call('setPage', 3)
+            ->assertDontSee('Add creators to the roster')
+            ->assertDontSee('No monitored creators match');
+    }
+
+    public function test_the_platform_filter_narrows_the_creator_grid(): void
+    {
+        $ivy = $this->rosterCreator('Insta Ivy');
+        PlatformAccount::factory()->create(['creator_id' => $ivy->id, 'platform' => Platform::Instagram]);
+
+        $tom = $this->rosterCreator('Tube Tom');
+        PlatformAccount::factory()->create(['creator_id' => $tom->id, 'platform' => Platform::YouTube]);
+
+        Livewire::test(MonitoringOverview::class)
+            ->set('platform', Platform::YouTube->value)
+            ->assertSee('Tube Tom')
+            ->assertDontSee('Insta Ivy');
     }
 
     public function test_url_round_trip_restores_the_toggle(): void
@@ -215,7 +254,7 @@ class MonitoringSeedingFilterTest extends TestCase
             ->assertSet('activeSeedingOnly', true);
     }
 
-    public function test_toggle_intersects_with_the_platform_filter(): void
+    public function test_toggle_intersects_with_the_platform_filter_for_the_posts_total(): void
     {
         $world = $this->seedWorld(); // seeded creator has 1 Instagram content item
 
@@ -227,42 +266,27 @@ class MonitoringSeedingFilterTest extends TestCase
         ContentItem::factory()->create([
             'platform_account_id' => $ttAccount->id,
             'platform' => Platform::TikTok,
+            'published_at' => now()->subDays(3),
         ]);
 
         Livewire::test(MonitoringOverview::class)
             ->set('activeSeedingOnly', true)
             ->set('platform', Platform::TikTok->value)
-            ->assertViewHas('newContent', 1)   // TikTok ∩ enrolled — not the Instagram item
-            // Roster card ignores platform by design; it responds only to the toggle.
-            ->assertViewHas('rosterCount', 1);
+            ->assertViewHas('totalPosts', 1)   // TikTok ∩ enrolled — not the Instagram item
+            ->assertSee('Seeded Sam')
+            ->assertDontSee('Plain Pat');
     }
 
-    public function test_page_renders_toggle_and_scoped_view_with_brand_only_reach_state(): void
+    public function test_the_empty_seeding_notice_shows_only_when_toggled_on_with_no_active_seeding(): void
     {
         $this->seedWorld();
 
         Livewire::test(MonitoringOverview::class)
-            ->assertSee('Active seeding only')
-            ->assertDontSee('Aggregated by brand — not available for the seeding filter.')
-            ->set('activeSeedingOnly', true)
-            // Reach/EMV: message only, no brand-wide number, distinct from
-            // the generic rollup-unavailable copy.
-            ->assertSee('Aggregated by brand — not available for the seeding filter.')
-            ->assertDontSee('No estimated reach for the selected dates yet');
-    }
-
-    public function test_empty_set_notice_shows_only_when_toggled_on_with_no_active_seeding(): void
-    {
-        $this->seedWorld();
-
-        $component = Livewire::test(MonitoringOverview::class)
             ->assertDontSee('No creators are currently in an active seeding.');
 
-        // Enrolled creators exist → no notice even when counts are zeroed
-        // by a restrictive date range.
-        $component->set('activeSeedingOnly', true)
-            ->set('from', '2030-01-01')
-            ->set('to', '2030-01-02')
+        // Enrolled creators exist → no notice even with the toggle on.
+        Livewire::test(MonitoringOverview::class)
+            ->set('activeSeedingOnly', true)
             ->assertDontSee('No creators are currently in an active seeding.');
 
         SeedingCampaign::query()->update(['status' => SeedingCampaignStatus::Completed->value]);
@@ -288,16 +312,12 @@ class MonitoringSeedingFilterTest extends TestCase
         });
 
         // Tenant A (default): roster creator, NO active seeding.
-        $creatorA = Creator::factory()->create();
-        MonitoredSubject::factory()->create([
-            'subject_type' => MonitoredSubjectType::Creator->value,
-            'creator_id' => $creatorA->id,
-            'active' => true,
-        ]);
+        $this->rosterCreator('Tenant A Creator');
 
         Livewire::test(MonitoringOverview::class)
             ->set('activeSeedingOnly', true)
-            ->assertViewHas('rosterCount', 0)       // tenant B's enrollment must not count here
-            ->assertViewHas('seedingSetEmpty', fn (mixed $empty): bool => $empty === true);
+            // Tenant B's enrollment must not leak in — the set reads empty here.
+            ->assertViewHas('seedingSetEmpty', fn (mixed $empty): bool => $empty === true)
+            ->assertViewHas('totalPosts', 0);
     }
 }

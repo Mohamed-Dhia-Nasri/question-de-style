@@ -6,6 +6,7 @@ use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\SeedingCampaign;
+use App\Platform\Analytics\RollupReader;
 use App\Shared\Authorization\PermissionsCatalog;
 use App\Shared\Enums\ShipmentStatus;
 use Illuminate\Support\Facades\Route;
@@ -42,8 +43,8 @@ Route::middleware(['web', 'auth', 'can:'.PermissionsCatalog::CRM_VIEW, 'subscrib
         // Item 6a: the progress strip's sub-counts are computed live here
         // from the Shipment table (never rollups, which lag) and are
         // read-only display — the closure never writes posted/posted_at.
-        Route::get('/seeding/{seedingCampaign}', fn (SeedingCampaign $seedingCampaign) => view('crm.seeding-detail', [
-            'seedingCampaign' => $seedingCampaign->load(['brand.client', 'campaign', 'product'])->loadCount([
+        Route::get('/seeding/{seedingCampaign}', function (SeedingCampaign $seedingCampaign) {
+            $seedingCampaign->load(['brand.client', 'campaign', 'product'])->loadCount([
                 'creators', 'shipments',
                 // Count strictly by status (M07). A Returned/Failed parcel
                 // keeps its shipped_at/delivered_at timestamps by design, so an
@@ -53,8 +54,16 @@ Route::middleware(['web', 'auth', 'can:'.PermissionsCatalog::CRM_VIEW, 'subscrib
                 'shipments as delivered_count' => fn ($q) => $q->where('status', ShipmentStatus::Delivered),
                 'shipments as posted_count' => fn ($q) => $q->where('posted', true),
                 'shipments as expected_posts_count' => fn ($q) => $q->where('posting_required', true),
-            ]),
-        ]))->name('seeding.show');
+            ]);
+
+            return view('crm.seeding-detail', [
+                'seedingCampaign' => $seedingCampaign,
+                // Results teaser on the Overview tab reads the same approved
+                // rollup the Results tab uses (ADR-0010); NULL sums mean "no
+                // results observed yet", never a fabricated zero.
+                'resultsTotals' => app(RollupReader::class)->seedingCampaignTotals($seedingCampaign->id),
+            ]);
+        })->name('seeding.show');
 
         // Step 4 — the cross-influencer product results dashboard
         // (REQ-M3-013, AC-M3-019). Results are rollup reads (ADR-0010):

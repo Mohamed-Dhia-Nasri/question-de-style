@@ -8,6 +8,7 @@ use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\Monitoring\Livewire\Dashboard\ContentDetail;
 use App\Modules\Monitoring\Livewire\Dashboard\CreatorDetail;
 use App\Modules\Monitoring\Livewire\Dashboard\CreatorsIndex;
+use App\Modules\Monitoring\Livewire\Dashboard\MonitoringOverview;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\MetricSnapshot;
 use App\Modules\Monitoring\Models\MonitoredSubject;
@@ -51,7 +52,49 @@ class DashboardScreensTest extends TestCase
         return $this->makeUser(RoleName::Analyst);
     }
 
-    public function test_overview_renders_kpis_deferred_states_and_review_counts(): void
+    public function test_overview_renders_headline_counts_and_the_creator_roster(): void
+    {
+        $creator = Creator::factory()->create(['display_name' => 'Nova Lang']);
+        MonitoredSubject::factory()->create([
+            'subject_type' => MonitoredSubjectType::Creator->value,
+            'creator_id' => $creator->id,
+            'active' => true,
+        ]);
+        PlatformAccount::factory()->create([
+            'creator_id' => $creator->id,
+            'platform' => Platform::Instagram,
+        ]);
+
+        $this->actingAs($this->analyst());
+
+        $this->get('/monitoring')
+            ->assertOk()
+            // Compact last-90-day headline totals.
+            ->assertSee('Last 90 days')
+            ->assertSee('Total posts')
+            ->assertSee('Total views')
+            ->assertSee('Total likes')
+            ->assertSee('Total comments')
+            // The creator roster is now the primary content: a card per creator
+            // with the person and their platform(s).
+            ->assertSee('Nova Lang')
+            ->assertSee('Instagram')
+            // Freshness note, with the effective poll intervals humanised from
+            // the config defaults (campaign 12h, baseline 84h ≈ 3.5 days).
+            ->assertSee('Fresh data arrives on a schedule')
+            ->assertSee('every 12 hours')
+            ->assertSee('every 3.5 days');
+
+        // The heavier reporting figures moved off this page (low cognitive
+        // load, user decision) — they live on Exports and per-creator views.
+        // Assert on the component itself: the full page's nav legitimately
+        // links to the EMV/Reach settings surfaces.
+        Livewire::test(MonitoringOverview::class)
+            ->assertDontSee('Estimated reach')
+            ->assertDontSee('EMV');
+    }
+
+    public function test_overview_shows_when_monitoring_data_was_last_updated(): void
     {
         $creator = Creator::factory()->create();
         MonitoredSubject::factory()->create([
@@ -59,23 +102,22 @@ class DashboardScreensTest extends TestCase
             'creator_id' => $creator->id,
             'active' => true,
         ]);
+        $account = PlatformAccount::factory()->create(['creator_id' => $creator->id]);
+
+        // The tenant-owned snapshot heartbeat is the page's freshness source.
+        MetricSnapshot::create([
+            'platform_account_id' => $account->id,
+            'captured_at' => '2026-07-21 14:32:00',
+            'metrics' => [new MetricValue(1000, MetricTier::Public, 'followers')],
+            'provenance' => new Provenance('SRC-apify-instagram-scraper', now()->toImmutable(), 'v1'),
+        ]);
 
         $this->actingAs($this->analyst());
 
         $this->get('/monitoring')
             ->assertOk()
-            ->assertSee('Monitored creators (roster)')
-            ->assertSee('Pending reviews')
-            ->assertSee('unavailable')          // deferred/unmeasured values
-            // Estimated reach now has a documented method (ADR-0022); no
-            // rollups yet means an honest "not yet", never DEF-003 (that's
-            // CONFIRMED-reach only, no longer surfaced on this page).
-            ->assertSee('No estimated reach for the selected dates yet', false)
-            ->assertSee('REQ-M1-006', false)
-            ->assertDontSee('DEF-003');
-        // The "Comment analysis" (DEF-005) and "Open-web listening" (DEF-006)
-        // deferred placeholder panels were removed from this overview at the
-        // user's request (2026-07-18); they are no longer surfaced here.
+            ->assertSee('Data updated')
+            ->assertSee('21.07.2026 14:32 UTC');
     }
 
     public function test_creators_index_searches_sorts_and_rejects_unknown_sort_columns(): void
@@ -194,6 +236,68 @@ class DashboardScreensTest extends TestCase
             ->assertSee('DEF-001', false)  // audience demographics deferred
             ->assertSee('DEF-002', false)  // contact auto-extraction deferred
             ->assertSee('ADR-0003', false); // history only from own-DB snapshots
+    }
+
+    public function test_creator_detail_shows_when_this_creators_data_was_last_updated(): void
+    {
+        $creator = Creator::factory()->create();
+        $account = PlatformAccount::factory()->create([
+            'creator_id' => $creator->id,
+            'platform' => Platform::Instagram,
+            // Profile last fetched BEFORE the snapshot heartbeat, so the
+            // account-level snapshot is unambiguously the newest observation.
+            'provenance' => new Provenance(
+                'SRC-apify-instagram-scraper',
+                \Carbon\CarbonImmutable::parse('2026-07-20 08:00:00'),
+                'v1',
+            ),
+        ]);
+
+        // Scoped to THIS creator's accounts — the newest observation of them.
+        MetricSnapshot::create([
+            'platform_account_id' => $account->id,
+            'captured_at' => '2026-07-21 14:32:00',
+            'metrics' => [new MetricValue(1000, MetricTier::Public, 'followers')],
+            'provenance' => new Provenance('SRC-apify-instagram-scraper', now()->toImmutable(), 'v1'),
+        ]);
+
+        $this->actingAs($this->analyst());
+
+        $this->get("/monitoring/creators/{$creator->id}")
+            ->assertOk()
+            ->assertSee('Data updated')
+            ->assertSee('21.07.2026 14:32 UTC');
+    }
+
+    public function test_creator_detail_freshness_falls_back_to_the_profile_fetch_when_no_follower_snapshot_exists(): void
+    {
+        // A creator whose follower count is hidden/absent (e.g. a YouTube
+        // channel with hidden subscribers) produces NO account-level
+        // MetricSnapshot heartbeat, yet their profile WAS pulled. Freshness must
+        // reflect that pull via provenance->fetchedAt, never falsely read "not
+        // pulled yet" while the page shows freshly ingested data.
+        $creator = Creator::factory()->create();
+        PlatformAccount::factory()->create([
+            'creator_id' => $creator->id,
+            'platform' => Platform::YouTube,
+            'follower_count' => null,
+            'provenance' => new Provenance(
+                'SRC-apify-instagram-scraper',
+                \Carbon\CarbonImmutable::parse('2026-07-20 09:15:00'),
+                'v1',
+            ),
+        ]);
+
+        // Deliberately NO MetricSnapshot: a null follower count is never
+        // heartbeated by the snapshot scheduler.
+
+        $this->actingAs($this->analyst());
+
+        $this->get("/monitoring/creators/{$creator->id}")
+            ->assertOk()
+            ->assertSee('Data updated')
+            ->assertSee('20.07.2026 09:15 UTC')
+            ->assertDontSee('not pulled yet');
     }
 
     public function test_content_detail_shows_tiered_metrics_and_correction_moves_to_human_corrected(): void

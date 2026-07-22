@@ -6,6 +6,12 @@
                 The accounts your team has confirmed belong to this person — added and removed by
                 hand.
             </p>
+            {{-- Only the public fields (bio, links, followers) are pulled; the
+                 handle/identity is operator-asserted (ADR-0014). Shown only when
+                 something has actually been pulled. --}}
+            @if ($dataUpdatedAt)
+                <x-data-freshness :at="$dataUpdatedAt" label="Public data updated" class="mt-1.5 block" />
+            @endif
         </div>
         {{-- Deliberately NO auto-detect and NO merge control here: ADR-0014
              removes the automatic path as an absent FEATURE (not an
@@ -81,10 +87,10 @@
                                 @if ($account->provenance->source === \App\Platform\Ingestion\SourceRegistry::AGENCY_MANUAL_ENTRY)
                                     <x-ui.badge color="info" title="Entered by hand by agency staff.">Manual entry</x-ui.badge>
                                 @else
-                                    <span class="text-theme-xs text-gray-500 dark:text-gray-400"
-                                        title="Fetched {{ $account->provenance->fetchedAt->format('d.m.Y H:i') }}">
+                                    <span class="block text-theme-xs text-gray-500 dark:text-gray-400">
                                         {{ $account->provenance->source }}
                                     </span>
+                                    <x-data-freshness :at="$account->provenance->fetchedAt" label="Updated" class="mt-0.5 block" />
                                 @endif
                             </td>
                             <td class="px-5 py-4">

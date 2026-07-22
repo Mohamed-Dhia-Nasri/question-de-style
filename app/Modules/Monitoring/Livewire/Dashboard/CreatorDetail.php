@@ -3,16 +3,20 @@
 namespace App\Modules\Monitoring\Livewire\Dashboard;
 
 use App\Modules\CRM\Models\Creator;
+use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\Monitoring\Models\ContentItem;
 use App\Modules\Monitoring\Models\Mention;
+use App\Modules\Monitoring\Models\MetricSnapshot;
 use App\Modules\Monitoring\Models\Story;
 use App\Platform\Analytics\RollupReader;
 use App\Platform\Enrichment\Metrics\DerivedMetricsService;
+use App\Platform\Ingestion\SourceRegistry;
 use App\Shared\Enums\ContentType;
 use App\Shared\Enums\Platform;
 use App\Shared\Livewire\Concerns\RunsCreatorMonitoringNow;
 use App\Shared\Settings\MonitoringSettingsResolver;
 use Illuminate\Contracts\View\View;
+use Illuminate\Support\Carbon;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -124,6 +128,25 @@ class CreatorDetail extends Component
         // ADR-0025) over the creator's observed likes+comments.
         $trendWindowDays = $settings->engagementTrendWindowDays();
 
+        // Freshness = the most recent observation of this creator's accounts,
+        // taking whichever of two signals is newer:
+        //   1. the account-level snapshot heartbeat (rows carry a non-null
+        //      platform_account_id) — only written when a follower count exists;
+        //   2. the newest external fetch stamped on the accounts themselves
+        //      (provenance->fetchedAt), refreshed on every profile pull
+        //      regardless of follower count, and excluding hand entries.
+        // Signal 1 alone falsely reads "not pulled yet" for a creator whose
+        // content was pulled but whose follower count is null/hidden (e.g. a
+        // YouTube channel with hidden subscribers), and would disagree with the
+        // CRM platform-accounts panel, which reads signal 2. Null only when
+        // nothing has ever been pulled (empty set → whereIn([]) → null).
+        $dataUpdatedAt = collect([
+            MetricSnapshot::query()->whereIn('platform_account_id', $accountIds)->max('captured_at'),
+            $this->creator->platformAccounts
+                ->reject(fn (PlatformAccount $account) => $account->provenance->source === SourceRegistry::AGENCY_MANUAL_ENTRY)
+                ->max(fn (PlatformAccount $account) => $account->provenance->fetchedAt),
+        ])->filter()->map(fn ($at) => Carbon::parse($at))->max();
+
         return view('livewire.monitoring.creator-detail', [
             'series' => $series,
             'latestBucket' => $series->last(),
@@ -138,6 +161,7 @@ class CreatorDetail extends Component
             'platforms' => Platform::cases(),
             'contentTypes' => ContentType::cases(),
             'rollupsRefreshedAt' => $rollups->lastRefreshedAt(),
+            'dataUpdatedAt' => $dataUpdatedAt,
         ]);
     }
 }

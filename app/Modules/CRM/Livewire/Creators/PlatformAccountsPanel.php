@@ -6,6 +6,7 @@ use App\Modules\CRM\Exceptions\PlatformAccountConflict;
 use App\Modules\CRM\Models\Creator;
 use App\Modules\CRM\Models\PlatformAccount;
 use App\Modules\CRM\Services\CreatorWriter;
+use App\Platform\Ingestion\SourceRegistry;
 use App\Shared\Audit\AuditLogger;
 use App\Shared\Enums\Platform;
 use Illuminate\Contracts\View\View;
@@ -228,9 +229,21 @@ class PlatformAccountsPanel extends Component
 
     public function render(): View
     {
+        $accounts = $this->creator->platformAccounts()->orderBy('platform')->get();
+
+        // Box-level "public data updated" = the newest external fetch across the
+        // creator's accounts. Manual-entry rows store the hand-entry moment in
+        // the same provenance.fetchedAt, so they are excluded — this timestamp
+        // reflects pulled data only (never a hand edit). Null when nothing has
+        // been pulled yet, so the view can omit the line entirely.
+        $dataUpdatedAt = $accounts
+            ->reject(fn (PlatformAccount $account) => $account->provenance->source === SourceRegistry::AGENCY_MANUAL_ENTRY)
+            ->max(fn (PlatformAccount $account) => $account->provenance->fetchedAt);
+
         return view('livewire.crm.creator-platform-accounts', [
-            'accounts' => $this->creator->platformAccounts()->orderBy('platform')->get(),
+            'accounts' => $accounts,
             'platforms' => Platform::cases(),
+            'dataUpdatedAt' => $dataUpdatedAt,
         ]);
     }
 }

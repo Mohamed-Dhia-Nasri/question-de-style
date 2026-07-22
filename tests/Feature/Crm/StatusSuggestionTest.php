@@ -4,28 +4,23 @@ namespace Tests\Feature\Crm;
 
 use App\Models\User;
 use App\Modules\CRM\Livewire\Campaigns\CampaignStatusActions;
-use App\Modules\CRM\Livewire\Seeding\SeedingStatusActions;
-use App\Modules\CRM\Models\Brand;
 use App\Modules\CRM\Models\Campaign;
 use App\Modules\CRM\Models\Creator;
-use App\Modules\CRM\Models\Product;
-use App\Modules\CRM\Models\SeedingCampaign;
-use App\Modules\CRM\Models\Shipment;
 use App\Shared\Authorization\PermissionsCatalog;
 use App\Shared\Enums\CampaignStatus;
 use App\Shared\Enums\RoleName;
-use App\Shared\Enums\SeedingCampaignStatus;
-use App\Shared\Enums\ShipmentStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
  * Item 6b (Stage D task 10): gentle one-click next-step prompts on the
- * campaign and seeding-run Overview tabs. At most one suggestion shows at a
- * time; the button re-authorizes crm.manage, re-checks the trigger still
- * holds (stale guard), sets the status, and records the transition. There is
- * no scheduler and no auto-transition — a person always clicks.
+ * campaign Overview tab. At most one suggestion shows at a time; the button
+ * re-authorizes crm.manage, re-checks the trigger still holds (stale guard),
+ * sets the status, and records the transition. There is no scheduler and no
+ * auto-transition — a person always clicks. (The seeding-run completion nudge
+ * was removed at the operator's request; run status is set on the Seeding runs
+ * list.)
  */
 class StatusSuggestionTest extends TestCase
 {
@@ -134,106 +129,5 @@ class StatusSuggestionTest extends TestCase
             'action' => 'campaign.status_changed',
             'subject_id' => $campaign->id,
         ]);
-    }
-
-    public function test_a_seeding_run_with_all_shipments_delivered_suggests_completed_and_apply_audits(): void
-    {
-        $this->actingAsCrmStaff();
-
-        $brand = Brand::factory()->create();
-        $run = SeedingCampaign::factory()->create([
-            'brand_id' => $brand->id,
-            'status' => SeedingCampaignStatus::Active,
-        ]);
-        $product = Product::factory()->create(['brand_id' => $brand->id]);
-        $c1 = Creator::factory()->create();
-        $c2 = Creator::factory()->create();
-        $run->creators()->attach([$c1->id, $c2->id]);
-
-        foreach ([$c1, $c2] as $creator) {
-            Shipment::factory()->create([
-                'seeding_campaign_id' => $run->id,
-                'creator_id' => $creator->id,
-                'product_id' => $product->id,
-                'status' => ShipmentStatus::Delivered,
-            ]);
-        }
-
-        Livewire::test(SeedingStatusActions::class, ['seedingCampaign' => $run])
-            ->assertOk()
-            ->assertSee('mark this seeding run as Completed')
-            ->call('applyStatus')
-            ->assertOk();
-
-        $this->assertSame(SeedingCampaignStatus::Completed, $run->fresh()->status);
-        $this->assertDatabaseHas('audit_logs', [
-            'action' => 'seeding_campaign.status_changed',
-            'subject_id' => $run->id,
-        ]);
-    }
-
-    public function test_a_cancelled_seeding_run_gets_no_completed_nudge(): void
-    {
-        $this->actingAsCrmStaff();
-
-        $brand = Brand::factory()->create();
-        $run = SeedingCampaign::factory()->create([
-            'brand_id' => $brand->id,
-            'status' => SeedingCampaignStatus::Cancelled,
-        ]);
-        $product = Product::factory()->create(['brand_id' => $brand->id]);
-        $creator = Creator::factory()->create();
-        $run->creators()->attach($creator->id);
-        Shipment::factory()->create([
-            'seeding_campaign_id' => $run->id,
-            'creator_id' => $creator->id,
-            'product_id' => $product->id,
-            'status' => ShipmentStatus::Delivered,
-        ]);
-
-        // A terminal (Cancelled) run must not be nudged back to Completed.
-        Livewire::test(SeedingStatusActions::class, ['seedingCampaign' => $run])
-            ->assertOk()
-            ->assertDontSee('mark this seeding run as Completed')
-            ->call('applyStatus')
-            ->assertOk();
-
-        $this->assertSame(SeedingCampaignStatus::Cancelled, $run->fresh()->status);
-        $this->assertDatabaseMissing('audit_logs', [
-            'action' => 'seeding_campaign.status_changed',
-            'subject_id' => $run->id,
-        ]);
-    }
-
-    public function test_a_seeding_run_with_a_non_delivered_shipment_shows_no_banner(): void
-    {
-        $this->actingAsCrmStaff();
-
-        $brand = Brand::factory()->create();
-        $run = SeedingCampaign::factory()->create([
-            'brand_id' => $brand->id,
-            'status' => SeedingCampaignStatus::Active,
-        ]);
-        $product = Product::factory()->create(['brand_id' => $brand->id]);
-        $c1 = Creator::factory()->create();
-        $c2 = Creator::factory()->create();
-        $run->creators()->attach([$c1->id, $c2->id]);
-
-        Shipment::factory()->create([
-            'seeding_campaign_id' => $run->id,
-            'creator_id' => $c1->id,
-            'product_id' => $product->id,
-            'status' => ShipmentStatus::Delivered,
-        ]);
-        Shipment::factory()->create([
-            'seeding_campaign_id' => $run->id,
-            'creator_id' => $c2->id,
-            'product_id' => $product->id,
-            'status' => ShipmentStatus::Shipped,
-        ]);
-
-        Livewire::test(SeedingStatusActions::class, ['seedingCampaign' => $run])
-            ->assertOk()
-            ->assertDontSee('mark this seeding run as Completed');
     }
 }

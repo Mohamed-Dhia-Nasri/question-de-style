@@ -10,7 +10,9 @@ use App\Modules\CRM\Models\SeedingCampaign;
 use App\Modules\CRM\Models\Shipment;
 use App\Modules\CRM\Models\Task;
 use App\Shared\Authorization\PermissionsCatalog;
+use App\Shared\Enums\CampaignStatus;
 use App\Shared\Enums\RoleName;
+use App\Shared\Enums\SeedingCampaignStatus;
 use App\Shared\Enums\ShipmentStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -43,7 +45,7 @@ class CrmOverviewTest extends TestCase
             ->assertSee('Get set up')->assertSee('Create your first client');
     }
 
-    public function test_checklist_collapses_to_a_pill_when_everything_exists(): void
+    public function test_checklist_disappears_and_headline_numbers_show_once_everything_exists(): void
     {
         $this->actingAsCrmStaff();
 
@@ -52,18 +54,50 @@ class CrmOverviewTest extends TestCase
         SeedingCampaign::factory()->forCampaign($campaign)->create(['brand_id' => $campaign->brand_id]);
 
         Livewire::test(CrmOverview::class)
-            ->assertSee('You’re all set up')
-            ->assertDontSee('Create your first client');
+            // The setup card is gone once every step exists.
+            ->assertDontSee('Get set up')
+            ->assertDontSee('Create your first client')
+            // The clickable headline strip replaces it.
+            ->assertSee('Clients')
+            ->assertSee('Creators')
+            ->assertSee('Active campaigns')
+            ->assertSee('Active runs');
     }
 
-    public function test_needs_attention_counts_overdue_tasks_empty_runs_and_stale_shipments(): void
+    public function test_headline_numbers_and_active_work_with_run_progress_render(): void
     {
         $this->actingAsCrmStaff();
 
-        Task::factory()->create(['due_at' => now()->subDay()]); // overdue (status Open default)
-        SeedingCampaign::factory()->create(); // Draft, no creators
+        $campaign = Campaign::factory()->create(['name' => 'Spring Launch', 'status' => CampaignStatus::Active]);
+        $run = SeedingCampaign::factory()->forCampaign($campaign)->create([
+            'brand_id' => $campaign->brand_id,
+            'name' => 'Nike Seeding',
+            'status' => SeedingCampaignStatus::Shipping,
+        ]);
         $creator = Creator::factory()->create();
-        $run2 = SeedingCampaign::factory()->create();
+        $run->creators()->syncWithoutDetaching([$creator->id]);
+        Shipment::factory()->create([
+            'seeding_campaign_id' => $run->id, 'creator_id' => $creator->id,
+            'status' => ShipmentStatus::Delivered, 'shipped_at' => now()->subDays(3), 'delivered_at' => now()->subDay(),
+        ]);
+
+        Livewire::test(CrmOverview::class)
+            ->assertViewHas('kpis', fn (array $kpis): bool => collect($kpis)->firstWhere('label', 'Active campaigns')['value'] === 1
+                && collect($kpis)->firstWhere('label', 'Active runs')['value'] === 1)
+            ->assertSee('Spring Launch')   // active campaign row
+            ->assertSee('Nike Seeding')    // active seeding run row
+            ->assertSee('1/1 delivered');  // run progress read
+    }
+
+    public function test_needs_attention_names_the_specific_overdue_tasks_empty_runs_and_stale_shipments(): void
+    {
+        $this->actingAsCrmStaff();
+
+        Task::factory()->create(['title' => 'Chase Nova about the brief', 'due_at' => now()->subDay()]);
+        SeedingCampaign::factory()->create(['name' => 'Lonely Run']); // Draft, no creators
+
+        $creator = Creator::factory()->create(['display_name' => 'Nova Lang']);
+        $run2 = SeedingCampaign::factory()->create(['name' => 'Nike Seeding']);
         $run2->creators()->syncWithoutDetaching([$creator->id]);
         Shipment::factory()->create([
             'seeding_campaign_id' => $run2->id, 'creator_id' => $creator->id,
@@ -71,9 +105,11 @@ class CrmOverviewTest extends TestCase
         ]);
 
         Livewire::test(CrmOverview::class)
-            ->assertSee('1 task is overdue')
-            ->assertSee('1 seeding run has no creators yet')
-            ->assertSee('on the road for more than a week');
+            // Each alert now names WHICH record and deep-links to it.
+            ->assertSee('Chase Nova about the brief')                                   // the overdue task
+            ->assertSee('Lonely Run')                                                  // the creator-less run
+            ->assertSee('Nova Lang · Nike Seeding')                                     // the stale parcel
+            ->assertSee(route('crm.seeding.show', $run2).'#shipments', false);         // links to that run's shipments tab
     }
 
     public function test_client_viewer_gets_403(): void

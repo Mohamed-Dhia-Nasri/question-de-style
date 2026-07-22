@@ -573,7 +573,10 @@ class NeonAnalyticsService implements AnalyticsService
                    sc.campaign_id,
                    ci.platform,
                    ci.content_type,
-                   qds_public_metric(ms.metrics, 'views'),
+                   -- Reels / TikTok / YouTube report "plays", not "views"; treat
+                   -- plays as the view-equivalent (mirrors the creator rollup's
+                   -- coalesce(views, plays)) so video results are not blank.
+                   coalesce(qds_public_metric(ms.metrics, 'views'), qds_public_metric(ms.metrics, 'plays')),
                    qds_public_metric(ms.metrics, 'likes'),
                    qds_public_metric(ms.metrics, 'comments'),
                    qds_public_metric(ms.metrics, 'shares'),

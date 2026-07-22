@@ -12,6 +12,8 @@ use App\Shared\Audit\AuditLog;
 use App\Shared\Authorization\PermissionsCatalog;
 use App\Shared\Enums\Platform;
 use App\Shared\Enums\RoleName;
+use App\Shared\ValueObjects\Provenance;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -44,6 +46,46 @@ class PlatformAccountsPanelTest extends TestCase
 
         Livewire::test(PlatformAccountsPanel::class, ['creator' => Creator::factory()->create()])
             ->assertForbidden();
+    }
+
+    public function test_the_panel_shows_when_a_pulled_accounts_public_data_was_last_updated(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $creator = Creator::factory()->create();
+        PlatformAccount::factory()->forCreator($creator)->onPlatform(Platform::Instagram)->create([
+            'provenance' => new Provenance(
+                SourceRegistry::APIFY_INSTAGRAM_PROFILE_SCRAPER,
+                CarbonImmutable::parse('2026-07-21 14:32:00'),
+                'v1',
+            ),
+        ]);
+
+        Livewire::test(PlatformAccountsPanel::class, ['creator' => $creator])
+            ->assertSee('Public data updated') // box-level, pulled rows only
+            ->assertSee('Updated')             // per-row stamp
+            ->assertSee('21.07.2026 14:32 UTC');
+    }
+
+    public function test_manual_entry_accounts_are_never_labelled_as_a_pull(): void
+    {
+        $this->actingAsCrmStaff();
+
+        $creator = Creator::factory()->create();
+        // Manual entries store the hand-entry moment in the same field; it must
+        // not be presented as an external pull, and must not drive the box line.
+        PlatformAccount::factory()->forCreator($creator)->onPlatform(Platform::Instagram)->create([
+            'provenance' => new Provenance(
+                SourceRegistry::AGENCY_MANUAL_ENTRY,
+                CarbonImmutable::parse('2026-01-01 09:00:00'),
+                'v1',
+            ),
+        ]);
+
+        Livewire::test(PlatformAccountsPanel::class, ['creator' => $creator])
+            ->assertSee('Manual entry')
+            ->assertDontSee('01.01.2026 09:00 UTC')
+            ->assertDontSee('Public data updated');
     }
 
     public function test_the_panel_lists_accounts_and_has_no_merge_or_autodetect_control(): void

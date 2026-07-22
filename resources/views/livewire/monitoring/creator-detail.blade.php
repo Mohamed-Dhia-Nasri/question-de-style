@@ -25,6 +25,7 @@
                 Relationship: {{ $creator->relationship_status?->value ?? 'NONE' }}
                 @if ($creator->primary_language) · Language: {{ $creator->primary_language }} @endif
             </p>
+            <x-data-freshness :at="$dataUpdatedAt" label="Data updated" never="not pulled yet" class="mt-1 block" />
             <div class="mt-3 space-y-2">
                 @forelse ($creator->platformAccounts as $account)
                     <div class="flex items-center justify-between rounded-lg border border-gray-100 px-3 py-2 dark:border-gray-800">

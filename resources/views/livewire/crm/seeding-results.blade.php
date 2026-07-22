@@ -228,8 +228,6 @@
             </div>
         @endif
 
-        <p class="mt-4 text-theme-xs text-gray-400 dark:text-gray-500">
-            Data refreshed {{ $rollupsRefreshedAt?->diffForHumans() ?? 'never' }}.
-        </p>
+        <x-data-freshness :at="$rollupsRefreshedAt" label="Data refreshed" class="mt-4 block" />
     </div>
 </div>

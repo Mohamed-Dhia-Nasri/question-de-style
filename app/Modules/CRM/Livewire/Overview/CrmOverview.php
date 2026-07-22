@@ -18,12 +18,13 @@ use Illuminate\Contracts\View\View;
 use Livewire\Component;
 
 /**
- * The `/crm` home (F02, Stage C) — an operational Overview replacing the
- * old 8-card hub. Four reads only, no mutators of its own: a setup
- * checklist (collapses to a success pill once every step exists), a
- * needs-attention queue (overdue tasks, creator-less seeding runs, shipments
- * stuck in transit for over a week), the five most recently touched active
- * campaigns/seeding runs, and quick-action links into the four index
+ * The `/crm` home (F02, Stage C) — an operational Overview. No mutators of
+ * its own: a setup checklist (shown only until every step exists, then it
+ * simply disappears), a clickable headline strip (clients, brands, creators,
+ * active campaigns, active runs), a needs-attention queue (overdue tasks,
+ * creator-less seeding runs, shipments stuck in transit for over a week), the
+ * five most recently touched active campaigns/seeding runs (runs carry a
+ * delivery-progress read), and quick-action links into the four index
  * components' create flows (see the `?create=1` mount() hook on each).
  *
  * Every query is tenant-scoped automatically (BelongsToTenant on every
@@ -89,30 +90,63 @@ class CrmOverview extends Component
         ];
         $setupComplete = collect($checklist)->every(fn ($s) => $s['done']);
 
-        $openStatuses = TasksIndex::openStatuses();
-        $attention = [
-            'overdueTasks' => Task::query()->whereIn('status', $openStatuses)
-                ->whereNotNull('due_at')->where('due_at', '<', now())->count(),
-            'emptyRuns' => SeedingCampaign::query()
-                ->whereNotIn('status', [SeedingCampaignStatus::Completed, SeedingCampaignStatus::Cancelled])
-                ->whereDoesntHave('creators')->count(),
-            'awaitedShipments' => Shipment::query()
-                ->whereIn('status', [ShipmentStatus::Shipped, ShipmentStatus::InTransit])
-                ->whereNotNull('shipped_at')->where('shipped_at', '<', now()->subDays(7))
-                ->whereNull('delivered_at')->count(),
+        // "Active" = the same in-progress status sets the lists below use, so
+        // each headline count agrees with its list. Clickable tiles orient the
+        // operator and jump straight into the relevant index.
+        $activeCampaignStatuses = [CampaignStatus::Planned, CampaignStatus::Active, CampaignStatus::Paused];
+        $activeRunStatuses = [SeedingCampaignStatus::Planned, SeedingCampaignStatus::Active, SeedingCampaignStatus::Shipping];
+
+        $kpis = [
+            ['label' => 'Clients', 'value' => $counts['clients'], 'url' => route('crm.clients.index')],
+            ['label' => 'Brands', 'value' => $counts['brands'], 'url' => route('crm.brands.index')],
+            ['label' => 'Creators', 'value' => $counts['creators'], 'url' => route('crm.creators.index')],
+            ['label' => 'Active campaigns', 'value' => Campaign::query()->whereIn('status', $activeCampaignStatuses)->count(), 'url' => route('crm.campaigns.index')],
+            ['label' => 'Active runs', 'value' => SeedingCampaign::query()->whereIn('status', $activeRunStatuses)->count(), 'url' => route('crm.seeding.index')],
         ];
 
+        // Needs-attention queue — the ACTUAL records (not just counts) so the
+        // operator sees WHICH ones and jumps straight to them. Capped at 6; the
+        // blade shows the first 5 and a "see all" link when a group is longer.
+        $openStatuses = TasksIndex::openStatuses();
+
+        $overdueTasks = Task::query()
+            ->whereIn('status', $openStatuses)
+            ->whereNotNull('due_at')->where('due_at', '<', now())
+            ->orderBy('due_at')->limit(6)->get();
+
+        $emptyRuns = SeedingCampaign::query()
+            ->whereNotIn('status', [SeedingCampaignStatus::Completed, SeedingCampaignStatus::Cancelled])
+            ->whereDoesntHave('creators')
+            ->latest('updated_at')->limit(6)->get();
+
+        $awaitedShipments = Shipment::query()
+            ->whereIn('status', [ShipmentStatus::Shipped, ShipmentStatus::InTransit])
+            ->whereNotNull('shipped_at')->where('shipped_at', '<', now()->subDays(7))
+            ->whereNull('delivered_at')
+            ->with(['creator', 'seedingCampaign'])
+            ->orderBy('shipped_at')->limit(6)->get();
+
         $activeCampaigns = Campaign::query()
-            ->whereIn('status', [CampaignStatus::Planned, CampaignStatus::Active, CampaignStatus::Paused])
+            ->whereIn('status', $activeCampaignStatuses)
             ->withCount(['creators', 'seedingCampaigns'])->latest('updated_at')->limit(5)->get();
         $activeRuns = SeedingCampaign::query()
-            ->whereIn('status', [SeedingCampaignStatus::Planned, SeedingCampaignStatus::Active, SeedingCampaignStatus::Shipping])
-            ->withCount(['creators', 'shipments'])->latest('updated_at')->limit(5)->get();
+            ->whereIn('status', $activeRunStatuses)
+            ->withCount([
+                'creators', 'shipments',
+                // Progress read (mirrors the seeding-detail route): delivered vs
+                // total, plus how many parcels' posts have landed.
+                'shipments as delivered_count' => fn ($q) => $q->where('status', ShipmentStatus::Delivered),
+                'shipments as posted_count' => fn ($q) => $q->where('posted', true),
+            ])
+            ->latest('updated_at')->limit(5)->get();
 
         return view('livewire.crm.overview', [
             'checklist' => $checklist,
             'setupComplete' => $setupComplete,
-            'attention' => $attention,
+            'kpis' => $kpis,
+            'overdueTasks' => $overdueTasks,
+            'emptyRuns' => $emptyRuns,
+            'awaitedShipments' => $awaitedShipments,
             'activeCampaigns' => $activeCampaigns,
             'activeRuns' => $activeRuns,
         ]);

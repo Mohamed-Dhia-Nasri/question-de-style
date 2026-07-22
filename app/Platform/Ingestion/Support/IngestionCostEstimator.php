@@ -29,14 +29,20 @@ class IngestionCostEstimator
      * Per-unit USD. ig_item ≈ post/reel dataset item; ig_profile = one
      * profile event; tt_result = one TikTok video; tt_filter = the
      * date-filter add-on per result; actor_start = per-run fee (reel +
-     * TikTok actors); story_run / story_username per the datavoyantlab
-     * actor. 'approx' marks tiers with interpolated Instagram prices.
+     * TikTok actors). Stories: the louisdeconinck
+     * instagram-story-details-scraper is PAY-PER-EVENT at $0.007 per
+     * profile (verified on the Apify store 2026-07-22) with NO per-run
+     * activation fee and NO per-story surcharge disclosed — so story_run is
+     * 0 and story_username carries the whole $0.007/account cost. Store
+     * discounts by plan tier are mentioned but unquantified, so the price
+     * is held flat across tiers; real spend shows on /monitoring/operations.
+     * 'approx' marks tiers with interpolated Instagram prices.
      */
     private const PRICES = [
-        'FREE' => ['ig_item' => 0.0027, 'ig_profile' => 0.0026, 'tt_result' => 0.0037, 'tt_filter' => 0.0013, 'actor_start' => 0.001, 'story_run' => 0.099, 'story_username' => 0.003, 'approx' => false],
-        'STARTER' => ['ig_item' => 0.0023, 'ig_profile' => 0.0023, 'tt_result' => 0.0030, 'tt_filter' => 0.0011, 'actor_start' => 0.001, 'story_run' => 0.099, 'story_username' => 0.003, 'approx' => false],
-        'SCALE' => ['ig_item' => 0.0019, 'ig_profile' => 0.0019, 'tt_result' => 0.0023, 'tt_filter' => 0.0008, 'actor_start' => 0.001, 'story_run' => 0.099, 'story_username' => 0.003, 'approx' => true],
-        'BUSINESS' => ['ig_item' => 0.0017, 'ig_profile' => 0.0017, 'tt_result' => 0.0017, 'tt_filter' => 0.0006, 'actor_start' => 0.001, 'story_run' => 0.099, 'story_username' => 0.003, 'approx' => true],
+        'FREE' => ['ig_item' => 0.0027, 'ig_profile' => 0.0026, 'tt_result' => 0.0037, 'tt_filter' => 0.0013, 'actor_start' => 0.001, 'story_run' => 0.0, 'story_username' => 0.007, 'approx' => false],
+        'STARTER' => ['ig_item' => 0.0023, 'ig_profile' => 0.0023, 'tt_result' => 0.0030, 'tt_filter' => 0.0011, 'actor_start' => 0.001, 'story_run' => 0.0, 'story_username' => 0.007, 'approx' => false],
+        'SCALE' => ['ig_item' => 0.0019, 'ig_profile' => 0.0019, 'tt_result' => 0.0023, 'tt_filter' => 0.0008, 'actor_start' => 0.001, 'story_run' => 0.0, 'story_username' => 0.007, 'approx' => true],
+        'BUSINESS' => ['ig_item' => 0.0017, 'ig_profile' => 0.0017, 'tt_result' => 0.0017, 'tt_filter' => 0.0006, 'actor_start' => 0.001, 'story_run' => 0.0, 'story_username' => 0.007, 'approx' => true],
     ];
 
     /** Monthly plan fee per Apify tier (USD, includes equal usage credit). */
@@ -331,7 +337,7 @@ class IngestionCostEstimator
             [
                 'service' => 'Instagram stories',
                 'detail' => 'Catching stories before their 24-hour expiry',
-                'unit' => $this->usd($p['story_run']).' per batch of '.max(1, (int) config('qds.ingestion.story_batch_size')).' + '.$this->usd($p['story_username']).' per account',
+                'unit' => $this->usd($p['story_username']).' per account checked',
                 'monthly' => $estimate['stories'],
                 'per_creator' => $this->perAccount($estimate['stories'], $storyActive),
                 'active' => $storiesOn,

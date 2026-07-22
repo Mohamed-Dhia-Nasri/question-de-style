@@ -49,8 +49,6 @@
             </div>
 
             <div x-show="tab === 'overview'" x-cloak class="space-y-6">
-                @livewire('crm.seeding-status-actions', ['seedingCampaign' => $seedingCampaign])
-
                 @php
                     $setupSteps = [
                         ['done' => $seedingCampaign->product_id !== null, 'label' => 'Choose a product', 'hint' => 'Edit the run on the Seeding runs page.'],
@@ -80,40 +78,93 @@
                     </div>
                 @endif
 
-                @if ($seedingCampaign->shipments_count > 0)
+                {{-- Run progress — the seeding pipeline (Creators → Shipped →
+                     Delivered → Posted), the run's core state at a glance.
+                     Replaces the dense one-line summary + redundant cards. --}}
+                @if ($seedingCampaign->creators_count > 0 || $seedingCampaign->shipments_count > 0)
                     @php
-                        // Posted is measured against parcels that actually
-                        // expect a post — a run needing none reads 0/0, never
-                        // 0/N. Posted is not a divisor, so no guard is needed.
+                        // Clamp to 100: a not-required creator who posts anyway can
+                        // push posted above the expected denominator.
+                        $pct = fn (int $n, int $d): int => $d > 0 ? min(100, (int) round($n / $d * 100)) : 0;
+                        $shipmentsTotal = $seedingCampaign->shipments_count;
                         $expectedPosts = $seedingCampaign->expected_posts_count;
-                        $deliveredPct = (int) round($seedingCampaign->delivered_count / $seedingCampaign->shipments_count * 100);
+                        $stages = [
+                            ['label' => 'Creators', 'value' => (string) $seedingCampaign->creators_count, 'caption' => 'on the roster', 'pct' => null],
+                            ['label' => 'Shipped', 'value' => $seedingCampaign->shipped_count.' of '.$shipmentsTotal, 'pct' => $pct($seedingCampaign->shipped_count, $shipmentsTotal)],
+                            ['label' => 'Delivered', 'value' => $seedingCampaign->delivered_count.' of '.$shipmentsTotal, 'pct' => $pct($seedingCampaign->delivered_count, $shipmentsTotal)],
+                            // When no post is required the denominator is 0, so show a
+                            // plain count ("1"), never a nonsensical "1 of 0".
+                            ['label' => 'Posted', 'value' => $expectedPosts > 0 ? $seedingCampaign->posted_count.' of '.$expectedPosts : (string) $seedingCampaign->posted_count, 'pct' => $expectedPosts > 0 ? $pct($seedingCampaign->posted_count, $expectedPosts) : null, 'caption' => $expectedPosts === 0 ? 'no posts required' : null],
+                        ];
                     @endphp
                     <div class="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-white/[0.03]">
-                        <p class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Roster {{ $seedingCampaign->creators_count }} · Shipped {{ $seedingCampaign->shipped_count }}/{{ $seedingCampaign->shipments_count }} · Delivered {{ $seedingCampaign->delivered_count }}/{{ $seedingCampaign->shipments_count }} · Posted {{ $seedingCampaign->posted_count }}/{{ $expectedPosts }}
-                        </p>
-                        <div class="mt-3 h-2.5 rounded-full bg-gray-100 dark:bg-white/5">
-                            <div class="h-2.5 rounded-full bg-brand-500" style="width: {{ $deliveredPct }}%"></div>
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Run progress</h3>
+                            <span class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                                Status <x-ui.badge color="primary">{{ $seedingCampaign->status->label() }}</x-ui.badge>
+                            </span>
                         </div>
-                        <p class="mt-2 text-theme-xs text-gray-500 dark:text-gray-400">The Posted count goes up once a creator’s post is matched to this run.</p>
+                        <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">{{ $seedingCampaign->status->description() }}</p>
+
+                        <div class="mt-5 grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
+                            @foreach ($stages as $stage)
+                                <div>
+                                    <p class="text-theme-xs font-medium uppercase tracking-wide text-gray-400">{{ $stage['label'] }}</p>
+                                    <p class="mt-1 text-2xl font-semibold tabular-nums text-gray-800 dark:text-white/90">{{ $stage['value'] }}</p>
+                                    @if (! is_null($stage['pct']))
+                                        <div class="mt-2 h-1.5 rounded-full bg-gray-100 dark:bg-white/5">
+                                            <div class="h-1.5 rounded-full bg-brand-500" style="width: {{ $stage['pct'] }}%"></div>
+                                        </div>
+                                    @elseif (! empty($stage['caption']))
+                                        <p class="mt-2 text-theme-xs text-gray-400">{{ $stage['caption'] }}</p>
+                                    @endif
+                                </div>
+                            @endforeach
+                        </div>
+                        <p class="mt-4 text-theme-xs text-gray-500 dark:text-gray-400">Posted rises as each creator’s post is matched to this run.</p>
                     </div>
                 @endif
 
-                <div class="grid grid-cols-1 gap-6 sm:grid-cols-3">
+                {{-- Results teaser — a peek at outcomes with a jump to the full
+                     Results tab. Same approved rollup the Results tab reads. --}}
+                @if ($seedingCampaign->shipments_count > 0)
+                    @php
+                        $hasResults = ($resultsTotals->content_count ?? 0) > 0
+                            || $resultsTotals->total_views !== null
+                            || $resultsTotals->total_engagement !== null;
+                    @endphp
                     <div class="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-white/[0.03]">
-                        <p class="text-sm text-gray-500 dark:text-gray-400">Creators</p>
-                        <p class="mt-1 text-2xl font-semibold text-gray-800 dark:text-white/90">{{ $seedingCampaign->creators_count }}</p>
+                        <div class="flex items-center justify-between gap-2">
+                            <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Results so far</h3>
+                            <button type="button" x-on:click="tab = 'results'" class="shrink-0 text-theme-sm font-medium text-brand-500 hover:underline dark:text-brand-400">View full results →</button>
+                        </div>
+
+                        @if ($hasResults)
+                            <div class="mt-4 grid grid-cols-3 gap-4">
+                                <div>
+                                    <p class="text-theme-xs font-medium uppercase tracking-wide text-gray-400">Posts</p>
+                                    <p class="mt-1 text-2xl font-semibold text-gray-800 dark:text-white/90">{{ $resultsTotals->content_count !== null ? number_format($resultsTotals->content_count) : '—' }}</p>
+                                </div>
+                                <div>
+                                    <p class="text-theme-xs font-medium uppercase tracking-wide text-gray-400">Views</p>
+                                    <p class="mt-1 text-2xl font-semibold text-gray-800 dark:text-white/90">
+                                        {{ $resultsTotals->total_views !== null ? number_format((float) $resultsTotals->total_views) : '—' }}
+                                        @if ($resultsTotals->total_views !== null)<x-metric.tier-badge tier="PUBLIC" />@endif
+                                    </p>
+                                </div>
+                                <div>
+                                    <p class="text-theme-xs font-medium uppercase tracking-wide text-gray-400">Engagement</p>
+                                    <p class="mt-1 text-2xl font-semibold text-gray-800 dark:text-white/90">
+                                        {{ $resultsTotals->total_engagement !== null ? number_format((float) $resultsTotals->total_engagement) : '—' }}
+                                        @if ($resultsTotals->total_engagement !== null)<x-metric.tier-badge tier="PUBLIC" />@endif
+                                    </p>
+                                </div>
+                            </div>
+                        @else
+                            <p class="mt-3 text-sm text-gray-500 dark:text-gray-400">No results yet — numbers appear here once creators post and their content is matched to this run.</p>
+                        @endif
                     </div>
-                    <div class="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-white/[0.03]">
-                        <p class="text-sm text-gray-500 dark:text-gray-400">Shipments</p>
-                        <p class="mt-1 text-2xl font-semibold text-gray-800 dark:text-white/90">{{ $seedingCampaign->shipments_count }}</p>
-                    </div>
-                    <div class="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-white/[0.03]">
-                        <p class="text-sm text-gray-500 dark:text-gray-400">Status</p>
-                        <p class="mt-1"><x-ui.badge color="primary">{{ $seedingCampaign->status->label() }}</x-ui.badge></p>
-                        <p class="mt-1 text-theme-xs text-gray-500 dark:text-gray-400">{{ $seedingCampaign->status->description() }}</p>
-                    </div>
-                </div>
+                @endif
             </div>
 
             <div x-show="tab === 'creators'" x-cloak>

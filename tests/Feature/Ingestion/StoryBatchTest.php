@@ -76,9 +76,10 @@ class StoryBatchTest extends TestCase
         $alpha = PlatformAccount::factory()->create(['platform' => Platform::Instagram, 'handle' => 'alpha.ig']);
         $beta = PlatformAccount::factory()->create(['platform' => Platform::Instagram, 'handle' => 'beta.ig']);
 
+        // Raw IG story objects with NO user.username — every item is ownerless.
         $this->fakeAsyncStoryRun([
-            ['id' => 'story-x1', 'imageUrl' => 'https://cdn.example/x1.jpg'],
-            ['id' => 'story-x2', 'imageUrl' => 'https://cdn.example/x2.jpg'],
+            ['id' => 'story-x1', 'media_type' => 1, 'image_versions2' => ['candidates' => [['url' => 'https://cdn.example/x1.jpg']]]],
+            ['id' => 'story-x2', 'media_type' => 1, 'image_versions2' => ['candidates' => [['url' => 'https://cdn.example/x2.jpg']]]],
         ]);
 
         $cycle = $this->runningStoryCycle(1);
@@ -105,10 +106,10 @@ class StoryBatchTest extends TestCase
         $beta = PlatformAccount::factory()->create(['platform' => Platform::Instagram, 'handle' => 'beta.ig']);
 
         $this->fakeAsyncStoryRun([
-            ['id' => 'story-a1', 'username' => 'alpha.ig', 'imageUrl' => 'https://cdn.example/a1.jpg'],
-            ['id' => 'story-b1', 'username' => 'beta.ig', 'videoUrl' => 'https://cdn.example/b1.mp4'],
+            ['id' => 'story-a1', 'user' => ['username' => 'alpha.ig'], 'media_type' => 1, 'image_versions2' => ['candidates' => [['url' => 'https://cdn.example/a1.jpg']]]],
+            ['id' => 'story-b1', 'user' => ['username' => 'beta.ig'], 'media_type' => 2, 'video_versions' => [['url' => 'https://cdn.example/b1.mp4']]],
             // Ownerless in a multi-account batch: dropped, never guessed.
-            ['id' => 'story-x1', 'imageUrl' => 'https://cdn.example/x.jpg'],
+            ['id' => 'story-x1', 'media_type' => 1, 'image_versions2' => ['candidates' => [['url' => 'https://cdn.example/x.jpg']]]],
         ]);
 
         $cycle = $this->runningStoryCycle(1);
@@ -150,8 +151,8 @@ class StoryBatchTest extends TestCase
         $solo = PlatformAccount::factory()->create(['platform' => Platform::Instagram, 'handle' => 'solo.ig']);
 
         // Single-handle batches use the synchronous endpoint.
-        $this->fakeApifyActor('datavoyantlab~advanced-instagram-stories-scraper', [
-            ['id' => 'story-s1', 'imageUrl' => 'https://cdn.example/s1.jpg'],
+        $this->fakeApifyActor((string) config('services.apify.actors.instagram_story'), [
+            ['id' => 'story-s1', 'media_type' => 1, 'image_versions2' => ['candidates' => [['url' => 'https://cdn.example/s1.jpg']]]],
         ]);
 
         $cycle = $this->runningStoryCycle(1);

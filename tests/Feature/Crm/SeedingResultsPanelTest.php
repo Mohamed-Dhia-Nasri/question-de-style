@@ -27,6 +27,7 @@ use App\Shared\Enums\ShipmentStatus;
 use App\Shared\ValueObjects\MetricValue;
 use App\Shared\ValueObjects\Provenance;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -140,6 +141,36 @@ class SeedingResultsPanelTest extends TestCase
         $this->actingAs($viewer);
 
         Livewire::test(SeedingResultsPanel::class, ['seedingCampaign' => $this->run])->assertOk();
+    }
+
+    public function test_the_results_footer_shows_the_absolute_refresh_datetime(): void
+    {
+        // Freeze so the rollup refresh stamp is deterministic; the footer must
+        // read the exact date-time in UTC, not a relative "x ago".
+        Carbon::setTestNow('2026-07-21 14:32:00');
+
+        try {
+            $this->actingAsCrmStaff();
+            $this->seedResults();
+
+            Livewire::test(SeedingResultsPanel::class, ['seedingCampaign' => $this->run])
+                ->assertSee('Data refreshed')
+                ->assertSee('21.07.2026 14:32 UTC');
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_reel_plays_are_counted_as_views_in_the_results(): void
+    {
+        $this->actingAsCrmStaff();
+        // A Reel / TikTok / YouTube video reports "plays", not "views" — the
+        // seeding results must still count them as views (coalesce in the fact
+        // ETL), not read blank.
+        $this->seedResults(['plays' => 800, 'likes' => 40, 'comments' => 10]);
+
+        Livewire::test(SeedingResultsPanel::class, ['seedingCampaign' => $this->run])
+            ->assertSee('800');
     }
 
     public function test_run_totals_and_per_creator_and_per_shipment_rows_render(): void
